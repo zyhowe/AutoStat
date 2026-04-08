@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>{{ title }}</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 40px; background: #f5f5f5; }
+        .container { max-width: 1200px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        h1 { color: #333; border-bottom: 3px solid #4CAF50; padding-bottom: 10px; }
+        h2 { color: #555; margin-top: 30px; border-left: 4px solid #4CAF50; padding-left: 15px; }
+        .summary { background: #e8f5e9; padding: 15px; border-radius: 8px; margin: 20px 0; }
+        table { border-collapse: collapse; width: 100%; margin: 15px 0; }
+        th, td { border: 1px solid #ddd; padding: 10px; text-align: left; }
+        th { background: #4CAF50; color: white; }
+        .warning { background: #fff3cd; border-left: 4px solid #ffc107; padding: 10px; margin: 10px 0; }
+        .good { background: #d4edda; border-left: 4px solid #28a745; padding: 10px; margin: 10px 0; }
+        .footer { text-align: center; margin-top: 40px; padding-top: 20px; border-top: 1px solid #ddd; color: #999; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h1>📊 {{ title }}</h1>
+    <p>生成时间: {{ timestamp }}</p>
+
+    <div class="summary">
+        <h2>📈 数据概览</h2>
+        <table>
+            <tr><td><strong>总行数</strong></td><td>{{ rows }}</td></tr>
+            <tr><td><strong>总列数</strong></td><td>{{ columns }}</td></tr>
+            <tr><td><strong>重复记录数</strong></td><td>{{ duplicates }}</td></tr>
+        </table>
+    </div>
+
+    <div class="footer">
+        <p>AutoStat 智能统计分析工具</p>
+    </div>
+</div>
+</body>
+</html>
