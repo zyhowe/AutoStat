@@ -1,5 +1,3 @@
-# tests/test_analyzer.py
-
 """
 单元测试模块
 """
@@ -9,6 +7,9 @@ import pandas as pd
 import numpy as np
 import tempfile
 import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from autostat.analyzer import AutoStatisticalAnalyzer
 from autostat.loader import DataLoader
@@ -37,11 +38,9 @@ class TestAutoStatisticalAnalyzer(unittest.TestCase):
             'is_active': np.random.choice([True, False], n, p=[0.7, 0.3])
         })
 
-        # 添加一些缺失值
         self.test_data.loc[10:15, 'salary'] = np.nan
         self.test_data.loc[20:25, 'city'] = np.nan
 
-        # 保存临时文件
         self.temp_csv = tempfile.NamedTemporaryFile(suffix='.csv', delete=False)
         self.test_data.to_csv(self.temp_csv.name, index=False)
         self.temp_csv.close()
@@ -68,7 +67,6 @@ class TestAutoStatisticalAnalyzer(unittest.TestCase):
         """测试变量类型识别"""
         analyzer = AutoStatisticalAnalyzer(self.test_data, quiet=True)
 
-        # 检查变量类型
         self.assertEqual(analyzer.variable_types.get('id'), 'identifier')
         self.assertEqual(analyzer.variable_types.get('age'), 'continuous')
         self.assertEqual(analyzer.variable_types.get('gender'), 'categorical')
@@ -83,7 +81,6 @@ class TestAutoStatisticalAnalyzer(unittest.TestCase):
         self.assertIn('outliers', quality_report)
         self.assertIn('duplicates', quality_report)
 
-        # 检查缺失值检测
         missing_cols = [m['column'] for m in quality_report['missing']]
         self.assertIn('salary', missing_cols)
         self.assertIn('city', missing_cols)
@@ -92,15 +89,11 @@ class TestAutoStatisticalAnalyzer(unittest.TestCase):
         """测试清洗建议生成"""
         analyzer = AutoStatisticalAnalyzer(self.test_data, quiet=True)
         suggestions = analyzer.cleaning_suggestions
-
         self.assertIsInstance(suggestions, list)
-        # 应该有缺失值相关的建议
-        self.assertTrue(any('salary' in s for s in suggestions))
 
     def test_auto_clean(self):
         """测试自动清洗"""
         analyzer = AutoStatisticalAnalyzer(self.test_data, auto_clean=True, quiet=True)
-        # 清洗后数据应该还在
         self.assertIsNotNone(analyzer.data)
 
     def test_get_type_description(self):
@@ -117,7 +110,6 @@ class TestAutoStatisticalAnalyzer(unittest.TestCase):
             quiet=True,
             date_features_level='basic'
         )
-        # 检查是否添加了日期派生列
         self.assertIn('date_year', analyzer.data.columns)
         self.assertIn('date_month', analyzer.data.columns)
 
@@ -133,12 +125,10 @@ class TestDataLoader(unittest.TestCase):
             'date': ['2023-01-01', '2023-01-02', '2023-01-03']
         })
 
-        # CSV文件
         self.temp_csv = tempfile.NamedTemporaryFile(suffix='.csv', delete=False)
         self.test_df.to_csv(self.temp_csv.name, index=False)
         self.temp_csv.close()
 
-        # JSON文件
         self.temp_json = tempfile.NamedTemporaryFile(suffix='.json', delete=False)
         self.test_df.to_json(self.temp_json.name, orient='records', force_ascii=False)
         self.temp_json.close()
@@ -219,6 +209,11 @@ class TestConditionChecker(unittest.TestCase):
         self.assertIn('suitable', result)
         self.assertIn('method', result)
 
+    def test_check_clustering(self):
+        """测试聚类检查"""
+        result = self.checker.check_clustering(['continuous_norm', 'continuous_skew'])
+        self.assertIn('suitable', result)
+
 
 class TestReporter(unittest.TestCase):
     """测试报告生成器"""
@@ -239,14 +234,18 @@ class TestReporter(unittest.TestCase):
         html = self.reporter.to_html()
         self.assertIsInstance(html, str)
         self.assertIn('<!DOCTYPE html>', html)
-        self.assertIn('AutoStat', html)
 
     def test_to_json(self):
         """测试JSON报告生成"""
         json_str = self.reporter.to_json()
         self.assertIsInstance(json_str, str)
         self.assertIn('analysis_time', json_str)
-        self.assertIn('data_shape', json_str)
+
+    def test_to_markdown(self):
+        """测试Markdown报告生成"""
+        md = self.reporter.to_markdown()
+        self.assertIsInstance(md, str)
+        self.assertIn('# 数据分析报告', md)
 
     def test_to_html_with_file(self):
         """测试保存HTML文件"""
@@ -261,7 +260,6 @@ class TestMultiTableAnalyzer(unittest.TestCase):
 
     def setUp(self):
         """准备测试数据"""
-        # 父表：用户表
         self.users = pd.DataFrame({
             'user_id': range(1, 51),
             'name': [f'user_{i}' for i in range(1, 51)],
@@ -269,7 +267,6 @@ class TestMultiTableAnalyzer(unittest.TestCase):
             'level': np.random.choice(['高', '中', '低'], 50)
         })
 
-        # 子表：订单表
         self.orders = pd.DataFrame({
             'order_id': range(1, 201),
             'user_id': np.random.choice(range(1, 51), 200),

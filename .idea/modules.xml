@@ -3,6 +3,7 @@
   <component name="ProjectModuleManager">
     <modules>
       <module fileurl="file://$PROJECT_DIR$/.idea/AutoStat.iml" filepath="$PROJECT_DIR$/.idea/AutoStat.iml" />
+      <module fileurl="file://$USER_HOME$/PycharmProjects/myapp/.idea/myapp.iml" filepath="$USER_HOME$/PycharmProjects/myapp/.idea/myapp.iml" />
     </modules>
   </component>
 </project>
