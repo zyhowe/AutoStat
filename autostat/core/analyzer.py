@@ -11,7 +11,7 @@ from typing import Dict, Optional, List
 
 from autostat.loader import DataLoader
 from autostat.checker import ConditionChecker
-from autostat.core.base import BaseAnalyzer
+from autostat.core.base import BaseAnalyzer, TYPE_DESCRIPTION_MAP
 from autostat.core.timeseries import TimeSeriesAnalyzer
 from autostat.core.relationship import RelationshipAnalyzer
 from autostat.core.recommendation import RecommendationAnalyzer
@@ -228,32 +228,12 @@ class AutoStatisticalAnalyzer:
             self.date_column_mapping[col] = date_col
 
     def _get_type_description(self, var_type):
-        type_map = {
-            'categorical': '分类变量', 'categorical_numeric': '数值型分类变量',
-            'ordinal': '有序分类变量', 'continuous': '连续变量',
-            'text': '文本变量', 'identifier': '标识符列',
-            'datetime': '日期时间变量', 'other': '其他', 'empty': '空变量'
-        }
-        return type_map.get(var_type, var_type)
+        """获取类型描述 - 调用 BaseAnalyzer 静态方法"""
+        return BaseAnalyzer.get_type_description(var_type)
 
     def _check_normality(self, x):
-        from scipy.stats import shapiro, normaltest
-        x = x.dropna()
-        if len(x) < 8 or len(x) > 5000:
-            return False, 1.0, {'skew': 0, 'kurtosis': 0}
-        try:
-            _, p_shapiro = shapiro(x)
-        except:
-            p_shapiro = 0
-        try:
-            _, p_normaltest = normaltest(x)
-        except:
-            p_normaltest = 0
-        skewness = abs(x.skew())
-        kurtosis = abs(x.kurtosis())
-        p_value = max(p_shapiro, p_normaltest)
-        is_normal = (p_value > 0.05) and (skewness < 2) and (kurtosis < 7)
-        return is_normal, p_value, {'skew': skewness, 'kurtosis': kurtosis}
+        """检查正态性 - 调用 BaseAnalyzer 静态方法"""
+        return BaseAnalyzer.check_normality(x)
 
     # ================== 图表base64方法 ==================
 
@@ -336,43 +316,16 @@ class AutoStatisticalAnalyzer:
     # ================== 辅助方法 ==================
 
     def _get_high_correlations(self, numeric_vars, threshold=0.7):
-        correlations = []
-        if len(numeric_vars) >= 2:
-            corr_data = self.data[numeric_vars].corr()
-            for i in range(len(corr_data.columns)):
-                for j in range(i + 1, len(corr_data.columns)):
-                    val = corr_data.iloc[i, j]
-                    if abs(val) >= threshold:
-                        correlations.append({
-                            'var1': corr_data.columns[i],
-                            'var2': corr_data.columns[j],
-                            'value': round(val, 3)
-                        })
-        return sorted(correlations, key=lambda x: abs(x['value']), reverse=True)
+        """获取强相关对 - 调用 BaseAnalyzer 静态方法"""
+        return BaseAnalyzer.get_high_correlations(self.data, numeric_vars, threshold)
 
     def _get_skewed_vars(self, threshold=2):
-        skewed = []
-        for col, typ in self.variable_types.items():
-            if typ == 'continuous':
-                data = self.data[col].dropna()
-                if len(data) > 0:
-                    skew = data.skew()
-                    if abs(skew) >= threshold:
-                        skewed.append({'name': col, 'skew': round(skew, 2)})
-        return sorted(skewed, key=lambda x: abs(x['skew']), reverse=True)
+        """获取偏态变量 - 调用 BaseAnalyzer 静态方法"""
+        return BaseAnalyzer.get_skewed_vars(self.data, self.variable_types, threshold)
 
     def _get_imbalanced_vars(self, threshold=0.8):
-        imbalanced = []
-        for col, typ in self.variable_types.items():
-            if typ in ['categorical', 'categorical_numeric', 'ordinal']:
-                vc = self.data[col].value_counts(normalize=True)
-                if len(vc) > 0 and vc.max() >= threshold:
-                    imbalanced.append({
-                        'name': col,
-                        'top_category': str(vc.index[0]),
-                        'top_pct': round(vc.max() * 100, 1)
-                    })
-        return imbalanced
+        """获取不平衡分类变量 - 调用 BaseAnalyzer 静态方法"""
+        return BaseAnalyzer.get_imbalanced_vars(self.data, self.variable_types, threshold)
 
     # ================== 对外接口 ==================
 

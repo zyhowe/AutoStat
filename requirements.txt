@@ -8,6 +8,7 @@ statsmodels>=0.13.0
 networkx>=2.6.0
 click>=8.0.0
 jinja2>=3.0.0
+requests>=2.25.0
 
 # 可选依赖（按需安装）
 # Web界面: streamlit>=1.0.0

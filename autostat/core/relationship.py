@@ -11,6 +11,7 @@ from typing import Dict, List, Tuple, Optional
 import warnings
 
 from autostat.core.plots import plot_correlation
+from autostat.core.base import BaseAnalyzer
 
 warnings.filterwarnings('ignore')
 
@@ -28,6 +29,10 @@ class RelationshipAnalyzer:
         self.date_derived_columns = date_derived_columns or set()
         self.date_column_mapping = date_column_mapping or {}
         self.quiet = quiet
+
+    def _check_normality(self, x):
+        """检查正态性 - 调用 BaseAnalyzer 静态方法"""
+        return BaseAnalyzer.check_normality(x)
 
     def auto_analyze_relationships(self):
         """自动关系分析"""
@@ -229,15 +234,3 @@ class RelationshipAnalyzer:
             if col != other and (col, other) not in exclude_pairs and (other, col) not in exclude_pairs:
                 return True
         return False
-
-    def _check_normality(self, x):
-        """检查正态性"""
-        from scipy.stats import shapiro
-        x = x.dropna()
-        if len(x) < 8 or len(x) > 5000:
-            return False, 1.0, {}
-        try:
-            _, p = shapiro(x)
-            return p > 0.05, p, {}
-        except:
-            return False, 0, {}

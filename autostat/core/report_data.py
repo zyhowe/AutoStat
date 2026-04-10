@@ -6,6 +6,8 @@ import numpy as np
 import pandas as pd
 from typing import Dict, List, Any, Optional
 
+from autostat.core.base import BaseAnalyzer
+
 
 class ReportDataBuilder:
     """报告数据构建器"""
@@ -51,7 +53,7 @@ class ReportDataBuilder:
             variables.append({
                 'name': col,
                 'type': var_type,
-                'type_desc': self.analyzer._get_type_description(var_type),
+                'type_desc': BaseAnalyzer.get_type_description(var_type),
                 'n': len(series),
                 'missing': data[col].isna().sum(),
                 'missing_pct': round(data[col].isna().mean() * 100, 1),
@@ -68,29 +70,15 @@ class ReportDataBuilder:
             if info.get('percent', 0) > 5:
                 quality_alerts.append(f"⚠️ {col} 异常值比例 {info['percent']:.1f}%")
 
-        # 偏态变量
-        skewed_vars = []
-        for col, typ in self.analyzer.variable_types.items():
-            if typ == 'continuous':
-                skew = data[col].dropna().skew()
-                if abs(skew) > 2:
-                    skewed_vars.append({'name': col, 'skew': round(skew, 2)})
+        # 偏态变量 - 使用 BaseAnalyzer
+        skewed_vars = BaseAnalyzer.get_skewed_vars(data, self.analyzer.variable_types, threshold=2)
 
-        # 不平衡分类变量
-        imbalanced_vars = []
-        for col, typ in self.analyzer.variable_types.items():
-            if typ in ['categorical', 'categorical_numeric', 'ordinal']:
-                vc = data[col].value_counts(normalize=True)
-                if len(vc) > 0 and vc.max() > 0.8:
-                    imbalanced_vars.append({
-                        'name': col,
-                        'top_category': str(vc.index[0]),
-                        'top_pct': round(vc.max() * 100, 1)
-                    })
+        # 不平衡分类变量 - 使用 BaseAnalyzer
+        imbalanced_vars = BaseAnalyzer.get_imbalanced_vars(data, self.analyzer.variable_types, threshold=0.8)
 
-        # 强相关对
+        # 强相关对 - 使用 BaseAnalyzer
         numeric_vars = [col for col, typ in self.analyzer.variable_types.items() if typ == 'continuous']
-        high_correlations = self._get_high_correlations(numeric_vars, threshold=0.7) if numeric_vars else []
+        high_correlations = BaseAnalyzer.get_high_correlations(data, numeric_vars, threshold=0.7) if numeric_vars else []
 
         # 时间序列洞察
         time_series_insight = None
@@ -174,22 +162,6 @@ class ReportDataBuilder:
             'key_insights': key_insights[:3],
             'next_actions': next_actions[:3]
         }
-
-    def _get_high_correlations(self, numeric_vars, threshold=0.7):
-        """获取强相关对"""
-        correlations = []
-        if len(numeric_vars) >= 2:
-            corr_data = self.analyzer.data[numeric_vars].corr()
-            for i in range(len(corr_data.columns)):
-                for j in range(i + 1, len(corr_data.columns)):
-                    val = corr_data.iloc[i, j]
-                    if abs(val) >= threshold:
-                        correlations.append({
-                            'var1': corr_data.columns[i],
-                            'var2': corr_data.columns[j],
-                            'value': round(val, 3)
-                        })
-        return sorted(correlations, key=lambda x: abs(x['value']), reverse=True)
 
     def _get_model_recommendations(self):
         """获取模型推荐"""

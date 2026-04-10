@@ -4,213 +4,380 @@
     <meta charset="UTF-8">
     <title>{{ title }}</title>
     <style>
-        body { font-family: Arial, sans-serif; margin: 40px; background: #f5f5f5; }
-        .container { max-width: 1400px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-        h1 { color: #333; border-bottom: 3px solid #4CAF50; padding-bottom: 10px; }
-        h2 { color: #555; margin-top: 30px; border-left: 4px solid #4CAF50; padding-left: 15px; }
-        h3 { color: #666; margin-top: 20px; background: #f0f0f0; padding: 8px; border-radius: 5px; }
-        table { border-collapse: collapse; width: 100%; margin: 15px 0; font-size: 13px; }
-        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
-        th { background: #4CAF50; color: white; }
-        tr:nth-child(even) { background: #f9f9f9; }
-        .summary { background: #e8f5e9; padding: 15px; border-radius: 8px; margin: 20px 0; }
-        .footer { text-align: center; margin-top: 40px; padding-top: 20px; border-top: 1px solid #ddd; color: #999; }
-        .metric { display: inline-block; margin: 10px 20px; text-align: center; }
-        .metric-value { font-size: 24px; font-weight: bold; color: #4CAF50; }
-        .metric-label { font-size: 12px; color: #666; }
-        .model-table th { background: #2196F3; }
-        .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; }
-        .badge-high { background: #ff5722; color: white; }
-        .badge-mid { background: #ff9800; color: white; }
-        .badge-low { background: #4caf50; color: white; }
-        .plot-container { margin: 20px 0; text-align: center; }
-        .plot-container img { max-width: 100%; border: 1px solid #ddd; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
-        .card { background: white; border-radius: 8px; padding: 20px; margin-bottom: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
-        .info-box { background: #e3f2fd; border-left: 4px solid #2196f3; padding: 12px 16px; margin: 10px 0; border-radius: 6px; }
-        .warning-box { background: #fff3e0; border-left: 4px solid #ff9800; padding: 12px 16px; margin: 10px 0; border-radius: 6px; }
+        * { box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; margin: 0; padding: 20px; background: #f0f2f5; }
+        .container { max-width: 1400px; margin: 0 auto; }
+
+        /* 头部 */
+        .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; border-radius: 16px; margin-bottom: 24px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
+        .header h1 { margin: 0 0 8px 0; font-size: 28px; }
+        .header p { margin: 0; opacity: 0.9; font-size: 14px; }
+        .header .badge { background: rgba(255,255,255,0.2); padding: 4px 12px; border-radius: 20px; font-size: 12px; display: inline-block; margin-top: 12px; }
+
+        /* 卡片 */
+        .card { background: white; border-radius: 12px; padding: 24px; margin-bottom: 24px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); transition: transform 0.2s, box-shadow 0.2s; }
+        .card:hover { box-shadow: 0 4px 16px rgba(0,0,0,0.12); }
+        .card h2 { margin: 0 0 20px 0; font-size: 20px; color: #333; border-left: 4px solid #667eea; padding-left: 16px; }
+        .card h3 { margin: 16px 0 12px 0; font-size: 16px; color: #555; }
+
+        /* 统计卡片行 */
+        .stats-row { display: flex; flex-wrap: wrap; gap: 16px; margin-bottom: 24px; }
+        .stat-card { flex: 1; min-width: 150px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; border-radius: 16px; text-align: center; }
+        .stat-card .value { font-size: 32px; font-weight: bold; }
+        .stat-card .label { font-size: 13px; opacity: 0.9; margin-top: 8px; }
+
+        /* 表格 */
+        table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        th, td { padding: 12px 12px; text-align: left; border-bottom: 1px solid #eee; }
+        th { background: #f8f9fa; font-weight: 600; color: #333; border-bottom: 2px solid #e9ecef; }
+        tr:hover { background: #f8f9fa; }
+
+        /* 图表容器 */
+        .plot-container { margin: 20px 0; text-align: center; background: #fafafa; border-radius: 12px; padding: 16px; }
+        .plot-container img { max-width: 100%; height: auto; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+
+        /* 标签 */
+        .badge-high { background: #ff4757; color: white; padding: 2px 10px; border-radius: 20px; font-size: 11px; }
+        .badge-mid { background: #ffa502; color: white; padding: 2px 10px; border-radius: 20px; font-size: 11px; }
+        .badge-low { background: #2ed573; color: white; padding: 2px 10px; border-radius: 20px; font-size: 11px; }
+
+        /* 信息框 */
+        .info-box { background: #e3f2fd; border-left: 4px solid #2196f3; padding: 12px 16px; margin: 12px 0; border-radius: 8px; font-size: 13px; }
+        .warning-box { background: #fff3e0; border-left: 4px solid #ff9800; padding: 12px 16px; margin: 12px 0; border-radius: 8px; font-size: 13px; }
+        .success-box { background: #e8f5e9; border-left: 4px solid #4caf50; padding: 12px 16px; margin: 12px 0; border-radius: 8px; font-size: 13px; }
+
+        /* 网格布局 */
+        .grid-2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; }
+        .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+
+        /* 变量卡片 */
+        .var-card { background: #f8f9fa; border-radius: 12px; padding: 16px; margin-bottom: 16px; border: 1px solid #e9ecef; }
+        .var-card h4 { margin: 0 0 8px 0; color: #333; font-size: 16px; }
+        .var-card .type-tag { display: inline-block; background: #667eea; color: white; padding: 2px 10px; border-radius: 20px; font-size: 11px; margin-bottom: 12px; }
+        .var-card .stats { display: flex; gap: 16px; flex-wrap: wrap; font-size: 12px; color: #666; margin-bottom: 12px; }
+        .var-card .stats span { background: white; padding: 4px 12px; border-radius: 20px; }
+
+        /* 模型表格 */
+        .model-table th { background: #2196f3; color: white; }
+
+        /* 页脚 */
+        .footer { text-align: center; padding: 20px; color: #999; font-size: 12px; border-top: 1px solid #e9ecef; margin-top: 20px; }
+
+        /* 响应式 */
+        @media (max-width: 768px) {
+            .grid-2, .grid-3 { grid-template-columns: 1fr; }
+            .stats-row { flex-direction: column; }
+            body { padding: 12px; }
+            .card { padding: 16px; }
+        }
+
+        /* 折叠面板 */
+        details { margin: 12px 0; }
+        summary { cursor: pointer; font-weight: 600; color: #667eea; padding: 8px 0; }
+        summary:hover { color: #764ba2; }
     </style>
 </head>
 <body>
 <div class="container">
-    <h1>📊 {{ title }}</h1>
-    <p>生成时间: {{ timestamp }}</p>
-    {% if source_table and source_table != '未知' %}
-    <p>源表: {{ source_table }}</p>
-    {% endif %}
+    <!-- 头部 -->
+    <div class="header">
+        <h1>📊 {{ title }}</h1>
+        <p>生成时间: {{ timestamp }}</p>
+        {% if source_table and source_table != '未知' %}
+        <p>📁 数据源: {{ source_table }}</p>
+        {% endif %}
+        <div class="badge">🤖 AutoStat 智能分析报告</div>
+    </div>
 
-    <div class="summary">
-        <h2>📈 数据概览</h2>
-        <div>
-            <div class="metric"><div class="metric-value">{{ rows }}</div><div class="metric-label">总行数</div></div>
-            <div class="metric"><div class="metric-value">{{ columns }}</div><div class="metric-label">总列数</div></div>
-            <div class="metric"><div class="metric-value">{{ missing_high_count }}</div><div class="metric-label">高缺失字段</div></div>
-            <div class="metric"><div class="metric-value">{{ duplicate_count }}</div><div class="metric-label">重复记录数</div></div>
-        </div>
+    <!-- 统计卡片 -->
+    <div class="stats-row">
+        <div class="stat-card"><div class="value">{{ rows }}</div><div class="label">总行数</div></div>
+        <div class="stat-card"><div class="value">{{ columns }}</div><div class="label">总列数</div></div>
+        <div class="stat-card"><div class="value">{{ missing_high_count }}</div><div class="label">高缺失字段</div></div>
+        <div class="stat-card"><div class="value">{{ duplicate_count }}</div><div class="label">重复记录数</div></div>
         {% if date_range %}
-        <p>📅 时间范围: {{ date_range.start }} 至 {{ date_range.end }}</p>
+        <div class="stat-card"><div class="value">📅</div><div class="label">{{ date_range.start }} ~ {{ date_range.end }}</div></div>
         {% endif %}
     </div>
 
-    <h2>📋 变量类型分布</h2>
-    <table>
-        <thead><tr><th>类型</th><th>数量</th></tr></thead>
-        <tbody>
-        {% for typ, count in type_counts.items() %}
-        <tr><td style="white-space: nowrap;">{{ typ }}</td><td>{{ count }}</td></tr>
-        {% endfor %}
-        </tbody>
-    </table>
-
-    <h2>🔍 变量详情</h2>
-    {% for var in variables %}
+    <!-- 核心洞察 -->
     <div class="card">
-        <h3>{{ var.name }}</h3>
-        <p><strong>类型:</strong> {{ var.type_desc }} | <strong>样本量:</strong> {{ var.n }} | <strong>缺失:</strong> {{ var.missing }} ({{ var.missing_pct }}%)</p>
-        <p><strong>中心趋势:</strong> {{ var.center }} | <strong>离散程度:</strong> {{ var.spread }}</p>
-        {% if var.plot_key and plots[var.plot_key] %}
-        <div class="plot-container">
-            <img src="data:image/png;base64,{{ plots[var.plot_key] }}" alt="{{ var.name }} 图表">
+        <h2>💡 核心洞察</h2>
+        <div class="grid-2">
+            <div>
+                <h3>📌 关键发现</h3>
+                <ul style="margin:0; padding-left:20px;">
+                {% for insight in key_insights %}
+                    <li style="margin:8px 0">{{ insight }}</li>
+                {% endfor %}
+                </ul>
+            </div>
+            <div>
+                <h3>🎯 建议行动</h3>
+                <ul style="margin:0; padding-left:20px;">
+                {% for action in next_actions %}
+                    <li style="margin:8px 0">{{ action }}</li>
+                {% endfor %}
+                </ul>
+            </div>
         </div>
-        {% endif %}
     </div>
-    {% endfor %}
-    {% if variables_truncated %}
-    <p>... 还有 {{ variables_truncated }} 个变量未显示</p>
-    {% endif %}
 
-    {% if quality_alerts %}
-    <h2>⚠️ 数据质量告警</h2>
+    <!-- 数据质量概览 -->
     <div class="card">
-        <ul>
-        {% for alert in quality_alerts %}
-            <li>{{ alert }}</li>
+        <h2>📋 数据质量概览</h2>
+        <div class="grid-3">
+            <div class="info-box">
+                <strong>📊 变量类型分布</strong><br>
+                {% for typ, count in type_counts.items() %}
+                {{ typ }}: {{ count }}列<br>
+                {% endfor %}
+            </div>
+            <div class="info-box">
+                <strong>⚠️ 缺失值情况</strong><br>
+                {% if quality_alerts %}
+                {% for alert in quality_alerts %}
+                {{ alert }}<br>
+                {% endfor %}
+                {% else %}
+                无高缺失率字段 ✅
+                {% endif %}
+            </div>
+            <div class="info-box">
+                <strong>🔍 异常值情况</strong><br>
+                异常值字段数: {{ outlier_count }}<br>
+                重复记录数: {{ duplicate_count }} ({{ duplicate_rate }}%)
+            </div>
+        </div>
+    </div>
+
+    <!-- 变量详情 -->
+    <div class="card">
+        <h2>🔍 变量详情</h2>
+        <div class="grid-2">
+        {% for var in variables %}
+            <div class="var-card">
+                <h4>{{ var.name }}</h4>
+                <div class="type-tag">{{ var.type_desc }}</div>
+                <div class="stats">
+                    <span>📊 样本量: {{ var.n }}</span>
+                    <span>⚠️ 缺失: {{ var.missing }} ({{ var.missing_pct }}%)</span>
+                    <span>📈 中心趋势: {{ var.center }}</span>
+                    <span>📉 离散程度: {{ var.spread }}</span>
+                </div>
+                {% if var.plot_key and plots[var.plot_key] %}
+                <div class="plot-container">
+                    <img src="data:image/png;base64,{{ plots[var.plot_key] }}" alt="{{ var.name }} 图表">
+                </div>
+                {% endif %}
+            </div>
         {% endfor %}
-        </ul>
-    </div>
-    {% endif %}
-
-    <h2>💡 核心发现</h2>
-    <div class="card">
-        {% if skewed_vars %}
-        <h3>📊 偏态严重的连续变量</h3>
-        <ul>{% for var in skewed_vars %}<li>{{ var.name }}（偏度={{ var.skew }}）</li>{% endfor %}</ul>
-        {% endif %}
-        {% if imbalanced_vars %}
-        <h3>⚖️ 不平衡的分类变量</h3>
-        <ul>{% for var in imbalanced_vars %}<li>{{ var.name }}：{{ var.top_category }}占{{ var.top_pct }}%</li>{% endfor %}</ul>
-        {% endif %}
-        {% if high_correlations %}
-        <h3>🔗 强相关对（|r|>0.7）</h3>
-        <ul>{% for corr in high_correlations %}<li>{{ corr.var1 }} ↔ {{ corr.var2 }}：r={{ corr.value }}</li>{% endfor %}</ul>
-        {% endif %}
-        {% if time_series_insight %}
-        <div class="info-box">{{ time_series_insight }}</div>
+        </div>
+        {% if variables_truncated %}
+        <p style="text-align:center; color:#999; margin-top:16px;">... 还有 {{ variables_truncated }} 个变量未显示</p>
         {% endif %}
     </div>
 
+    <!-- 数值变量相关性热力图 -->
     {% if plots.numeric_correlation %}
-    <h2>🔗 数值变量相关性热力图</h2>
-    <div class="plot-container">
-        <img src="data:image/png;base64,{{ plots.numeric_correlation }}" alt="数值变量相关性热力图">
-    </div>
-    {% endif %}
-
-    {% if plots.categorical_correlation %}
-    <h2>🔗 分类变量关联热力图 (Cramer's V)</h2>
-    <div class="plot-container">
-        <img src="data:image/png;base64,{{ plots.categorical_correlation }}" alt="分类变量关联热力图">
-    </div>
-    {% endif %}
-
-    {% if plots.numeric_categorical_eta %}
-    <h2>🔗 数值-分类变量关联热力图 (Eta-squared)</h2>
-    <div class="plot-container">
-        <img src="data:image/png;base64,{{ plots.numeric_categorical_eta }}" alt="数值-分类变量关联热力图">
-    </div>
-    {% endif %}
-
-    <h2>📈 时间序列分析</h2>
-    {% if time_series_diagnostics %}
     <div class="card">
-        <h3>时间序列诊断结果</h3>
-        <table>
+        <h2>🔗 数值变量相关性热力图</h2>
+        <div class="plot-container">
+            <img src="data:image/png;base64,{{ plots.numeric_correlation }}" alt="数值变量相关性热力图">
+        </div>
+        {% if high_correlations %}
+        <details>
+            <summary>📊 强相关对详情 (|r| > 0.7)</summary>
+            <ul style="margin-top:12px;">
+            {% for corr in high_correlations %}
+                <li><strong>{{ corr.var1 }}</strong> ↔ <strong>{{ corr.var2 }}</strong>：相关系数 r = {{ corr.value }}</li>
+            {% endfor %}
+            </ul>
+        </details>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    <!-- 分类变量关联热力图 -->
+    {% if plots.categorical_correlation %}
+    <div class="card">
+        <h2>🔗 分类变量关联热力图 (Cramer's V)</h2>
+        <div class="plot-container">
+            <img src="data:image/png;base64,{{ plots.categorical_correlation }}" alt="分类变量关联热力图">
+        </div>
+        <div class="info-box">
+            💡 Cramer's V 值范围 0~1，越接近1表示关联越强，越接近0表示独立
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- 数值-分类变量关联热力图 -->
+    {% if plots.numeric_categorical_eta %}
+    <div class="card">
+        <h2>🔗 数值-分类变量关联热力图 (Eta-squared)</h2>
+        <div class="plot-container">
+            <img src="data:image/png;base64,{{ plots.numeric_categorical_eta }}" alt="数值-分类变量关联热力图">
+        </div>
+        <div class="info-box">
+            💡 Eta-squared 表示分类变量对数值变量的解释程度，值越大说明组间差异越显著
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- 时间序列分析 -->
+    <div class="card">
+        <h2>📈 时间序列分析</h2>
+        {% if time_series_diagnostics %}
+        <div class="success-box">
+            ✅ 检测到时间序列数据，共 {{ time_series_diagnostics|length }} 个序列
+        </div>
+
+        <!-- 时间序列图表 -->
+        {% for key, diag in time_series_diagnostics.items() %}
+            {% set plot_key = key.split('_')[0] + '_timeseries' if '_' in key else key + '_timeseries' %}
+            {% if plots[plot_key] %}
+            <div class="plot-container">
+                <h3 style="margin:0 0 12px 0; color:#555;">{{ key }}</h3>
+                <img src="data:image/png;base64,{{ plots[plot_key] }}" alt="{{ key }} 时间序列图">
+            </div>
+            {% endif %}
+        {% endfor %}
+
+        <!-- 时间序列诊断表格 -->
+        <table style="margin-top:16px;">
             <thead>
-                <tr><th>变量/分组</th><th>平稳性</th><th>自相关性</th><th>推荐方法</th></tr>
+                <tr><th>变量/分组</th><th>样本量</th><th>平稳性</th><th>自相关性</th><th>季节性</th><th>推荐方法</th></tr>
             </thead>
             <tbody>
             {% for key, diag in time_series_diagnostics.items() %}
             <tr>
-                <td>{{ key }}</td>
+                <td><strong>{{ key }}</strong></td>
+                <td>{{ diag.n_samples }}</td>
                 <td>{% if diag.is_stationary %}✅ 平稳{% else %}⚠️ 非平稳{% endif %}</td>
                 <td>{% if diag.has_autocorrelation %}✅ 存在自相关{% else %}❌ 白噪声{% endif %}</td>
-                <td>{% if diag.has_autocorrelation %}ARIMA/SARIMA{% else %}均值/中位数{% endif %}</td>
+                <td>{% if diag.has_seasonality %}✅ 有季节性{% else %}❌ 无季节性{% endif %}</td>
+                <td>
+                    {% if diag.has_autocorrelation %}
+                        {% if diag.is_stationary %}ARIMA/SARIMA{% else %}差分后ARIMA{% endif %}
+                    {% else %}均值/中位数预测{% endif %}
+                </td>
             </tr>
             {% endfor %}
             </tbody>
         </table>
+
+        {% if time_series_insight %}
+        <div class="info-box" style="margin-top:16px;">
+            💡 {{ time_series_insight }}
+        </div>
+        {% endif %}
+
+        {% else %}
+        <div class="warning-box">
+            ⚠️ 未检测到有效的时间序列数据<br>
+            <small>可能原因：数据中没有日期列，或数值变量样本量不足（少于10个时间点）</small>
+        </div>
+        {% endif %}
     </div>
-    {% else %}
-    <div class="card warning-box">
-        <p>⚠️ 未检测到时间序列数据</p>
-        <p>可能原因：</p>
-        <ul>
-            <li>数据中没有日期列</li>
-            <li>数值变量样本量不足（少于10个时间点）</li>
-        </ul>
+
+    <!-- 建模建议 -->
+    <div class="card">
+        <h2>🤖 建模建议</h2>
+        {% if model_recommendations %}
+        <div class="info-box">
+            💡 以下是基于您的数据特征推荐的分析任务和模型
+        </div>
+        <table class="model-table">
+            <thead>
+                <tr>
+                    <th>优先级</th>
+                    <th>任务类型</th>
+                    <th>目标字段</th>
+                    <th>传统模型</th>
+                    <th>机器学习</th>
+                    <th>深度学习</th>
+                    <th>大模型</th>
+                    <th>建议原因</th>
+                </tr>
+            </thead>
+            <tbody>
+            {% for rec in model_recommendations %}
+            <tr>
+                <td><span class="{% if rec.priority == '高' %}badge-high{% elif rec.priority == '中' %}badge-mid{% else %}badge-low{% endif %}">{{ rec.priority }}</span></td>
+                <td>{{ rec.task_type }}</td>
+                <td><strong>{{ rec.target_column }}</strong></td>
+                <td>{{ rec.traditional }}</td>
+                <td>{{ rec.ml }}</td>
+                <td>{{ rec.dl }}</td>
+                <td>{{ rec.llm }}</td>
+                <td>{{ rec.reason }}</td>
+            </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <div class="warning-box">
+            ⚠️ 数据特征不足，无法生成建模建议<br>
+            <small>建议：至少需要2个数值变量或1个分类变量+1个数值变量</small>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- 数据清洗建议 -->
+    <div class="card">
+        <h2>🧹 数据清洗建议</h2>
+        {% if cleaning_suggestions %}
+        <table>
+            <thead><tr><th>优先级</th><th>操作类型</th><th>涉及字段</th><th>建议方法</th></tr></thead>
+            <tbody>
+            {% for suggestion in cleaning_suggestions %}
+            <tr>
+                <td><span class="{% if suggestion.priority == '高' %}badge-high{% elif suggestion.priority == '中' %}badge-mid{% else %}badge-low{% endif %}">{{ suggestion.priority }}</span></td>
+                <td>{{ suggestion.operation }}</td>
+                <td>{{ suggestion.columns }}</td>
+                <td>{{ suggestion.method }}</td>
+            </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <div class="success-box">
+            ✅ 数据质量良好，无明显清洗需求
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- 偏态与不平衡变量 -->
+    {% if skewed_vars or imbalanced_vars %}
+    <div class="card">
+        <h2>⚠️ 特殊变量提醒</h2>
+        <div class="grid-2">
+            {% if skewed_vars %}
+            <div class="warning-box">
+                <strong>📊 偏态严重的连续变量</strong><br>
+                {% for var in skewed_vars %}
+                • {{ var.name }}（偏度={{ var.skew }}）<br>
+                {% endfor %}
+                <small>建议：使用中位数代替均值进行描述，或进行对数变换</small>
+            </div>
+            {% endif %}
+            {% if imbalanced_vars %}
+            <div class="warning-box">
+                <strong>⚖️ 不平衡的分类变量</strong><br>
+                {% for var in imbalanced_vars %}
+                • {{ var.name }}：「{{ var.top_category }}」占 {{ var.top_pct }}%<br>
+                {% endfor %}
+                <small>建议：分析时注意类别不平衡问题，考虑重采样</small>
+            </div>
+            {% endif %}
+        </div>
     </div>
     {% endif %}
 
-    <h2>🤖 建模建议</h2>
-    <table class="model-table">
-        <thead>
-            <tr>
-                <th>优先级</th>
-                <th>任务类型</th>
-                <th>目标字段</th>
-                <th>推荐模型</th>
-                <th>建议原因</th>
-                <th>注意事项</th>
-            </tr>
-        </thead>
-        <tbody>
-        {% for rec in model_recommendations %}
-        <tr>
-            <td><span class="badge {% if rec.priority == '高' %}badge-high{% elif rec.priority == '中' %}badge-mid{% else %}badge-low{% endif %}">{{ rec.priority }}</span></td>
-            <td>{{ rec.task_type }}</td>
-            <td><strong>{{ rec.target_column }}</strong></td>
-            <td>{{ rec.recommended_models }}</td>
-            <td>{{ rec.reason }}</td>
-            <td>{{ rec.caution }}</td>
-        </tr>
-        {% endfor %}
-        </tbody>
-    </table>
-
-    <h2>🧹 数据清洗建议</h2>
-    <table>
-        <thead><tr><th>优先级</th><th>操作</th><th>字段</th><th>建议方法</th></tr></thead>
-        <tbody>
-        {% for suggestion in cleaning_suggestions %}
-        <tr>
-            <td>{{ suggestion.priority }}</td>
-            <td>{{ suggestion.operation }}</td>
-            <td>{{ suggestion.columns }}</td>
-            <td>{{ suggestion.method }}</td>
-        </tr>
-        {% endfor %}
-        </tbody>
-    </table>
-
-    <h2>📝 总结</h2>
-    <div class="card">
-        <h3>核心洞察</h3>
-        <ul>{% for insight in key_insights %}<li>{{ insight }}</li>{% endfor %}</ul>
-        <h3>下一步行动</h3>
-        <ul>{% for action in next_actions %}<li>{{ action }}</li>{% endfor %}</ul>
-    </div>
-
+    <!-- 页脚 -->
     <div class="footer">
-        <p>AutoStat 智能统计分析工具 | 报告自动生成 | 基于采样数据，结果可能存在误差</p>
+        <p>🤖 AutoStat 智能统计分析工具 | 报告自动生成 | 基于采样数据，结果可能存在误差</p>
+        <p>📊 分析完成时间: {{ timestamp }}</p>
     </div>
 </div>
 </body>

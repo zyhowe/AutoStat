@@ -11,6 +11,7 @@ from typing import Dict, List, Optional, Any
 import warnings
 
 from autostat.core.plots import plot_timeseries
+from autostat.core.base import BaseAnalyzer
 
 warnings.filterwarnings('ignore')
 
@@ -25,6 +26,10 @@ class TimeSeriesAnalyzer:
         self.quiet = quiet
         self.time_series_diagnostics = {}
         self.time_series_grouping = {}
+
+    def _get_type_description(self, var_type):
+        """获取类型描述 - 调用 BaseAnalyzer 静态方法"""
+        return BaseAnalyzer.get_type_description(var_type)
 
     def identify_time_series_grouping(self, date_col=None):
         """自动识别时间序列分组字段"""
@@ -410,11 +415,3 @@ class TimeSeriesAnalyzer:
         # 使用统一模块显示图表
         if detailed:
             plot_timeseries(series, value_col)
-
-    def _get_type_description(self, var_type):
-        type_map = {
-            'categorical': '分类变量', 'categorical_numeric': '数值型分类变量',
-            'ordinal': '有序分类变量', 'continuous': '连续变量',
-            'identifier': '标识符列', 'datetime': '日期时间变量'
-        }
-        return type_map.get(var_type, var_type)

@@ -5,10 +5,39 @@
 import numpy as np
 import pandas as pd
 from scipy.stats import shapiro, normaltest
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 import warnings
 
 warnings.filterwarnings('ignore')
+
+# ==================== 全局常量定义 ====================
+
+# 变量类型中文描述映射（唯一来源）
+TYPE_DESCRIPTION_MAP = {
+    'categorical': '分类变量',
+    'categorical_numeric': '数值型分类变量',
+    'ordinal': '有序分类变量',
+    'continuous': '连续变量',
+    'text': '文本变量',
+    'identifier': '标识符列',
+    'datetime': '日期时间变量',
+    'other': '其他',
+    'empty': '空变量'
+}
+
+# 相关性阈值
+HIGH_CORRELATION_THRESHOLD = 0.7  # 强相关阈值
+STATISTICAL_SIGNIFICANCE_THRESHOLD = 0.05  # 统计显著阈值
+
+# 偏态阈值
+SKEWNESS_THRESHOLD = 2.0
+
+# 峰度阈值
+KURTOSIS_THRESHOLD = 7.0
+
+# 正态性检验样本量限制
+NORMALITY_MIN_SAMPLES = 8
+NORMALITY_MAX_SAMPLES = 5000
 
 
 class BaseAnalyzer:
@@ -23,10 +52,23 @@ class BaseAnalyzer:
         self.quality_report = {}
         self.cleaning_suggestions = []
 
-    def _check_normality(self, x):
-        """检查正态性"""
+    @staticmethod
+    def check_normality(x):
+        """
+        检查正态性（静态方法，供全局复用）
+
+        参数:
+        - x: 一维数组或Series
+
+        返回:
+        - is_normal: bool
+        - p_value: float
+        - stats: dict, 包含 skew, kurtosis
+        """
         x = x.dropna()
-        if len(x) < 8 or len(x) > 5000:
+
+        # 样本量限制
+        if len(x) < NORMALITY_MIN_SAMPLES or len(x) > NORMALITY_MAX_SAMPLES:
             return False, 1.0, {'skew': 0, 'kurtosis': 0}
 
         try:
@@ -42,24 +84,62 @@ class BaseAnalyzer:
         skewness = abs(x.skew())
         kurtosis = abs(x.kurtosis())
         p_value = max(p_shapiro, p_normaltest)
-        is_normal = (p_value > 0.05) and (skewness < 2) and (kurtosis < 7)
+
+        is_normal = (p_value > STATISTICAL_SIGNIFICANCE_THRESHOLD and
+                     skewness < SKEWNESS_THRESHOLD and
+                     kurtosis < KURTOSIS_THRESHOLD)
 
         return is_normal, p_value, {'skew': skewness, 'kurtosis': kurtosis}
 
-    def _get_type_description(self, var_type):
-        """获取类型描述"""
-        type_map = {
-            'categorical': '分类变量',
-            'categorical_numeric': '数值型分类变量',
-            'ordinal': '有序分类变量',
-            'continuous': '连续变量',
-            'text': '文本变量',
-            'identifier': '标识符列',
-            'datetime': '日期时间变量',
-            'other': '其他',
-            'empty': '空变量'
-        }
-        return type_map.get(var_type, var_type)
+    @staticmethod
+    def get_type_description(var_type):
+        """获取类型描述（静态方法）"""
+        return TYPE_DESCRIPTION_MAP.get(var_type, var_type)
+
+    @staticmethod
+    def get_high_correlations(data, numeric_vars, threshold=HIGH_CORRELATION_THRESHOLD):
+        """获取强相关对"""
+        correlations = []
+        if len(numeric_vars) >= 2:
+            corr_data = data[numeric_vars].corr()
+            for i in range(len(corr_data.columns)):
+                for j in range(i + 1, len(corr_data.columns)):
+                    val = corr_data.iloc[i, j]
+                    if abs(val) >= threshold:
+                        correlations.append({
+                            'var1': corr_data.columns[i],
+                            'var2': corr_data.columns[j],
+                            'value': round(val, 3)
+                        })
+        return sorted(correlations, key=lambda x: abs(x['value']), reverse=True)
+
+    @staticmethod
+    def get_skewed_vars(data, variable_types, threshold=SKEWNESS_THRESHOLD):
+        """获取偏态变量"""
+        skewed = []
+        for col, typ in variable_types.items():
+            if typ == 'continuous':
+                series = data[col].dropna()
+                if len(series) > 0:
+                    skew = series.skew()
+                    if abs(skew) >= threshold:
+                        skewed.append({'name': col, 'skew': round(skew, 2)})
+        return sorted(skewed, key=lambda x: abs(x['skew']), reverse=True)
+
+    @staticmethod
+    def get_imbalanced_vars(data, variable_types, threshold=0.8):
+        """获取不平衡分类变量"""
+        imbalanced = []
+        for col, typ in variable_types.items():
+            if typ in ['categorical', 'categorical_numeric', 'ordinal']:
+                vc = data[col].value_counts(normalize=True)
+                if len(vc) > 0 and vc.max() >= threshold:
+                    imbalanced.append({
+                        'name': col,
+                        'top_category': str(vc.index[0]),
+                        'top_pct': round(vc.max() * 100, 1)
+                    })
+        return imbalanced
 
     def _quick_pre_screen(self):
         """快速初筛"""
@@ -144,7 +224,7 @@ class BaseAnalyzer:
                     self.type_reasons[col] = f'有序分类变量，{n_unique}个等级'
                 else:
                     self.variable_types[col] = 'continuous'
-                    is_normal, _, norm_stats = self._check_normality(values)
+                    is_normal, _, norm_stats = self.check_normality(values)
                     norm_status = "正态" if is_normal else "非正态"
                     self.type_reasons[col] = f'连续变量，{norm_status}分布 (偏度={norm_stats["skew"]:.2f})'
             elif pd.api.types.is_string_dtype(values) or pd.api.types.is_categorical_dtype(values):
@@ -313,10 +393,10 @@ class BaseAnalyzer:
                 'mode': data.mode().iloc[0] if not data.mode().empty else None,
                 'mode_freq': value_counts.iloc[0] if not value_counts.empty else 0,
                 'mode_pct': (value_counts.iloc[0] / len(data) * 100) if not value_counts.empty else 0,
-                'value_counts': value_counts  # 这个字段用于显示类别分布
+                'value_counts': value_counts
             })
         elif var_type == 'continuous':
-            is_normal, p_norm, norm_stats = self._check_normality(data)
+            is_normal, p_norm, norm_stats = self.check_normality(data)
             summary.update({
                 'mean': data.mean(),
                 'std': data.std(),
@@ -355,7 +435,7 @@ class BaseAnalyzer:
             type_counts[typ] = type_counts.get(typ, 0) + 1
         print("\n  类型汇总:")
         for typ, count in type_counts.items():
-            print(f"    {self._get_type_description(typ)}: {count}列")
+            print(f"    {self.get_type_description(typ)}: {count}列")
 
     def _print_quality_summary(self):
         """打印质量摘要"""

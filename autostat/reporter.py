@@ -10,6 +10,7 @@ from typing import Dict, List, Any, Optional
 import pandas as pd
 
 from jinja2 import Template
+from autostat.core.base import BaseAnalyzer
 
 
 class Reporter:
@@ -41,20 +42,45 @@ class Reporter:
             return error_html
 
     def to_json(self, output_file=None, indent=2, ensure_ascii=False):
-        """生成JSON格式结果"""
-        result = self._build_json()
-        json_str = json.dumps(result, indent=indent, ensure_ascii=ensure_ascii, default=str)
+        """
+        生成JSON格式结果
 
-        if output_file:
-            with open(output_file, 'w', encoding='utf-8') as f:
-                f.write(json_str)
-            print(f"✅ 分析结果已保存为JSON: {output_file}")
-            return output_file
-        return json_str
+        直接复用 analyzer.to_json() 方法，确保输出内容完整
+        """
+        return self.analyzer.to_json(output_file, indent, ensure_ascii)
 
     def to_markdown(self, output_file=None):
         """生成Markdown格式报告"""
-        md = self._build_markdown()
+        data = self.analyzer.data
+        quality = self.analyzer.quality_report
+
+        md = f"""# 数据分析报告
+
+生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+
+## 数据概览
+
+| 指标 | 数值 |
+|------|------|
+| 总行数 | {len(data):,} |
+| 总列数 | {len(data.columns)} |
+| 重复记录数 | {quality.get('duplicates', {}).get('count', 0)} |
+
+## 变量类型分布
+
+| 类型 | 数量 |
+|------|------|
+"""
+        type_counts = {}
+        for typ in self.analyzer.variable_types.values():
+            type_counts[typ] = type_counts.get(typ, 0) + 1
+        for typ, count in type_counts.items():
+            md += f"| {BaseAnalyzer.get_type_description(typ)} | {count} |\n"
+
+        if self.analyzer.cleaning_suggestions:
+            md += "\n## 清洗建议\n\n"
+            for s in self.analyzer.cleaning_suggestions[:5]:
+                md += f"- {s}\n"
 
         if output_file:
             with open(output_file, 'w', encoding='utf-8') as f:
@@ -65,28 +91,34 @@ class Reporter:
 
     def to_excel(self, output_file):
         """生成Excel格式报告"""
+        data = self.analyzer.data
+        quality = self.analyzer.quality_report
+
         with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
+            # Sheet 1: 数据概览
             summary_df = pd.DataFrame({
                 '指标': ['总行数', '总列数', '缺失率>20%字段', '重复记录数'],
                 '数值': [
-                    len(self.analyzer.data),
-                    len(self.analyzer.data.columns),
-                    len([m for m in self.analyzer.quality_report.get('missing', []) if m.get('percent', 0) > 20]),
-                    self.analyzer.quality_report.get('duplicates', {}).get('count', 0)
+                    len(data),
+                    len(data.columns),
+                    len([m for m in quality.get('missing', []) if m.get('percent', 0) > 20]),
+                    quality.get('duplicates', {}).get('count', 0)
                 ]
             })
             summary_df.to_excel(writer, sheet_name='数据概览', index=False)
 
+            # Sheet 2: 变量详情
             var_data = []
             for col, typ in self.analyzer.variable_types.items():
                 var_data.append({
                     '变量名': col,
-                    '类型': self.analyzer._get_type_description(typ),
-                    '非空数': len(self.analyzer.data[col].dropna()),
-                    '缺失数': self.analyzer.data[col].isna().sum()
+                    '类型': BaseAnalyzer.get_type_description(typ),
+                    '非空数': len(data[col].dropna()),
+                    '缺失数': data[col].isna().sum()
                 })
             pd.DataFrame(var_data).to_excel(writer, sheet_name='变量详情', index=False)
 
+            # Sheet 3: 清洗建议
             if self.analyzer.cleaning_suggestions:
                 pd.DataFrame({'建议': self.analyzer.cleaning_suggestions}).to_excel(
                     writer, sheet_name='清洗建议', index=False)
@@ -120,78 +152,6 @@ class Reporter:
 </body>
 </html>"""
 
-    def _build_json(self):
-        """构建JSON内容"""
-        quality = self.analyzer.quality_report
-        return {
-            'analysis_time': datetime.now().isoformat(),
-            'source_table': getattr(self.analyzer, 'source_table_name', None),
-            'data_shape': {
-                'rows': len(self.analyzer.data),
-                'columns': len(self.analyzer.data.columns)
-            },
-            'variable_types': {
-                col: {'type': var_type, 'type_desc': self.analyzer._get_type_description(var_type)}
-                for col, var_type in self.analyzer.variable_types.items()
-            },
-            'quality_report': {
-                'missing': quality.get('missing', [])[:10],
-                'outliers': {col: {'count': info.get('count', 0), 'percent': info.get('percent', 0)}
-                            for col, info in list(quality.get('outliers', {}).items())[:5]},
-                'duplicates': quality.get('duplicates', {})
-            },
-            'cleaning_suggestions': self.analyzer.cleaning_suggestions,
-            'time_series_diagnostics': getattr(self.analyzer, 'time_series_diagnostics', {})
-        }
-
-    def _build_markdown(self):
-        """构建Markdown内容"""
-        data = self.analyzer.data
-        quality = self.analyzer.quality_report
-
-        md = f"""# 数据分析报告
-
-生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
-
-## 数据概览
-
-| 指标 | 数值 |
-|------|------|
-| 总行数 | {len(data):,} |
-| 总列数 | {len(data.columns)} |
-| 重复记录数 | {quality.get('duplicates', {}).get('count', 0)} |
-
-## 变量类型分布
-
-| 类型 | 数量 |
-|------|------|
-"""
-        type_counts = {}
-        for typ in self.analyzer.variable_types.values():
-            type_counts[typ] = type_counts.get(typ, 0) + 1
-        type_desc = {'continuous': '连续变量', 'categorical': '分类变量', 'datetime': '日期时间', 'identifier': '标识符'}
-        for typ, count in type_counts.items():
-            md += f"| {type_desc.get(typ, typ)} | {count} |\n"
-
-        if self.analyzer.cleaning_suggestions:
-            md += "\n## 清洗建议\n\n"
-            for s in self.analyzer.cleaning_suggestions[:5]:
-                md += f"- {s}\n"
-
-        return md
-
-    def _get_model_recommendations(self):
-        """获取基于实际字段的模型推荐（调用 recommendation_analyzer）"""
-        if hasattr(self.analyzer, 'recommendation_analyzer'):
-            numeric_vars = [col for col, typ in self.analyzer.variable_types.items() if typ == 'continuous']
-            categorical_vars = [col for col, typ in self.analyzer.variable_types.items()
-                               if typ in ['categorical', 'categorical_numeric', 'ordinal']]
-            datetime_vars = [col for col, typ in self.analyzer.variable_types.items() if typ == 'datetime']
-            return self.analyzer.recommendation_analyzer._get_model_recommendations(
-                numeric_vars, categorical_vars, datetime_vars
-            )
-        return []
-
     def _build_html(self, title):
         """构建HTML内容（包含图表）"""
         data = self.analyzer.data
@@ -218,16 +178,22 @@ class Reporter:
                     if img:
                         plots[f'{col}_categorical'] = img
 
-            # 时间序列图表
-            if hasattr(self.analyzer, 'time_series_diagnostics') and self.analyzer.time_series_diagnostics:
-                original_cols = set()
-                for key in self.analyzer.time_series_diagnostics.keys():
-                    col = key.split('_')[0] if '_' in key else key
-                    original_cols.add(col)
-                for col in original_cols:
-                    img = self.analyzer.get_plot_base64('timeseries', col)
-                    if img:
-                        plots[f'{col}_timeseries'] = img
+            # 时间序列图表 - 为每个数值变量生成，使用日期列
+            if date_cols:
+                date_col = date_cols[0]
+                numeric_cols = [col for col, typ in self.analyzer.variable_types.items() if typ == 'continuous']
+                for col in numeric_cols:
+                    try:
+                        # 按日期聚合
+                        ts_data = data.groupby(date_col)[col].mean().reset_index()
+                        ts_data = ts_data.dropna()
+                        if len(ts_data) >= 3:
+                            img = self.analyzer.get_plot_base64('timeseries', col)
+                            if img:
+                                plots[f'{col}_timeseries'] = img
+                    except Exception as e:
+                        if not hasattr(self.analyzer, 'quiet') or not self.analyzer.quiet:
+                            print(f"⚠️ 生成 {col} 时间序列图失败: {e}")
 
             # 数值变量相关性热力图
             img = self.analyzer.get_numeric_correlation_base64()
@@ -255,15 +221,22 @@ class Reporter:
             if pd.notna(min_date) and pd.notna(max_date):
                 date_range = {'start': str(min_date.date()), 'end': str(max_date.date())}
 
-        # 变量类型统计
+        # 变量类型统计（使用中文描述）
         type_counts = {}
-        type_desc = {
-            'continuous': '连续变量', 'categorical': '分类变量',
-            'categorical_numeric': '数值型分类', 'ordinal': '有序分类',
-            'datetime': '日期时间', 'identifier': '标识符', 'text': '文本'
+        type_display_map = {
+            'continuous': '连续变量',
+            'categorical': '分类变量',
+            'categorical_numeric': '数值型分类',
+            'ordinal': '有序分类',
+            'datetime': '日期时间',
+            'identifier': '标识符',
+            'text': '文本',
+            'other': '其他',
+            'empty': '空变量'
         }
         for typ in self.analyzer.variable_types.values():
-            type_counts[typ] = type_counts.get(typ, 0) + 1
+            display_name = type_display_map.get(typ, typ)
+            type_counts[display_name] = type_counts.get(display_name, 0) + 1
 
         # 变量详情列表
         variables = []
@@ -280,16 +253,24 @@ class Reporter:
             else:
                 center = '-'
                 spread = '-'
+
+            # 确定图表key
+            plot_key = None
+            if var_type == 'continuous':
+                plot_key = f'{col}_continuous'
+            elif var_type in ['categorical', 'categorical_numeric', 'ordinal']:
+                plot_key = f'{col}_categorical'
+
             variables.append({
                 'name': col,
                 'type': var_type,
-                'type_desc': type_desc.get(var_type, var_type),
+                'type_desc': BaseAnalyzer.get_type_description(var_type),
                 'n': len(series),
                 'missing': data[col].isna().sum(),
                 'missing_pct': round(data[col].isna().mean() * 100, 1),
                 'center': center,
                 'spread': spread,
-                'plot_key': f'{col}_continuous' if var_type == 'continuous' else (f'{col}_categorical' if var_type in ['categorical', 'categorical_numeric', 'ordinal'] else None)
+                'plot_key': plot_key
             })
 
         # 质量告警
@@ -301,45 +282,21 @@ class Reporter:
             if info.get('percent', 0) > 5:
                 quality_alerts.append(f"⚠️ {col} 异常值比例 {info['percent']:.1f}%")
 
-        # 偏态变量
-        skewed_vars = []
-        for col, typ in self.analyzer.variable_types.items():
-            if typ == 'continuous':
-                skew = data[col].dropna().skew()
-                if abs(skew) > 2:
-                    skewed_vars.append({'name': col, 'skew': round(skew, 2)})
+        # 偏态变量 - 使用 BaseAnalyzer
+        skewed_vars = BaseAnalyzer.get_skewed_vars(data, self.analyzer.variable_types, threshold=2)
 
-        # 不平衡分类变量
-        imbalanced_vars = []
-        for col, typ in self.analyzer.variable_types.items():
-            if typ in ['categorical', 'categorical_numeric', 'ordinal']:
-                vc = data[col].value_counts(normalize=True)
-                if len(vc) > 0 and vc.max() > 0.8:
-                    imbalanced_vars.append({
-                        'name': col,
-                        'top_category': str(vc.index[0]),
-                        'top_pct': round(vc.max() * 100, 1)
-                    })
+        # 不平衡分类变量 - 使用 BaseAnalyzer
+        imbalanced_vars = BaseAnalyzer.get_imbalanced_vars(data, self.analyzer.variable_types, threshold=0.8)
 
-        # 强相关对
+        # 强相关对 - 使用 BaseAnalyzer，阈值 0.7
         numeric_vars = [col for col, typ in self.analyzer.variable_types.items() if typ == 'continuous']
-        high_correlations = []
-        if len(numeric_vars) >= 2:
-            corr_data = data[numeric_vars].corr()
-            for i in range(len(corr_data.columns)):
-                for j in range(i + 1, len(corr_data.columns)):
-                    val = corr_data.iloc[i, j]
-                    if abs(val) >= 0.7:
-                        high_correlations.append({
-                            'var1': corr_data.columns[i],
-                            'var2': corr_data.columns[j],
-                            'value': round(val, 3)
-                        })
+        high_correlations = BaseAnalyzer.get_high_correlations(data, numeric_vars, threshold=0.7) if numeric_vars else []
 
         # 时间序列洞察
         time_series_insight = None
-        if hasattr(self.analyzer, 'time_series_diagnostics') and self.analyzer.time_series_diagnostics:
-            has_auto = any(d.get('has_autocorrelation') for d in self.analyzer.time_series_diagnostics.values())
+        time_series_diagnostics = getattr(self.analyzer, 'time_series_diagnostics', {})
+        if time_series_diagnostics:
+            has_auto = any(d.get('has_autocorrelation') for d in time_series_diagnostics.values())
             if has_auto:
                 time_series_insight = "✅ 检测到显著自相关性，适合时间序列预测"
             else:
@@ -379,9 +336,11 @@ class Reporter:
         # 核心洞察
         key_insights = []
         if skewed_vars:
-            key_insights.append(f"发现{len(skewed_vars)}个偏态变量（{', '.join([v['name'] for v in skewed_vars[:3]])}），建议使用中位数描述")
+            skewed_names = ', '.join([v['name'] for v in skewed_vars[:3]])
+            key_insights.append(f"发现{len(skewed_vars)}个偏态变量（{skewed_names}），建议使用中位数描述")
         if imbalanced_vars:
-            key_insights.append(f"发现{len(imbalanced_vars)}个不平衡分类变量（{', '.join([v['name'] for v in imbalanced_vars[:3]])}），分析时需注意")
+            imb_names = ', '.join([v['name'] for v in imbalanced_vars[:3]])
+            key_insights.append(f"发现{len(imbalanced_vars)}个不平衡分类变量（{imb_names}），分析时需注意")
         if high_correlations:
             key_insights.append(f"发现{len(high_correlations)}对强相关变量，可考虑特征选择")
         if time_series_insight:
@@ -399,6 +358,8 @@ class Reporter:
             next_actions.append("探索数值变量与分类变量的关系")
         if date_cols and numeric_vars:
             next_actions.append("进行时间序列趋势分析")
+        if not next_actions:
+            next_actions.append("数据质量良好，可直接进行建模分析")
 
         # 使用Jinja2模板渲染
         template_path = os.path.join(os.path.dirname(__file__), '..', 'templates', 'report.html')
@@ -435,7 +396,19 @@ class Reporter:
                 key_insights=key_insights[:3],
                 next_actions=next_actions[:3],
                 plots=plots,
-                time_series_diagnostics=self.analyzer.time_series_diagnostics
+                time_series_diagnostics=time_series_diagnostics
             )
         except Exception as e:
             return self._get_error_html(title, f"模板渲染失败: {str(e)}")
+
+    def _get_model_recommendations(self):
+        """获取基于实际字段的模型推荐（调用 recommendation_analyzer）"""
+        if hasattr(self.analyzer, 'recommendation_analyzer'):
+            numeric_vars = [col for col, typ in self.analyzer.variable_types.items() if typ == 'continuous']
+            categorical_vars = [col for col, typ in self.analyzer.variable_types.items()
+                               if typ in ['categorical', 'categorical_numeric', 'ordinal']]
+            datetime_vars = [col for col, typ in self.analyzer.variable_types.items() if typ == 'datetime']
+            return self.analyzer.recommendation_analyzer._get_model_recommendations(
+                numeric_vars, categorical_vars, datetime_vars
+            )
+        return []

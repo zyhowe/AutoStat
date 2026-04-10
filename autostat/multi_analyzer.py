@@ -13,6 +13,7 @@ import warnings
 
 from autostat.analyzer import AutoStatisticalAnalyzer
 from autostat.loader import DataLoader
+from autostat.core.base import BaseAnalyzer
 
 warnings.filterwarnings('ignore')
 
@@ -544,21 +545,6 @@ class MultiTableStatisticalAnalyzer:
 
         return date_info
 
-    def _get_type_description(self, var_type):
-        """获取变量类型的中文描述"""
-        type_map = {
-            'categorical': '分类变量',
-            'categorical_numeric': '数值型分类变量',
-            'ordinal': '有序分类变量',
-            'continuous': '连续变量',
-            'text': '文本变量',
-            'identifier': '标识符列',
-            'datetime': '日期时间变量',
-            'other': '其他',
-            'empty': '空变量'
-        }
-        return type_map.get(var_type, var_type)
-
     def get_merged_analyzer(self):
         """获取合并后的主表分析器（用于生成完整报告）"""
         # 找出最大的表作为主表
@@ -676,45 +662,47 @@ class MultiTableStatisticalAnalyzer:
         return final_html
 
     def to_json(self, output_file=None, indent=2, ensure_ascii=False):
-        """将多表分析结果转换为JSON格式"""
+        """
+        将多表分析结果转换为JSON格式
+
+        返回合并表的完整分析结果（与单表分析一致），同时包含多表关系信息
+        """
         import json
         from datetime import datetime
 
-        result = {
-            'analysis_time': datetime.now().isoformat(),
+        # 获取合并表的完整分析结果
+        merged_analyzer = self.get_merged_analyzer()
+        merged_result = json.loads(merged_analyzer.to_json())
+
+        # 添加多表特有的信息
+        merged_result['multi_table_info'] = {
             'tables': {},
             'relationships': self.all_relationships.get('foreign_keys', []),
             'table_groups': self.table_groups
         }
 
-        for table_name, data in self.tables.items():
-            analyzer = AutoStatisticalAnalyzer(
-                data,
-                source_table_name=table_name,
-                auto_clean=False,
-                quiet=True
-            )
+        # 添加各表的概要信息
+        for table_name, df in self.tables.items():
+            # 获取该表的变量类型
+            var_types = {}
+            if table_name in self.table_variable_types:
+                for col, typ in self.table_variable_types[table_name]['types'].items():
+                    var_types[col] = {
+                        'type': typ,
+                        'type_desc': BaseAnalyzer.get_type_description(typ)
+                    }
 
-            result['tables'][table_name] = {
+            merged_result['multi_table_info']['tables'][table_name] = {
                 'shape': {
-                    'rows': len(data),
-                    'columns': len(data.columns)
+                    'rows': len(df),
+                    'columns': len(df.columns)
                 },
-                'variable_types': {},
-                'quality_summary': {
-                    'missing_count': len(analyzer.quality_report.get('missing', [])),
-                    'outlier_count': len(analyzer.quality_report.get('outliers', {})),
-                    'duplicate_count': analyzer.quality_report.get('duplicates', {}).get('count', 0)
-                }
+                'column_names': list(df.columns),
+                'variable_types': var_types,
+                'quality_summary': self.table_quality_reports.get(table_name, {}).get('quality_report', {})
             }
 
-            for col, var_type in analyzer.variable_types.items():
-                result['tables'][table_name]['variable_types'][col] = {
-                    'type': var_type,
-                    'type_desc': analyzer._get_type_description(var_type)
-                }
-
-        json_str = json.dumps(result, indent=indent, ensure_ascii=ensure_ascii, default=str)
+        json_str = json.dumps(merged_result, indent=indent, ensure_ascii=ensure_ascii, default=str)
 
         if output_file:
             with open(output_file, 'w', encoding='utf-8') as f:
@@ -779,7 +767,7 @@ class MultiTableStatisticalAnalyzer:
                 type_count_display = 0
                 for col, var_type in predefined_types.items():
                     if col in merged_df_clean.columns:
-                        type_desc = self._get_type_description(var_type)
+                        type_desc = BaseAnalyzer.get_type_description(var_type)
                         if type_count_display < 10:
                             print(f"  {col}: {type_desc}")
                         type_count_display += 1
