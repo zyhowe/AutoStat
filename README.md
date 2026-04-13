@@ -155,24 +155,18 @@ AutoStat provides MCP (Model Context Protocol) service for AI agent integration.
       "mcpServers": {
         "autostat": {
           "command": "uvx",
-          "args": ["autostat-mcp"],
-          "env": {
-            "PYTHONPATH": ""
-          }
+          "args": ["autostat-mcp"]
         }
       }
     }
 
-Or after pip installation:
+Or using pip installation:
 
     {
       "mcpServers": {
         "autostat": {
           "command": "python",
-          "args": ["-m", "autostat.mcp_server"],
-          "env": {
-            "PYTHONPATH": ""
-          }
+          "args": ["-m", "autostat.mcp_server"]
         }
       }
     }

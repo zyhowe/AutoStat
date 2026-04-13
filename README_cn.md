@@ -149,16 +149,17 @@ HTML报告包含：
 
 AutoStat 提供 MCP (Model Context Protocol) 服务，可供 AI Agent 调用。
 
+## MCP 服务配置
+
+AutoStat 提供 MCP (Model Context Protocol) 服务，可供 AI Agent 调用。
+
 ### STDIO 类型（推荐用于 Claude Desktop）
 
     {
       "mcpServers": {
         "autostat": {
           "command": "uvx",
-          "args": ["autostat-mcp"],
-          "env": {
-            "PYTHONPATH": ""
-          }
+          "args": ["autostat-mcp"]
         }
       }
     }
@@ -169,10 +170,7 @@ AutoStat 提供 MCP (Model Context Protocol) 服务，可供 AI Agent 调用。
       "mcpServers": {
         "autostat": {
           "command": "python",
-          "args": ["-m", "autostat.mcp_server"],
-          "env": {
-            "PYTHONPATH": ""
-          }
+          "args": ["-m", "autostat.mcp_server"]
         }
       }
     }

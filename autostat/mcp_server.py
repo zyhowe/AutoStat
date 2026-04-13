@@ -6,6 +6,7 @@ import json
 import os
 import time
 import argparse
+import sys
 import pandas as pd
 from typing import Dict, Any
 
@@ -16,7 +17,8 @@ from autostat.multi_analyzer import MultiTableStatisticalAnalyzer
 from autostat.loader import DataLoader
 from autostat.reporter import Reporter
 
-mcp = FastMCP("DataAnalyzerMCP")
+# 创建 MCP 服务实例
+mcp = FastMCP("AutoStat")
 
 
 @mcp.tool
@@ -290,13 +292,20 @@ def get_data_quality_report(file_path: str) -> str:
 
 
 def main():
-    """MCP 服务主入口"""
+    """
+    MCP 服务主入口
+
+    支持三种传输模式:
+    - stdio: 标准输入输出（用于 Claude Desktop 等客户端）
+    - http:  Streamable HTTP 服务
+    - sse:   Server-Sent Events 服务
+    """
     parser = argparse.ArgumentParser(
         description="AutoStat MCP Server - 智能统计分析工具",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 示例:
-  # STDIO 模式（用于 Claude Desktop 等客户端）
+  # STDIO 模式（默认，用于 Claude Desktop）
   autostat-mcp
   
   # HTTP 模式
@@ -325,6 +334,13 @@ def main():
         default=int(os.getenv("AUTOSTAT_PORT", "6011")),
         help="HTTP/SSE 服务端口 (默认: 6011)"
     )
+
+    # 当没有参数传入时（如 uvx autostat-mcp），显示帮助信息并退出
+    # 但为了魔搭部署检测，需要直接运行 STDIO 模式
+    if len(sys.argv) == 1:
+        # 无参数时直接运行 STDIO 模式（魔搭部署检测使用）
+        mcp.run(transport="stdio")
+        return
 
     args = parser.parse_args()
 
