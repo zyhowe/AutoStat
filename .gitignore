@@ -1,7 +1,6 @@
 # Python
 __pycache__/
 *.py[cod]
-*$py.class
 *.so
 .Python
 env/
@@ -35,16 +34,14 @@ wheels/
 *.ipynb
 
 # Streamlit
-.streamlit/secrets.toml
+.streamlit/
 
-# Data files
-*.csv
-*.xlsx
-*.xls
-*.json
-*.txt
-!requirements.txt
-!package.json
+# Data files（只忽略根目录下的数据文件，不忽略 .dify 配置）
+/*.csv
+/*.xlsx
+/*.xls
+/*.txt
+/*.json
 
 # Logs
 *.log
@@ -54,11 +51,14 @@ logs/
 .DS_Store
 Thumbs.db
 
-# Config files
-.autostat/
-*.config.json
+# Config files（只忽略根目录下的配置）
+/*.config.json
 
 # Test
 .pytest_cache/
 .coverage
 htmlcov/
+
+# Dify 插件配置（明确不忽略）
+!.dify/
+!.dify/**/*.json
