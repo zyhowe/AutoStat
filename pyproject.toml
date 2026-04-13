@@ -1,0 +1,54 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "autostat-mcp"
+version = "0.2.0"
+description = "AutoStat - 智能统计分析工具 MCP Server"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [
+    {name = "AutoStat Team", email = "howe_min@163.com"}
+]
+keywords = ["statistics", "data-analysis", "mcp", "ai", "automl"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Scientific/Engineering :: Information Analysis",
+]
+requires-python = ">=3.8"
+dependencies = [
+    "pandas>=1.3.0",
+    "numpy>=1.21.0",
+    "matplotlib>=3.4.0",
+    "seaborn>=0.11.0",
+    "scipy>=1.7.0",
+    "statsmodels>=0.13.0",
+    "networkx>=2.6.0",
+    "click>=8.0.0",
+    "jinja2>=3.0.0",
+    "requests>=2.25.0",
+    "fastmcp>=0.1.0",
+]
+
+[project.scripts]
+autostat-mcp = "autostat.mcp_server:main"
+
+[project.urls]
+Homepage = "https://github.com/zyhowe/AutoStat"
+Repository = "https://github.com/zyhowe/AutoStat"
+Issues = "https://github.com/zyhowe/AutoStat/issues"
+
+[tool.setuptools.packages.find]
+include = ["autostat*"]
+exclude = ["tests*", "examples*", "web*", "templates*"]
+
+[tool.setuptools.package-data]
+autostat = ["templates/*.html"]

@@ -5,6 +5,7 @@ MCP服务模块 - 供AI Agent调用
 import json
 import os
 import time
+import argparse
 import pandas as pd
 from typing import Dict, Any
 
@@ -255,5 +256,85 @@ def analyze_from_db(
         return json.dumps({'success': False, 'error': str(e)}, ensure_ascii=False, indent=2)
 
 
+@mcp.tool
+def get_data_quality_report(file_path: str) -> str:
+    """
+    获取数据质量报告（快速检查）
+
+    参数:
+    - file_path: 文件路径
+
+    返回:
+    - JSON格式的质量报告
+    """
+    try:
+        analyzer = AutoStatisticalAnalyzer(file_path, quiet=True)
+        quality = analyzer.quality_report
+
+        result = {
+            "success": True,
+            "file_name": file_path,
+            "rows": len(analyzer.data),
+            "columns": len(analyzer.data.columns),
+            "missing": quality.get("missing", [])[:10],
+            "outliers": {
+                col: {"count": info.get("count", 0), "percent": info.get("percent", 0)}
+                for col, info in list(quality.get("outliers", {}).items())[:5]
+            },
+            "duplicates": quality.get("duplicates", {}),
+            "cleaning_suggestions": analyzer.cleaning_suggestions[:5]
+        }
+        return json.dumps(result, ensure_ascii=False, indent=2, default=str)
+    except Exception as e:
+        return json.dumps({"success": False, "error": str(e)}, ensure_ascii=False, indent=2)
+
+
+def main():
+    """MCP 服务主入口"""
+    parser = argparse.ArgumentParser(
+        description="AutoStat MCP Server - 智能统计分析工具",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+示例:
+  # STDIO 模式（用于 Claude Desktop 等客户端）
+  autostat-mcp
+  
+  # HTTP 模式
+  autostat-mcp --transport http --port 6011
+  
+  # SSE 模式
+  autostat-mcp --transport sse --host 0.0.0.0 --port 6011
+        """
+    )
+    parser.add_argument(
+        "--transport",
+        type=str,
+        default="stdio",
+        choices=["stdio", "http", "sse"],
+        help="传输协议 (默认: stdio)"
+    )
+    parser.add_argument(
+        "--host",
+        type=str,
+        default=os.getenv("AUTOSTAT_HOST", "0.0.0.0"),
+        help="HTTP/SSE 服务绑定地址 (默认: 0.0.0.0)"
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=int(os.getenv("AUTOSTAT_PORT", "6011")),
+        help="HTTP/SSE 服务端口 (默认: 6011)"
+    )
+
+    args = parser.parse_args()
+
+    if args.transport == "stdio":
+        mcp.run(transport="stdio")
+    elif args.transport == "http":
+        mcp.run(transport="streamable-http", host=args.host, port=args.port)
+    elif args.transport == "sse":
+        mcp.run(transport="sse", host=args.host, port=args.port)
+
+
 if __name__ == "__main__":
-    mcp.run(transport="streamable-http", host="0.0.0.0", port=6011)
+    main()
