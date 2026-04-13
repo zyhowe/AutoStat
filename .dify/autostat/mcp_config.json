@@ -1,0 +1,8 @@
+{
+    "mcpServers": {
+        "autostat": {
+            "command": "uvx",
+            "args": ["autostat-mcp"]
+        }
+    }
+}
