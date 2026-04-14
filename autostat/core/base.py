@@ -67,9 +67,13 @@ class BaseAnalyzer:
         """
         x = x.dropna()
 
-        # 样本量限制
-        if len(x) < NORMALITY_MIN_SAMPLES or len(x) > NORMALITY_MAX_SAMPLES:
+        # 样本量不足
+        if len(x) < NORMALITY_MIN_SAMPLES:
             return False, 1.0, {'skew': 0, 'kurtosis': 0}
+
+        # 样本量过大时采样
+        if len(x) > NORMALITY_MAX_SAMPLES:
+            x = x.sample(n=NORMALITY_MAX_SAMPLES, random_state=42)
 
         try:
             _, p_shapiro = shapiro(x)
@@ -98,54 +102,68 @@ class BaseAnalyzer:
 
     @staticmethod
     def get_high_correlations(data, numeric_vars, threshold=HIGH_CORRELATION_THRESHOLD):
-        """获取强相关对"""
+        """获取强相关对（处理空数据）"""
         correlations = []
         if len(numeric_vars) >= 2:
-            corr_data = data[numeric_vars].corr()
-            for i in range(len(corr_data.columns)):
-                for j in range(i + 1, len(corr_data.columns)):
-                    val = corr_data.iloc[i, j]
-                    if abs(val) >= threshold:
-                        correlations.append({
-                            'var1': corr_data.columns[i],
-                            'var2': corr_data.columns[j],
-                            'value': round(val, 3)
-                        })
+            # 过滤掉全空的列
+            valid_vars = [col for col in numeric_vars if col in data.columns and data[col].notna().any()]
+            if len(valid_vars) >= 2:
+                corr_data = data[valid_vars].corr()
+                for i in range(len(corr_data.columns)):
+                    for j in range(i + 1, len(corr_data.columns)):
+                        val = corr_data.iloc[i, j]
+                        if not pd.isna(val) and abs(val) >= threshold:
+                            correlations.append({
+                                'var1': corr_data.columns[i],
+                                'var2': corr_data.columns[j],
+                                'value': round(val, 3)
+                            })
         return sorted(correlations, key=lambda x: abs(x['value']), reverse=True)
 
     @staticmethod
     def get_skewed_vars(data, variable_types, threshold=SKEWNESS_THRESHOLD):
-        """获取偏态变量"""
+        """获取偏态变量（处理空数据）"""
         skewed = []
         for col, typ in variable_types.items():
-            if typ == 'continuous':
+            if typ == 'continuous' and col in data.columns:
                 series = data[col].dropna()
                 if len(series) > 0:
                     skew = series.skew()
-                    if abs(skew) >= threshold:
+                    if not pd.isna(skew) and abs(skew) >= threshold:
                         skewed.append({'name': col, 'skew': round(skew, 2)})
         return sorted(skewed, key=lambda x: abs(x['skew']), reverse=True)
 
     @staticmethod
     def get_imbalanced_vars(data, variable_types, threshold=0.8):
-        """获取不平衡分类变量"""
+        """获取不平衡分类变量（处理空数据）"""
         imbalanced = []
         for col, typ in variable_types.items():
-            if typ in ['categorical', 'categorical_numeric', 'ordinal']:
-                vc = data[col].value_counts(normalize=True)
-                if len(vc) > 0 and vc.max() >= threshold:
-                    imbalanced.append({
-                        'name': col,
-                        'top_category': str(vc.index[0]),
-                        'top_pct': round(vc.max() * 100, 1)
-                    })
+            if typ in ['categorical', 'categorical_numeric', 'ordinal'] and col in data.columns:
+                vc = data[col].value_counts(normalize=True, dropna=False)
+                if len(vc) > 0:
+                    # 排除NaN作为类别
+                    vc_clean = vc.dropna()
+                    if len(vc_clean) > 0 and vc_clean.max() >= threshold:
+                        imbalanced.append({
+                            'name': col,
+                            'top_category': str(vc_clean.index[0]) if len(vc_clean.index) > 0 else '未知',
+                            'top_pct': round(vc_clean.max() * 100, 1)
+                        })
         return imbalanced
 
     def _quick_pre_screen(self):
-        """快速初筛"""
+        """快速初筛（增强空值处理）"""
         self.type_inference_warnings = {}
 
         for col in self.data.columns:
+            # 跳过全空列
+            if self.data[col].isna().all():
+                if not self.quiet:
+                    print(f"  ⚠️ 警告: {col} 全部为空值")
+                self.type_inference_warnings[col] = '全为空值'
+                continue
+
+            # 处理bytes类型
             if self.data[col].dtype == 'object':
                 try:
                     if len(self.data[col]) > 0:
@@ -154,6 +172,7 @@ class BaseAnalyzer:
                             self.data[col] = self.data[col].apply(
                                 lambda x: x.decode('gbk', errors='ignore') if isinstance(x, bytes) else x
                             )
+                    # 处理空字符串
                     empty_mask = self.data[col].astype(str).str.strip() == ''
                     if empty_mask.any():
                         if not self.quiet:
@@ -163,11 +182,7 @@ class BaseAnalyzer:
                 except Exception as e:
                     continue
 
-            if self.data[col].isna().all():
-                if not self.quiet:
-                    print(f"  ⚠️ 警告: {col} 全部为空值")
-                self.type_inference_warnings[col] = '全为空值'
-
+            # 处理数值列中的缺失标记
             if pd.api.types.is_numeric_dtype(self.data[col]):
                 missing_flags = [-999, -9999, 999999, 9999999]
                 for flag in missing_flags:
@@ -176,14 +191,17 @@ class BaseAnalyzer:
                         if not self.quiet:
                             print(f"  ⚠️ 警告: {col} 包含 {flag_mask.sum()} 个缺失标记值 {flag}")
                         self.type_inference_warnings[col] = f'包含缺失标记 {flag}'
+                        self.data.loc[flag_mask, col] = np.nan
 
     def _infer_variable_types(self):
-        """自动推断变量类型"""
+        """自动推断变量类型（增强空值处理）"""
         for col in self.data.columns:
             if col in self.variable_types:
                 continue
 
             values = self.data[col].dropna()
+
+            # 全空列
             if len(values) == 0:
                 self.variable_types[col] = 'empty'
                 self.type_reasons[col] = '空变量'
@@ -195,8 +213,10 @@ class BaseAnalyzer:
             # 日期类型检测
             if pd.api.types.is_string_dtype(values) or pd.api.types.is_object_dtype(values):
                 try:
-                    converted = pd.to_datetime(values.head(100), errors='coerce')
-                    if converted.notna().sum() > 80:
+                    # 采样检测
+                    sample_size = min(100, len(values))
+                    converted = pd.to_datetime(values.head(sample_size), errors='coerce')
+                    if converted.notna().sum() > sample_size * 0.8:
                         self.variable_types[col] = 'datetime'
                         self.type_reasons[col] = '日期时间类型'
                         self.data[col] = pd.to_datetime(self.data[col], errors='coerce')
@@ -255,15 +275,17 @@ class BaseAnalyzer:
         return sorted(missing_list, key=lambda x: x['percent'], reverse=True)
 
     def _check_outliers_by_type(self) -> Dict:
-        """检查异常值"""
+        """检查异常值（增强空值处理）"""
         outlier_report = {}
         for col, typ in self.variable_types.items():
-            if typ == 'continuous':
+            if typ == 'continuous' and col in self.data.columns:
                 data = self.data[col].dropna()
                 if len(data) > 0:
                     Q1 = data.quantile(0.25)
                     Q3 = data.quantile(0.75)
                     IQR = Q3 - Q1
+                    if IQR == 0:
+                        continue
                     lower = Q1 - 1.5 * IQR
                     upper = Q3 + 1.5 * IQR
                     outlier_mask = (data < lower) | (data > upper)
@@ -277,38 +299,46 @@ class BaseAnalyzer:
         return outlier_report
 
     def _check_duplicates_by_key(self) -> Dict:
-        """检查重复值"""
-        id_cols = [col for col, typ in self.variable_types.items() if typ == 'identifier']
+        """检查重复值（增强空值处理）"""
+        id_cols = [col for col, typ in self.variable_types.items() if typ == 'identifier' and col in self.data.columns]
         if id_cols:
-            duplicates = self.data.duplicated(subset=id_cols, keep=False)
-            return {
-                'count': duplicates.sum(),
-                'percent': duplicates.sum() / len(self.data) * 100 if len(self.data) > 0 else 0,
-                'based_on': id_cols
-            }
-        else:
-            duplicates = self.data.duplicated(keep=False)
-            return {
-                'count': duplicates.sum(),
-                'percent': duplicates.sum() / len(self.data) * 100 if len(self.data) > 0 else 0,
-                'based_on': 'all_columns'
-            }
+            # 只使用非空ID列检查重复
+            temp_data = self.data[id_cols].dropna()
+            if len(temp_data) > 0:
+                duplicates = temp_data.duplicated(keep=False)
+                return {
+                    'count': duplicates.sum(),
+                    'percent': duplicates.sum() / len(self.data) * 100 if len(self.data) > 0 else 0,
+                    'based_on': id_cols
+                }
+
+        # 全列检查
+        duplicates = self.data.duplicated(keep=False)
+        return {
+            'count': duplicates.sum(),
+            'percent': duplicates.sum() / len(self.data) * 100 if len(self.data) > 0 else 0,
+            'based_on': 'all_columns'
+        }
 
     def _check_type_consistency(self) -> Dict:
-        """检查类型一致性"""
+        """检查类型一致性（增强空值处理）"""
         inconsistency = {}
         for col in self.data.columns:
-            types = self.data[col].apply(type).unique()
+            # 排除空值后检查类型
+            non_null = self.data[col].dropna()
+            if len(non_null) == 0:
+                continue
+            types = non_null.apply(type).unique()
             if len(types) > 1:
-                non_nan_types = [t for t in types if t != float or not pd.isna(self.data[col]).all()]
-                if len(non_nan_types) > 1:
-                    inconsistency[col] = {'types': [str(t) for t in non_nan_types]}
+                inconsistency[col] = {'types': [str(t) for t in types]}
         return inconsistency
 
     def _check_invalid_by_type(self) -> Dict:
-        """检查无效值"""
+        """检查无效值（增强空值处理）"""
         invalid = {}
         for col, typ in self.variable_types.items():
+            if col not in self.data.columns:
+                continue
             data = self.data[col].dropna()
             if len(data) == 0:
                 continue
@@ -356,7 +386,7 @@ class BaseAnalyzer:
         return suggestions
 
     def _auto_clean(self):
-        """自动清洗"""
+        """自动清洗（增强空值处理）"""
         if not self.quiet:
             print("\n  执行自动清洗...")
         cols_to_drop = []
@@ -374,7 +404,10 @@ class BaseAnalyzer:
         self.quality_report = self._comprehensive_quality_check()
 
     def _get_variable_summary(self, col):
-        """获取变量摘要"""
+        """获取变量摘要（增强空值处理）"""
+        if col not in self.data.columns:
+            return {'name': col, 'type': 'unknown', 'n': 0, 'n_missing': 0, 'missing_pct': 0}
+
         data = self.data[col].dropna()
         var_type = self.variable_types.get(col, 'unknown')
 
@@ -386,15 +419,27 @@ class BaseAnalyzer:
             'missing_pct': self.data[col].isna().mean() * 100
         }
 
+        if len(data) == 0:
+            return summary
+
         if var_type in ['categorical', 'categorical_numeric', 'ordinal']:
             value_counts = data.value_counts()
-            summary.update({
-                'n_unique': data.nunique(),
-                'mode': data.mode().iloc[0] if not data.mode().empty else None,
-                'mode_freq': value_counts.iloc[0] if not value_counts.empty else 0,
-                'mode_pct': (value_counts.iloc[0] / len(data) * 100) if not value_counts.empty else 0,
-                'value_counts': value_counts
-            })
+            if len(value_counts) > 0:
+                summary.update({
+                    'n_unique': data.nunique(),
+                    'mode': data.mode().iloc[0] if not data.mode().empty else None,
+                    'mode_freq': value_counts.iloc[0] if not value_counts.empty else 0,
+                    'mode_pct': (value_counts.iloc[0] / len(data) * 100) if not value_counts.empty else 0,
+                    'value_counts': value_counts
+                })
+            else:
+                summary.update({
+                    'n_unique': 0,
+                    'mode': None,
+                    'mode_freq': 0,
+                    'mode_pct': 0,
+                    'value_counts': pd.Series()
+                })
         elif var_type == 'continuous':
             is_normal, p_norm, norm_stats = self.check_normality(data)
             summary.update({

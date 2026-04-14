@@ -138,41 +138,69 @@ class RelationshipAnalyzer:
 
     def _analyze_categorical_categorical(self, categorical_vars, exclude_pairs, significant_pairs):
         """分析分类-分类关联"""
-        print("\n【分类变量关联矩阵 (Cramer\'s V)】")
-        valid_cat = [v for v in categorical_vars if self._has_valid_pair(v, categorical_vars, exclude_pairs)]
+        print("\n【分类变量关联矩阵 (Cramer's V)】")
+        valid_cat = []
+        for v in categorical_vars:
+            if v in self.date_derived_columns:
+                continue
+            if self.data[v].nunique() <= 1:
+                print(f"  ⚠️ 跳过 {v}（唯一值≤1）")
+                continue
+            valid_cat.append(v)
 
-        if len(valid_cat) >= 2:
-            n_cat = len(valid_cat)
-            cramer_matrix = pd.DataFrame(index=valid_cat, columns=valid_cat, dtype=float)
+        if len(valid_cat) < 2:
+            print("  分类变量不足2个，跳过关联矩阵")
+            return
 
-            for i in range(n_cat):
-                for j in range(n_cat):
-                    if i == j:
-                        cramer_matrix.iloc[i, j] = 1.0
-                    else:
-                        v1, v2 = valid_cat[i], valid_cat[j]
-                        if (v1, v2) in exclude_pairs or (v2, v1) in exclude_pairs:
-                            cramer_matrix.iloc[i, j] = np.nan
-                            continue
+        n_cat = len(valid_cat)
+        cramer_matrix = pd.DataFrame(index=valid_cat, columns=valid_cat, dtype=float)
+
+        for i in range(n_cat):
+            for j in range(n_cat):
+                if i == j:
+                    cramer_matrix.iloc[i, j] = 1.0
+                elif i < j:
+                    v1, v2 = valid_cat[i], valid_cat[j]
+                    if (v1, v2) in exclude_pairs or (v2, v1) in exclude_pairs:
+                        cramer_matrix.iloc[i, j] = np.nan
+                        continue
+                    try:
                         crosstab = pd.crosstab(self.data[v1], self.data[v2])
+                        # 检查 crosstab 是否有效
+                        if crosstab.size == 0 or crosstab.shape[0] <= 1 or crosstab.shape[1] <= 1:
+                            cramer_matrix.iloc[i, j] = 0
+                            continue
                         chi2, p_value, dof, expected = chi2_contingency(crosstab)
                         n = len(self.data)
                         min_dim = min(crosstab.shape) - 1
-                        cramer_v = np.sqrt(chi2 / (n * min_dim)) if chi2 > 0 and n > 0 and min_dim > 0 else 0
+                        if min_dim <= 0:
+                            cramer_matrix.iloc[i, j] = 0
+                            continue
+                        cramer_v = np.sqrt(chi2 / (n * min_dim)) if chi2 > 0 and n > 0 else 0
                         cramer_matrix.iloc[i, j] = cramer_v
-                        if p_value < 0.05 and i < j:
+                        if p_value < 0.05:
                             significant_pairs.append({
                                 'var1': v1, 'var2': v2, 'type': '分类-分类',
                                 'statistic': cramer_v, 'p_value': p_value, 'strength': cramer_v
                             })
+                    except Exception as e:
+                        print(f"  ⚠️ 计算 {v1} vs {v2} 失败: {e}")
+                        cramer_matrix.iloc[i, j] = 0
+                else:
+                    cramer_matrix.iloc[i, j] = cramer_matrix.iloc[j, i]
 
-            print(cramer_matrix.round(4))
-            plt.figure(figsize=(10, 8))
-            sns.heatmap(cramer_matrix, annot=True, cmap='YlOrRd', center=0.5,
-                        square=True, linewidths=1, mask=np.triu(np.ones_like(cramer_matrix, dtype=bool), k=1))
-            plt.title('分类变量关联矩阵 (Cramer\'s V)')
-            plt.tight_layout()
-            plt.show()
+        # 检查是否有有效数据
+        if cramer_matrix.isna().all().all() or (cramer_matrix.values == 0).all():
+            print("  无有效关联数据，跳过热力图")
+            return
+
+        print(cramer_matrix.round(4))
+        plt.figure(figsize=(10, 8))
+        sns.heatmap(cramer_matrix, annot=True, cmap='YlOrRd', center=0.5,
+                    square=True, linewidths=1, mask=np.triu(np.ones_like(cramer_matrix, dtype=bool), k=1))
+        plt.title('分类变量关联矩阵 (Cramer\'s V)')
+        plt.tight_layout()
+        plt.show()
 
     def _analyze_numeric_categorical(self, numeric_vars, categorical_vars, exclude_pairs, significant_pairs):
         """分析数值-分类关联"""

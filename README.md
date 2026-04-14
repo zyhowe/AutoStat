@@ -8,17 +8,17 @@ AutoStat is an intelligent statistical analysis tool that automatically identifi
 
 ## Features
 
--   **Automatic Data Type Recognition** - Identifies continuous, categorical, datetime, identifier, and ordinal variables
--   **Data Quality Inspection** - Detects missing values, outliers, duplicates, and inconsistent types
--   **Smart Statistical Method Selection** - Automatically chooses between t-test, ANOVA, Mann-Whitney, chi-square, Fisher's exact test
--   **Multi-table Association Analysis** - Automatically discovers relationships between tables and performs joint analysis
--   **Time Series Analysis** - Stationarity test (ADF), autocorrelation test (Ljung-Box), seasonality detection
--   **Relationship Analysis** - Correlation matrix, Cramer's V, Eta-squared with visual heatmaps
--   **Intelligent Sampling** - Foreign-key-aware stratified sampling for large datasets
--   **Multiple Output Formats** - HTML reports, JSON, Markdown, Excel
--   **Multiple Data Sources** - CSV, Excel, JSON, TXT, SQL Server
--   **MCP Service** - Can be called by AI agents (Claude Desktop, etc.)
--   **Web Interface** - Streamlit-based UI
+- **Automatic Data Type Recognition** - Identifies continuous, categorical, datetime, identifier, and ordinal variables
+- **Data Quality Inspection** - Detects missing values, outliers, duplicates, and inconsistent types
+- **Smart Statistical Method Selection** - Automatically chooses between t-test, ANOVA, Mann-Whitney, chi-square, Fisher's exact test
+- **Multi-table Association Analysis** - Automatically discovers relationships between tables and performs joint analysis
+- **Time Series Analysis** - Stationarity test (ADF), autocorrelation test (Ljung-Box), seasonality detection
+- **Relationship Analysis** - Correlation matrix, Cramer's V, Eta-squared with visual heatmaps
+- **Intelligent Sampling** - Foreign-key-aware stratified sampling for large datasets
+- **Multiple Output Formats** - HTML reports, JSON, Markdown, Excel
+- **Multiple Data Sources** - CSV, Excel, JSON, TXT, SQL Server
+- **MCP Service** - Can be called by AI agents (Claude Desktop, etc.)
+- **Web Interface** - Streamlit-based UI with AI-powered data interpretation
 
 ## Quick Start
 
@@ -94,7 +94,25 @@ Install MCP version from PyPI:
 
 ### Web Interface
 
+Start the web interface:
+
     streamlit run web/app.py
+
+The web interface supports:
+
+- **Single File Analysis** - Upload and analyze CSV, Excel, JSON, TXT files
+- **Multi-file Analysis** - Upload multiple related files, auto-discover relationships
+- **Database Analysis** - Connect to SQL Server for data analysis
+- **AI Smart Interpretation** - Context-aware AI chat for data insights
+
+#### AI Smart Interpretation Features
+
+The web interface includes an AI-powered chat feature that can:
+
+- Answer questions about your data based on selected context (JSON results, HTML reports, raw data)
+- Provide data quality assessments and cleaning recommendations
+- Suggest appropriate statistical methods and models
+- Query specific data ranges and perform filtering
 
 ### MCP Service (for AI Agents)
 
@@ -113,10 +131,10 @@ Install MCP version from PyPI:
 
 The HTML report includes:
 
--   Data overview (rows, columns, missing values, duplicates)
--   Variable type distribution
--   Statistical summaries for each variable
--   Data cleaning suggestions
+- Data overview (rows, columns, missing values, duplicates)
+- Variable type distribution
+- Statistical summaries for each variable
+- Data cleaning suggestions
 
 ### JSON Output Structure
 
@@ -132,7 +150,7 @@ The HTML report includes:
         "missing": [{"column": "city", "count": 150, "percent": 1.5}],
         "duplicates": {"count": 23, "percent": 0.23}
       },
-      "cleaning_suggestions": ["建议处理缺失值"]
+      "cleaning_suggestions": ["Handle missing values"]
     }
 
 ## Supported Data Sources
@@ -229,10 +247,10 @@ Or using pip installation:
 
 ## Requirements
 
--   Python 3.8+
--   pandas, numpy, matplotlib, seaborn
--   scipy, statsmodels, networkx
--   click, jinja2
+- Python 3.8+
+- pandas, numpy, matplotlib, seaborn
+- scipy, statsmodels, networkx
+- click, jinja2
 
 ## Optional Dependencies
 
@@ -255,7 +273,6 @@ Or using pip installation:
     │   ├── reporter.py      # Report generator
     │   ├── cli.py           # Command line interface
     │   ├── mcp_server.py    # MCP service
-    │   ├── config_manager.py # Configuration management
     │   ├── llm_client.py    # LLM client
     │   ├── prompts.py       # Prompt templates
     │   └── core/
@@ -267,7 +284,20 @@ Or using pip installation:
     │       ├── report_data.py
     │       └── plots.py
     ├── web/
-    │   └── app.py           # Streamlit web UI
+    │   ├── app.py           # Streamlit main entry
+    │   ├── components/      # UI components
+    |   |   ├── __init__.py
+    │   │   ├── sidebar.py
+    │   │   ├── single_analysis.py
+    │   │   ├── multi_analysis.py
+    │   │   ├── db_analysis.py
+    │   │   └── chat_interface.py
+    │   ├── utils/           # Utility functions
+    |   |   ├── __init__.py
+    │   │   ├── helpers.py
+    │   │   └── context_builder.py
+    │   └── config/          # Client-side storage
+    │       └── storage.py
     ├── templates/
     │   └── report.html      # HTML report template
     ├── tests/
@@ -291,5 +321,5 @@ Contributions are welcome! Please submit a Pull Request.
 
 ## Contact
 
--   Issues: https://github.com/zyhowe/AutoStat/issues
--   Email: howe_min@163.com
+- Issues: https://github.com/zyhowe/AutoStat/issues
+- Email: howe_min@163.com

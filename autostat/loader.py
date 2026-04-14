@@ -8,6 +8,8 @@ import pandas as pd
 import pyodbc
 import os
 import json
+import io
+import re
 from typing import List, Dict, Optional, Any
 
 class DataLoader:
@@ -32,14 +34,66 @@ class DataLoader:
 
     @staticmethod
     def load_csv(file_path, encoding='utf-8-sig', parse_dates=True, date_columns=None, **kwargs):
-        """加载CSV文件"""
+        """加载CSV文件（增强健壮性）"""
+        print(f"  📂 开始加载CSV文件: {file_path}")
+
+        df = None
+
+        # 方法1：二进制模式读取，处理空字符和特殊字符
+        try:
+            with open(file_path, 'rb') as f:
+                content = f.read()
+                # 替换空字符
+                if b'\x00' in content:
+                    print(f"  ⚠️ 发现空字符，正在清理...")
+                    content = content.replace(b'\x00', b'')
+                # 解码，忽略无法解码的字符
+                content_str = content.decode('utf-8', errors='ignore')
+                # 清理其他特殊控制字符（保留换行和回车）
+                content_str = re.sub(r'[\x01-\x08\x0b\x0c\x0e-\x1f\x7f]', '', content_str)
+                df = pd.read_csv(io.StringIO(content_str), **kwargs)
+                print(f"  ✅ 二进制模式读取成功")
+        except Exception as e:
+            print(f"  ⚠️ 二进制模式读取失败: {e}")
+
+        # 方法2：普通方式读取，尝试多种编码
+        if df is None:
+            encodings = [encoding, 'utf-8', 'gbk', 'gb2312', 'gb18030', 'latin1', 'cp1252']
+            for enc in encodings:
+                try:
+                    df = pd.read_csv(file_path, encoding=enc, **kwargs)
+                    print(f"  ✅ 使用编码 {enc} 读取成功")
+                    break
+                except UnicodeDecodeError:
+                    continue
+                except Exception as e:
+                    print(f"  ⚠️ 编码 {enc} 失败: {e}")
+                    continue
+
+        # 方法3：使用 python 引擎，跳过错误行
+        if df is None:
+            try:
+                df = pd.read_csv(file_path, encoding='utf-8', engine='python',
+                                on_bad_lines='skip', **kwargs)
+                print(f"  ✅ Python引擎读取成功（已跳过错误行）")
+            except Exception as e:
+                print(f"  ❌ 所有读取方式都失败: {e}")
+                raise ValueError(f"无法读取CSV文件: {e}")
+
+        if df is None:
+            raise ValueError("无法读取CSV文件")
+
+        # 清理列名（去除首尾空格，替换特殊字符）
+        df.columns = [str(col).strip().replace('\n', '_').replace('\r', '_').replace('\t', '_') for col in df.columns]
+
+        # 处理空字符串为NaN
+        df = df.replace(r'^\s*$', np.nan, regex=True)
+
         if not parse_dates:
-            return pd.read_csv(file_path, encoding=encoding, **kwargs)
+            return df
 
         try:
-            sample_df = pd.read_csv(file_path, encoding=encoding, nrows=5, **kwargs)
-            existing_columns = list(sample_df.columns)
-
+            existing_columns = list(df.columns)
             if date_columns is not None:
                 if isinstance(date_columns, str):
                     date_columns = [date_columns]
@@ -49,55 +103,105 @@ class DataLoader:
 
             if valid_date_cols:
                 print(f"  📅 自动识别日期列: {valid_date_cols}")
-                return pd.read_csv(file_path, encoding=encoding, parse_dates=valid_date_cols, **kwargs)
-            else:
-                return pd.read_csv(file_path, encoding=encoding, **kwargs)
-
-        except Exception as e:
-            print(f"  ⚠️ 日期解析失败: {e}，尝试不解析日期加载")
-            return pd.read_csv(file_path, encoding=encoding, **kwargs)
-
-    @staticmethod
-    def load_excel(file_path, sheet_name=0, **kwargs):
-        """加载Excel文件"""
-        return pd.read_excel(file_path, sheet_name=sheet_name, **kwargs)
-
-    @staticmethod
-    def load_json(file_path, encoding='utf-8-sig', orient='records',
-                  parse_dates=True, date_columns=None, **kwargs):
-        """加载JSON文件"""
-        with open(file_path, 'r', encoding=encoding) as f:
-            data = json.load(f)
-
-        df = pd.DataFrame(data)
-
-        if parse_dates:
-            if date_columns is None:
-                date_columns = DataLoader.DEFAULT_DATE_COLUMNS
-            elif isinstance(date_columns, str):
-                date_columns = [date_columns]
-
-            for col in date_columns:
-                if col in df.columns:
+                for col in valid_date_cols:
                     try:
                         df[col] = pd.to_datetime(df[col], errors='coerce')
-                        print(f"  📅 转换日期列: {col}")
                     except:
                         pass
+        except Exception as e:
+            print(f"  ⚠️ 日期解析失败: {e}")
 
         return df
 
     @staticmethod
-    def load_json_string(json_str, parse_dates=True, date_columns=None, **kwargs):
-        """从JSON字符串加载数据"""
-        print("📄 从JSON字符串加载数据...")
+    def load_excel(file_path, sheet_name=0, **kwargs):
+        """加载Excel文件（增强健壮性）"""
+        print(f"  📂 开始加载Excel文件: {file_path}")
 
+        df = None
+        engines = ['openpyxl', 'xlrd', 'calamine', None]
+
+        for engine in engines:
+            try:
+                if engine is None:
+                    df = pd.read_excel(file_path, sheet_name=sheet_name, **kwargs)
+                else:
+                    df = pd.read_excel(file_path, sheet_name=sheet_name, engine=engine, **kwargs)
+                print(f"  ✅ 使用引擎 {engine or 'auto'} 读取成功")
+                break
+            except Exception as e:
+                print(f"  ⚠️ 引擎 {engine or 'auto'} 失败: {e}")
+                continue
+
+        if df is None:
+            # 尝试作为CSV读取（可能是错误后缀名）
+            try:
+                df = DataLoader.load_csv(file_path, **kwargs)
+                print(f"  ✅ 作为CSV文件读取成功")
+            except:
+                pass
+
+        if df is None:
+            raise ValueError("无法读取Excel文件，请确认文件格式正确（支持 .xlsx, .xls）")
+
+        # 清理列名
+        df.columns = [str(col).strip().replace('\n', '_').replace('\r', '_').replace('\t', '_') for col in df.columns]
+
+        # 处理空字符串为NaN
+        df = df.replace(r'^\s*$', np.nan, regex=True)
+
+        return df
+
+    @staticmethod
+    def load_json(file_path, encoding='utf-8-sig', orient='records',
+                  parse_dates=True, date_columns=None, **kwargs):
+        """加载JSON文件（增强健壮性）"""
+        print(f"  📂 开始加载JSON文件: {file_path}")
+
+        df = None
+
+        # 方法1：尝试多种JSON格式
         try:
-            data = json.loads(json_str)
-        except json.JSONDecodeError as e:
-            raise ValueError(f"JSON字符串解析失败: {e}")
+            with open(file_path, 'r', encoding=encoding) as f:
+                content = f.read()
+        except:
+            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                content = f.read()
 
-        df = pd.DataFrame(data)
+        # 清理控制字符
+        content = re.sub(r'[\x00-\x1f\x7f]', '', content)
+
+        json_formats = [None, 'records', 'index', 'columns', 'values', 'table']
+        for fmt in json_formats:
+            try:
+                data = json.loads(content)
+                df = pd.DataFrame(data)
+                print(f"  ✅ JSON读取成功")
+                break
+            except:
+                continue
+
+        if df is None:
+            # 尝试逐行读取JSON
+            try:
+                lines = content.strip().split('\n')
+                data_list = []
+                for line in lines:
+                    if line.strip():
+                        data_list.append(json.loads(line))
+                df = pd.DataFrame(data_list)
+                print(f"  ✅ 逐行JSON读取成功")
+            except:
+                pass
+
+        if df is None:
+            raise ValueError("无法解析JSON文件")
+
+        # 清理列名
+        df.columns = [str(col).strip().replace('\n', '_').replace('\r', '_').replace('\t', '_') for col in df.columns]
+
+        # 处理空字符串为NaN
+        df = df.replace(r'^\s*$', np.nan, regex=True)
 
         if parse_dates:
             if date_columns is None:
@@ -117,14 +221,36 @@ class DataLoader:
 
     @staticmethod
     def load_txt(file_path, delimiter='\t', encoding='utf-8-sig', parse_dates=True, date_columns=None, **kwargs):
-        """加载TXT文件"""
+        """加载TXT文件（增强健壮性）"""
+        print(f"  📂 开始加载TXT文件: {file_path}")
+
+        df = None
+
+        # 尝试多种分隔符
+        delimiters = [delimiter, ',', '\t', ';', '|', ' ']
+        for delim in delimiters:
+            try:
+                df = pd.read_csv(file_path, delimiter=delim, encoding=encoding,
+                               on_bad_lines='skip', engine='python', **kwargs)
+                print(f"  ✅ 使用分隔符 '{delim}' 读取成功")
+                break
+            except:
+                continue
+
+        if df is None:
+            raise ValueError("无法读取TXT文件")
+
+        # 清理列名
+        df.columns = [str(col).strip().replace('\n', '_').replace('\r', '_').replace('\t', '_') for col in df.columns]
+
+        # 处理空字符串为NaN
+        df = df.replace(r'^\s*$', np.nan, regex=True)
+
         if not parse_dates:
-            return pd.read_csv(file_path, delimiter=delimiter, encoding=encoding, **kwargs)
+            return df
 
         try:
-            sample_df = pd.read_csv(file_path, delimiter=delimiter, encoding=encoding, nrows=5, **kwargs)
-            existing_columns = list(sample_df.columns)
-
+            existing_columns = list(df.columns)
             if date_columns is not None:
                 if isinstance(date_columns, str):
                     date_columns = [date_columns]
@@ -134,14 +260,58 @@ class DataLoader:
 
             if valid_date_cols:
                 print(f"  📅 自动识别日期列: {valid_date_cols}")
-                return pd.read_csv(file_path, delimiter=delimiter, encoding=encoding,
-                                   parse_dates=valid_date_cols, **kwargs)
-            else:
-                return pd.read_csv(file_path, delimiter=delimiter, encoding=encoding, **kwargs)
-
+                for col in valid_date_cols:
+                    try:
+                        df[col] = pd.to_datetime(df[col], errors='coerce')
+                    except:
+                        pass
         except Exception as e:
-            print(f"  ⚠️ 日期解析失败: {e}，尝试不解析日期加载")
-            return pd.read_csv(file_path, delimiter=delimiter, encoding=encoding, **kwargs)
+            print(f"  ⚠️ 日期解析失败: {e}")
+
+        return df
+
+    @staticmethod
+    def load_json_string(json_str, parse_dates=True, date_columns=None, **kwargs):
+        """从JSON字符串加载数据（增强健壮性）"""
+        print("📄 从JSON字符串加载数据...")
+
+        # 清理控制字符
+        json_str = re.sub(r'[\x00-\x1f\x7f]', '', json_str)
+
+        try:
+            data = json.loads(json_str)
+        except json.JSONDecodeError as e:
+            # 尝试修复常见问题
+            try:
+                # 替换单引号为双引号
+                json_str = json_str.replace("'", '"')
+                data = json.loads(json_str)
+            except:
+                raise ValueError(f"JSON字符串解析失败: {e}")
+
+        df = pd.DataFrame(data)
+
+        # 清理列名
+        df.columns = [str(col).strip().replace('\n', '_').replace('\r', '_').replace('\t', '_') for col in df.columns]
+
+        # 处理空字符串为NaN
+        df = df.replace(r'^\s*$', np.nan, regex=True)
+
+        if parse_dates:
+            if date_columns is None:
+                date_columns = DataLoader.DEFAULT_DATE_COLUMNS
+            elif isinstance(date_columns, str):
+                date_columns = [date_columns]
+
+            for col in date_columns:
+                if col in df.columns:
+                    try:
+                        df[col] = pd.to_datetime(df[col], errors='coerce')
+                        print(f"  📅 转换日期列: {col}")
+                    except:
+                        pass
+
+        return df
 
     @staticmethod
     def load_sql_server(server, database, table_name=None, query=None,
@@ -597,8 +767,9 @@ class DataLoader:
 
     @staticmethod
     def load_from_file(file_path, parse_dates=True, date_columns=None, **kwargs):
-        """根据文件扩展名自动加载数据"""
+        """根据文件扩展名自动加载数据（增强健壮性）"""
         ext = os.path.splitext(file_path)[1].lower()
+        print(f"  📂 文件扩展名: {ext}")
 
         if ext == '.csv':
             return DataLoader.load_csv(file_path, parse_dates=parse_dates, date_columns=date_columns, **kwargs)

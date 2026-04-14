@@ -34,12 +34,26 @@ class MultiTableStatisticalAnalyzer:
         - relationships: 用户定义的表间关系（可选）
         - date_features_level: 日期派生列级别
         """
+        # 验证输入
+        if not tables:
+            raise ValueError("tables 不能为空")
+
         for name, data in tables.items():
+            if data is None:
+                raise ValueError(f"表 {name} 的数据为 None")
             if not isinstance(data, pd.DataFrame):
                 raise ValueError(f"表 {name} 的数据必须是 DataFrame，请先使用 DataLoader 加载")
+            if data.empty:
+                print(f"⚠️ 警告: 表 {name} 为空，将被忽略")
+                continue
+
+        # 过滤空表
+        self.tables = {name: df for name, df in tables.items() if df is not None and not df.empty}
+
+        if not self.tables:
+            raise ValueError("没有有效的表数据")
 
         self.date_features_level = date_features_level
-        self.tables = tables
         self.table_names = list(self.tables.keys())
         self.relationships = relationships or {}
 
@@ -60,7 +74,10 @@ class MultiTableStatisticalAnalyzer:
         self._print_discovered_relationships()
 
         self.relationship_graph = self._build_relationship_graph()
-        self.connected_components = list(nx.connected_components(self.relationship_graph.to_undirected()))
+        if len(self.relationship_graph.nodes) > 0:
+            self.connected_components = list(nx.connected_components(self.relationship_graph.to_undirected()))
+        else:
+            self.connected_components = []
         self.table_groups = self._identify_table_groups()
 
         print("\n✅ 初始化完成，发现 {} 个关联表组，{} 个独立表".format(
@@ -79,8 +96,11 @@ class MultiTableStatisticalAnalyzer:
             print(f"  加载表 {name}: {file_path}")
             try:
                 df = DataLoader.load_from_file(file_path, **kwargs)
-                tables[name] = df
-                print(f"    ✅ 成功: {len(df)}行 x {len(df.columns)}列")
+                if df is not None and not df.empty:
+                    tables[name] = df
+                    print(f"    ✅ 成功: {len(df)}行 x {len(df.columns)}列")
+                else:
+                    print(f"    ⚠️ 文件为空: {file_path}")
             except Exception as e:
                 print(f"    ❌ 失败: {e}")
 
@@ -101,8 +121,11 @@ class MultiTableStatisticalAnalyzer:
             print(f"  加载表 {name}")
             try:
                 df = DataLoader.load_json_string(json_str, parse_dates=parse_dates, date_columns=date_columns, **kwargs)
-                tables[name] = df
-                print(f"    ✅ 成功: {len(df)}行 x {len(df.columns)}列")
+                if df is not None and not df.empty:
+                    tables[name] = df
+                    print(f"    ✅ 成功: {len(df)}行 x {len(df.columns)}列")
+                else:
+                    print(f"    ⚠️ JSON为空")
             except Exception as e:
                 print(f"    ❌ 失败: {e}")
 
@@ -319,7 +342,7 @@ class MultiTableStatisticalAnalyzer:
         for fk in self.all_relationships.get('foreign_keys', []):
             from_table = fk.get('from_table')
             to_table = fk.get('to_table')
-            if from_table and to_table:
+            if from_table and to_table and from_table in self.table_names and to_table in self.table_names:
                 G.add_edge(from_table, to_table,
                            from_col=fk.get('from_col'),
                            to_col=fk.get('to_col'),
@@ -331,18 +354,19 @@ class MultiTableStatisticalAnalyzer:
         """识别表组（关联表组和独立表）"""
         groups = []
 
-        for component in self.connected_components:
-            if len(component) > 1:
-                group = {
-                    'type': 'related',
-                    'tables': list(component),
-                    'relationships': []
-                }
-                for fk in self.all_relationships.get('foreign_keys', []):
-                    if (fk.get('from_table') in component and
-                            fk.get('to_table') in component):
-                        group['relationships'].append(fk)
-                groups.append(group)
+        if self.connected_components:
+            for component in self.connected_components:
+                if len(component) > 1:
+                    group = {
+                        'type': 'related',
+                        'tables': list(component),
+                        'relationships': []
+                    }
+                    for fk in self.all_relationships.get('foreign_keys', []):
+                        if (fk.get('from_table') in component and
+                                fk.get('to_table') in component):
+                            group['relationships'].append(fk)
+                    groups.append(group)
 
         all_related_tables = set()
         for group in groups:
@@ -464,8 +488,15 @@ class MultiTableStatisticalAnalyzer:
 
     def _plot_relationship_graph(self):
         """绘制表间关系图"""
+        if len(self.relationship_graph.nodes) == 0:
+            print("  无节点，跳过关系图绘制")
+            return
+
         plt.figure(figsize=(12, 8))
-        pos = nx.spring_layout(self.relationship_graph, k=2, iterations=50)
+        try:
+            pos = nx.spring_layout(self.relationship_graph, k=2, iterations=50)
+        except:
+            pos = nx.random_layout(self.relationship_graph)
 
         edges = self.relationship_graph.edges(data=True)
         edge_colors = []

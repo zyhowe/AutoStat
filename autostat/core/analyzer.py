@@ -7,6 +7,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import io
 import base64
+import os
 from typing import Dict, Optional, List
 
 from autostat.loader import DataLoader
@@ -34,10 +35,21 @@ class AutoStatisticalAnalyzer:
                  predefined_types=None, auto_clean=False, quiet=False,
                  parse_dates=True, date_columns=None, date_features_level="basic"):
         """初始化分析器"""
+        # 处理空数据
+        if data is None:
+            raise ValueError("data 参数不能为 None")
+
         if isinstance(data, str):
             print(f"📁 加载文件: {data}")
-            self.raw_data = DataLoader.load_from_file(data, parse_dates=parse_dates, date_columns=date_columns).copy()
+            if not os.path.exists(data):
+                raise FileNotFoundError(f"文件不存在: {data}")
+            try:
+                self.raw_data = DataLoader.load_from_file(data, parse_dates=parse_dates, date_columns=date_columns).copy()
+            except Exception as e:
+                raise ValueError(f"文件加载失败: {e}")
         elif isinstance(data, pd.DataFrame):
+            if data.empty:
+                raise ValueError("DataFrame 不能为空")
             self.raw_data = data.copy()
         else:
             raise ValueError("data 参数必须是 DataFrame 或文件路径字符串")
@@ -239,15 +251,26 @@ class AutoStatisticalAnalyzer:
 
     def get_plot_base64(self, plot_type, col=None, **kwargs):
         """获取指定图表的base64编码"""
+        if col is None or col not in self.data.columns:
+            return None
+
         buf = io.BytesIO()
 
         try:
             if plot_type == 'categorical' and col:
-                plot_categorical(self.data[col].dropna(), col, buf)
+                series = self.data[col].dropna()
+                if len(series) > 0:
+                    plot_categorical(series, col, buf)
+                else:
+                    return None
             elif plot_type == 'continuous' and col:
-                plot_continuous(self.data[col].dropna(), col, buf)
+                series = self.data[col].dropna()
+                if len(series) > 0:
+                    plot_continuous(series, col, buf)
+                else:
+                    return None
             elif plot_type == 'timeseries' and col:
-                date_cols = [c for c, typ in self.variable_types.items() if typ == 'datetime']
+                date_cols = [c for c, typ in self.variable_types.items() if typ == 'datetime' and c in self.data.columns]
                 if date_cols:
                     date_col = date_cols[0]
                     ts_data = self.data.groupby(date_col)[col].mean().reset_index()
@@ -256,9 +279,14 @@ class AutoStatisticalAnalyzer:
                         ts_data = ts_data.set_index(date_col)
                         series = ts_data[col]
                         plot_timeseries(series, col, buf)
+                    else:
+                        return None
             elif plot_type == 'correlation':
-                numeric_vars = [c for c, typ in self.variable_types.items() if typ == 'continuous']
-                plot_correlation(self.data, numeric_vars, buf)
+                numeric_vars = [c for c, typ in self.variable_types.items() if typ == 'continuous' and c in self.data.columns]
+                if len(numeric_vars) >= 2:
+                    plot_correlation(self.data, numeric_vars, buf)
+                else:
+                    return None
             else:
                 return None
 
@@ -273,7 +301,7 @@ class AutoStatisticalAnalyzer:
 
     def get_numeric_correlation_base64(self):
         """获取数值变量相关性热力图base64"""
-        numeric_vars = [col for col, typ in self.variable_types.items() if typ == 'continuous']
+        numeric_vars = [col for col, typ in self.variable_types.items() if typ == 'continuous' and col in self.data.columns]
         if len(numeric_vars) < 2:
             return None
 
@@ -287,7 +315,7 @@ class AutoStatisticalAnalyzer:
     def get_categorical_correlation_base64(self):
         """获取分类变量关联热力图base64"""
         categorical_vars = [col for col, typ in self.variable_types.items()
-                            if typ in ['categorical', 'categorical_numeric', 'ordinal']]
+                            if typ in ['categorical', 'categorical_numeric', 'ordinal'] and col in self.data.columns]
         if len(categorical_vars) < 2:
             return None
 
@@ -300,9 +328,9 @@ class AutoStatisticalAnalyzer:
 
     def get_numeric_categorical_eta_base64(self):
         """获取数值-分类变量关联热力图base64"""
-        numeric_vars = [col for col, typ in self.variable_types.items() if typ == 'continuous']
+        numeric_vars = [col for col, typ in self.variable_types.items() if typ == 'continuous' and col in self.data.columns]
         categorical_vars = [col for col, typ in self.variable_types.items()
-                            if typ in ['categorical', 'categorical_numeric', 'ordinal']]
+                            if typ in ['categorical', 'categorical_numeric', 'ordinal'] and col in self.data.columns]
         if not numeric_vars or not categorical_vars:
             return None
 
@@ -317,6 +345,8 @@ class AutoStatisticalAnalyzer:
 
     def _get_high_correlations(self, numeric_vars, threshold=0.7):
         """获取强相关对 - 调用 BaseAnalyzer 静态方法"""
+        if not numeric_vars:
+            return []
         return BaseAnalyzer.get_high_correlations(self.data, numeric_vars, threshold)
 
     def _get_skewed_vars(self, threshold=2):
@@ -401,7 +431,11 @@ class AutoStatisticalAnalyzer:
                         pct = count / summary['n'] * 100
                         print(f"  {val}: {count} ({pct:.1f}%)")
 
-                plot_categorical(self.data[col].dropna(), col)
+                try:
+                    plot_categorical(self.data[col].dropna(), col)
+                except Exception as e:
+                    if not self.quiet:
+                        print(f"  ⚠️ 图表生成失败: {e}")
 
             elif var_type == 'continuous':
                 print(f"均值 ± 标准差: {summary['mean']:.2f} ± {summary['std']:.2f}")
@@ -417,7 +451,11 @@ class AutoStatisticalAnalyzer:
                 else:
                     print(f"推荐描述: {summary['median']:.2f} [{summary['q1']:.2f}, {summary['q3']:.2f}]")
 
-                plot_continuous(self.data[col].dropna(), col)
+                try:
+                    plot_continuous(self.data[col].dropna(), col)
+                except Exception as e:
+                    if not self.quiet:
+                        print(f"  ⚠️ 图表生成失败: {e}")
 
     def generate_full_report(self, show_outlier_details=False):
         """生成完整报告"""
@@ -446,8 +484,12 @@ class AutoStatisticalAnalyzer:
         self.auto_analyze_relationships()
         self.recommend_scenarios()
 
-        plt.show(block=False)
-        plt.pause(0.5)
+        try:
+            plt.show(block=False)
+            plt.pause(0.5)
+        except Exception as e:
+            if not self.quiet:
+                print(f"⚠️ 图表显示失败: {e}")
 
     def to_json(self, output_file=None, indent=2, ensure_ascii=False):
         import json
@@ -521,7 +563,9 @@ class AutoStatisticalAnalyzer:
 
         correlation_matrix = None
         if len(numeric_vars) >= 2:
-            correlation_matrix = self.data[numeric_vars].corr().round(4).to_dict()
+            valid_numeric = [col for col in numeric_vars if col in self.data.columns and self.data[col].notna().any()]
+            if len(valid_numeric) >= 2:
+                correlation_matrix = self.data[valid_numeric].corr().round(4).to_dict()
 
         high_correlations = self._get_high_correlations(numeric_vars, threshold=0.7) if numeric_vars else []
         skewed_vars = self._get_skewed_vars(threshold=2)
@@ -537,11 +581,12 @@ class AutoStatisticalAnalyzer:
         normal_numeric = []
         nonnormal_numeric = []
         for col in numeric_vars:
-            is_normal, _, _ = self._check_normality(self.data[col].dropna())
-            if is_normal:
-                normal_numeric.append(col)
-            else:
-                nonnormal_numeric.append(col)
+            if col in self.data.columns:
+                is_normal, _, _ = self._check_normality(self.data[col].dropna())
+                if is_normal:
+                    normal_numeric.append(col)
+                else:
+                    nonnormal_numeric.append(col)
 
         model_recommendations = self.recommendation_analyzer._get_model_recommendations(
             numeric_vars, categorical_vars, date_cols
