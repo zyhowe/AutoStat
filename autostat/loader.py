@@ -32,6 +32,23 @@ class DataLoader:
     # 需要剔除的MAX类型（长度=-1表示MAX）
     MAX_TYPES = ['varchar', 'nvarchar', 'varbinary']
 
+    # 需要剔除的字段名（关键词匹配，不区分大小写）- MCP模式自动排除
+    EXCLUDE_COLUMN_KEYWORDS = [
+        'tmstamp', 'entrydt', 'transferdt', 'entrydate', 'entrytime',
+        'examine', 'isdel', 'synchronize', 'isdelete', 'deleted',
+        'createuser', 'updateuser', 'createip', 'updateip',
+        'temp', 'tmp', 'bak', 'backup', 'sys', 'system'
+    ]
+
+    @staticmethod
+    def _should_exclude_column(col_name: str) -> bool:
+        """判断是否应该排除该字段（MCP模式自动排除）"""
+        col_lower = col_name.lower()
+        for keyword in DataLoader.EXCLUDE_COLUMN_KEYWORDS:
+            if keyword.lower() == col_lower or keyword.lower() in col_lower:
+                return True
+        return False
+
     @staticmethod
     def load_csv(file_path, encoding='utf-8-sig', parse_dates=True, date_columns=None, **kwargs):
         """加载CSV文件（增强健壮性）"""
@@ -477,6 +494,7 @@ class DataLoader:
         2. MAX类型（varchar(max)/nvarchar(max)/varbinary(max)）直接剔除
         3. 普通文本字段（varchar/nvarchar）长度 > max_text_length 的剔除
         4. 用户指定的排除列剔除
+        5. 排除特定关键词的字段（MCP模式自动排除）
         """
         try:
             schema_query = f"""
@@ -505,6 +523,7 @@ class DataLoader:
             removed_max_fields = []
             removed_long_text = []
             removed_by_user = []
+            removed_by_keyword = []
 
             for _, row in schema_df.iterrows():
                 col_name = row['column_name']
@@ -516,7 +535,12 @@ class DataLoader:
                     removed_by_user.append(col_name)
                     continue
 
-                # 2. 大字段类型直接剔除（text/ntext/image/xml等）
+                # 2. 关键词排除（MCP模式自动排除）
+                if DataLoader._should_exclude_column(col_name):
+                    removed_by_keyword.append(col_name)
+                    continue
+
+                # 3. 大字段类型直接剔除（text/ntext/image/xml等）
                 is_large_field = False
                 for large_type in DataLoader.LARGE_FIELD_TYPES:
                     if data_type == large_type or large_type in data_type:
@@ -527,7 +551,7 @@ class DataLoader:
                     removed_large_fields.append(f"{col_name}({data_type})")
                     continue
 
-                # 3. MAX类型剔除（varchar(max)/nvarchar(max)/varbinary(max)）
+                # 4. MAX类型剔除（varchar(max)/nvarchar(max)/varbinary(max)）
                 is_max_type = False
                 for max_type in DataLoader.MAX_TYPES:
                     if data_type == max_type and max_len == -1:
@@ -538,7 +562,7 @@ class DataLoader:
                     removed_max_fields.append(f"{col_name}({data_type},MAX)")
                     continue
 
-                # 4. 普通文本字段长度检查
+                # 5. 普通文本字段长度检查
                 if data_type in ['varchar', 'nvarchar', 'char', 'nchar']:
                     if max_len > max_text_length:
                         removed_long_text.append(f"{col_name}({data_type},{max_len})")
@@ -548,6 +572,11 @@ class DataLoader:
                 keep_columns.append(col_name)
 
             # 打印过滤日志
+            if removed_by_keyword:
+                print(f"    🗑️ 剔除关键词匹配字段: {', '.join(removed_by_keyword[:10])}")
+                if len(removed_by_keyword) > 10:
+                    print(f"       ... 还有{len(removed_by_keyword) - 10}个")
+
             if removed_large_fields:
                 print(f"    🗑️ 剔除大字段: {', '.join(removed_large_fields[:5])}")
                 if len(removed_large_fields) > 5:
@@ -594,6 +623,7 @@ class DataLoader:
 
         print(f"\n📂 批量加载 {len(table_dict)} 个表...")
         print(f"   文本字段最大保留长度: {max_text_length}")
+        print(f"   关键词过滤: {', '.join(DataLoader.EXCLUDE_COLUMN_KEYWORDS[:10])}")
         print(f"{'─' * 50}")
 
         if relationships:

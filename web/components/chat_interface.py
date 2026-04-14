@@ -459,7 +459,7 @@ def render_chat_interface():
         cols = st.columns(min(len(recommended_qs), 3))
         for i, q in enumerate(recommended_qs):
             col_idx = i % 3
-            if cols[col_idx].button(q, key=f"rec_q_{i}", use_container_width=True):
+            if cols[col_idx].button(q, key=f"rec_q_{i}", width="stretch"):
                 send_message(q)
                 st.rerun()
 

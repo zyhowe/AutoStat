@@ -25,7 +25,7 @@ class MultiTableStatisticalAnalyzer:
     """多表智能统计分析器 - 自动识别表间关系并整合分析"""
 
     def __init__(self, tables: Dict[str, pd.DataFrame], relationships: Optional[Dict] = None,
-                 date_features_level: str = "basic"):
+                 date_features_level: str = "basic", predefined_types: Dict[str, Dict[str, str]] = None):
         """
         初始化多表分析器
 
@@ -33,6 +33,7 @@ class MultiTableStatisticalAnalyzer:
         - tables: 表名字典，值必须是 DataFrame
         - relationships: 用户定义的表间关系（可选）
         - date_features_level: 日期派生列级别
+        - predefined_types: 每个表的预定义类型 {表名: {列名: 类型}}
         """
         # 验证输入
         if not tables:
@@ -56,6 +57,7 @@ class MultiTableStatisticalAnalyzer:
         self.date_features_level = date_features_level
         self.table_names = list(self.tables.keys())
         self.relationships = relationships or {}
+        self.predefined_types = predefined_types or {}  # 新增
 
         self.table_variable_types = {}
         self.table_quality_reports = {}
@@ -141,12 +143,19 @@ class MultiTableStatisticalAnalyzer:
                 print(f"\n【分析表: {table_name}】")
                 print(f"{'─' * 50}")
 
+            # 获取该表的预定义类型
+            table_predefined_types = self.predefined_types.get(table_name, None)
+            # Web模式：如果有预定义类型，跳过自动识别
+            skip_auto = table_predefined_types is not None
+
             analyzer = AutoStatisticalAnalyzer(
                 df,
                 source_table_name=table_name,
                 auto_clean=False,
                 quiet=quiet,
-                date_features_level=self.date_features_level
+                date_features_level=self.date_features_level,
+                predefined_types=table_predefined_types,
+                skip_auto_inference=skip_auto
             )
 
             if not quiet:

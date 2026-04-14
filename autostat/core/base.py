@@ -462,10 +462,39 @@ class BaseAnalyzer:
                 'max': data.max()
             })
         elif var_type == 'datetime':
+            # 确保数据是 datetime 类型
+            try:
+                # 尝试转换为 datetime
+                dt_data = pd.to_datetime(data, errors='coerce')
+                dt_data = dt_data.dropna()
+                if len(dt_data) > 0:
+                    min_date = dt_data.min()
+                    max_date = dt_data.max()
+                    date_range = max_date - min_date
+                    summary.update({
+                        'min_date': min_date,
+                        'max_date': max_date,
+                        'date_range': date_range,
+                        'n_unique': dt_data.nunique()
+                    })
+                else:
+                    summary.update({
+                        'min_date': None,
+                        'max_date': None,
+                        'date_range': None,
+                        'n_unique': data.nunique()
+                    })
+            except Exception as e:
+                # 转换失败，当作分类变量处理
+                summary.update({
+                    'min_date': None,
+                    'max_date': None,
+                    'date_range': None,
+                    'n_unique': data.nunique()
+                })
+        else:
+            # 其他类型，至少添加 n_unique
             summary.update({
-                'min_date': data.min(),
-                'max_date': data.max(),
-                'date_range': data.max() - data.min(),
                 'n_unique': data.nunique()
             })
 

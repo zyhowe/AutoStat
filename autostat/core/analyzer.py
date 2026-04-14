@@ -33,8 +33,23 @@ class AutoStatisticalAnalyzer:
 
     def __init__(self, data, target_col=None, source_table_name=None,
                  predefined_types=None, auto_clean=False, quiet=False,
-                 parse_dates=True, date_columns=None, date_features_level="basic"):
-        """初始化分析器"""
+                 parse_dates=True, date_columns=None, date_features_level="basic",
+                 skip_auto_inference=False):
+        """
+        初始化分析器
+
+        参数:
+        - data: DataFrame 或文件路径
+        - target_col: 目标列名
+        - source_table_name: 源表名
+        - predefined_types: 预定义的变量类型字典 {col: type}
+        - auto_clean: 是否自动清洗
+        - quiet: 静默模式
+        - parse_dates: 是否解析日期
+        - date_columns: 日期列名列表
+        - date_features_level: 日期特征级别
+        - skip_auto_inference: 是否跳过自动类型识别（Web模式使用）
+        """
         # 处理空数据
         if data is None:
             raise ValueError("data 参数不能为 None")
@@ -76,6 +91,7 @@ class AutoStatisticalAnalyzer:
             print("🔍 启动智能分析流程")
             print("=" * 70)
 
+        # 阶段1：快速初筛（总是执行，只做数据清洗）
         if not quiet:
             print("\n【阶段1】快速初筛...")
         base = BaseAnalyzer(self.data, quiet=quiet)
@@ -84,19 +100,35 @@ class AutoStatisticalAnalyzer:
         if not quiet:
             print("  ✅ 完成")
 
+        # 阶段2：类型识别（根据参数决定）
         if not quiet:
-            print("\n【阶段2】首次类型识别...")
-        if predefined_types:
-            self.variable_types = predefined_types
-            self.type_reasons = {col: f'从源表 {source_table_name} 继承' for col in predefined_types.keys()}
+            print("\n【阶段2】类型识别...")
+
+        if predefined_types and skip_auto_inference:
+            # Web模式：直接使用用户定义的类型
+            self.variable_types = predefined_types.copy()
+            self.type_reasons = {col: '用户定义' for col in predefined_types.keys()}
+            # 过滤掉标记为排除的字段
+            excluded_cols = [col for col, typ in predefined_types.items() if typ == 'exclude']
+            if excluded_cols:
+                self.data = self.data.drop(columns=excluded_cols, errors='ignore')
+                if not quiet:
+                    print(f"  🗑️ 已排除字段: {excluded_cols}")
+            if not quiet:
+                print("  ✅ 使用用户定义类型")
         else:
+            # MCP/CLI模式：自动识别
             base.variable_types = self.variable_types
             base.type_reasons = self.type_reasons
             base._infer_variable_types()
             self.variable_types = base.variable_types
             self.type_reasons = base.type_reasons
-        if not quiet:
-            print("  ✅ 基础字段识别完成")
+            # 如果有部分预定义，覆盖
+            if predefined_types:
+                self.variable_types.update(predefined_types)
+                self.type_reasons.update({col: '用户定义' for col in predefined_types.keys()})
+            if not quiet:
+                print("  ✅ 自动类型识别完成")
 
         if not quiet:
             print("\n【阶段3】日期特征提取...")
@@ -104,7 +136,8 @@ class AutoStatisticalAnalyzer:
         if not quiet:
             print("  ✅ 完成")
 
-        if self._has_new_date_features():
+        # 阶段4：二次类型识别（仅当自动模式且新加了日期特征时）
+        if not (predefined_types and skip_auto_inference) and self._has_new_date_features():
             if not quiet:
                 print("\n【阶段4】二次类型识别...")
             base.variable_types = self.variable_types
@@ -407,29 +440,44 @@ class AutoStatisticalAnalyzer:
             print(f"样本量: {summary['n']} (缺失: {summary['n_missing']}, {summary['missing_pct']:.1f}%)")
 
             if var_type == 'identifier':
-                print(f"唯一值数: {summary['n_unique']}")
-                print(f"范围: [{summary['min']}, {summary['max']}]")
+                n_unique = summary.get('n_unique', 'N/A')
+                min_val = summary.get('min', 'N/A')
+                max_val = summary.get('max', 'N/A')
+                print(f"唯一值数: {n_unique}")
+                print(f"范围: [{min_val}, {max_val}]")
                 print(f"⚠️ 标识符列，统计指标无实际意义")
 
             elif var_type == 'datetime':
-                print(f"日期范围: {summary['min_date']} 到 {summary['max_date']}")
-                print(f"时间跨度: {summary['date_range']}")
-                print(f"唯一日期数: {summary['n_unique']}")
+                min_date = summary.get('min_date', 'N/A')
+                max_date = summary.get('max_date', 'N/A')
+                date_range = summary.get('date_range', 'N/A')
+                n_unique = summary.get('n_unique', 'N/A')
+                print(f"日期范围: {min_date} 到 {max_date}")
+                print(f"时间跨度: {date_range}")
+                print(f"唯一日期数: {n_unique}")
 
             elif var_type in ['categorical', 'categorical_numeric', 'ordinal']:
-                print(f"类别数: {summary['n_unique']}")
-                print(f"众数: {summary['mode']} (频数: {summary['mode_freq']}, {summary['mode_pct']:.1f}%)")
+                n_unique = summary.get('n_unique', 'N/A')
+                mode_val = summary.get('mode', 'N/A')
+                mode_freq = summary.get('mode_freq', 0)
+                mode_pct = summary.get('mode_pct', 0)
+                print(f"类别数: {n_unique}")
+                print(f"众数: {mode_val} (频数: {mode_freq}, {mode_pct:.1f}%)")
 
-                if summary['n_unique'] <= 10:
+                if isinstance(n_unique, int) and n_unique <= 10:
                     print("\n类别分布:")
-                    for val, count in summary['value_counts'].head().items():
-                        pct = count / summary['n'] * 100
-                        print(f"  {val}: {count} ({pct:.1f}%)")
-                else:
+                    value_counts = summary.get('value_counts', {})
+                    for val, count in list(value_counts.items())[:5]:
+                        if isinstance(val, (int, float)):
+                            pct = count / summary['n'] * 100 if summary['n'] > 0 else 0
+                            print(f"  {val}: {count} ({pct:.1f}%)")
+                elif isinstance(n_unique, int) and n_unique > 10:
                     print("\n(前5个类别)")
-                    for val, count in summary['value_counts'].head().items():
-                        pct = count / summary['n'] * 100
-                        print(f"  {val}: {count} ({pct:.1f}%)")
+                    value_counts = summary.get('value_counts', {})
+                    for val, count in list(value_counts.items())[:5]:
+                        if isinstance(val, (int, float)):
+                            pct = count / summary['n'] * 100 if summary['n'] > 0 else 0
+                            print(f"  {val}: {count} ({pct:.1f}%)")
 
                 try:
                     plot_categorical(self.data[col].dropna(), col)
@@ -438,24 +486,40 @@ class AutoStatisticalAnalyzer:
                         print(f"  ⚠️ 图表生成失败: {e}")
 
             elif var_type == 'continuous':
-                print(f"均值 ± 标准差: {summary['mean']:.2f} ± {summary['std']:.2f}")
-                print(f"中位数 [Q1, Q3]: {summary['median']:.2f} [{summary['q1']:.2f}, {summary['q3']:.2f}]")
-                print(f"范围: [{summary['min']:.2f}, {summary['max']:.2f}]")
-                print(f"偏度: {summary['skew']:.2f}, 峰度: {summary['kurtosis']:.2f}")
+                mean_val = summary.get('mean', 0)
+                std_val = summary.get('std', 0)
+                median_val = summary.get('median', 0)
+                q1_val = summary.get('q1', 0)
+                q3_val = summary.get('q3', 0)
+                min_val = summary.get('min', 0)
+                max_val = summary.get('max', 0)
+                skew_val = summary.get('skew', 0)
+                kurtosis_val = summary.get('kurtosis', 0)
+                is_normal = summary.get('is_normal', False)
+                normality_p = summary.get('normality_p', 1.0)
 
-                norm_status = "✅ 正态分布" if summary['is_normal'] else "⚠️ 非正态分布"
-                print(f"正态性: {norm_status} (p={summary['normality_p']:.4f})")
+                print(f"均值 ± 标准差: {mean_val:.2f} ± {std_val:.2f}")
+                print(f"中位数 [Q1, Q3]: {median_val:.2f} [{q1_val:.2f}, {q3_val:.2f}]")
+                print(f"范围: [{min_val:.2f}, {max_val:.2f}]")
+                print(f"偏度: {skew_val:.2f}, 峰度: {kurtosis_val:.2f}")
 
-                if summary['is_normal']:
-                    print(f"推荐描述: {summary['mean']:.2f} ± {summary['std']:.2f}")
+                norm_status = "✅ 正态分布" if is_normal else "⚠️ 非正态分布"
+                print(f"正态性: {norm_status} (p={normality_p:.4f})")
+
+                if is_normal:
+                    print(f"推荐描述: {mean_val:.2f} ± {std_val:.2f}")
                 else:
-                    print(f"推荐描述: {summary['median']:.2f} [{summary['q1']:.2f}, {summary['q3']:.2f}]")
+                    print(f"推荐描述: {median_val:.2f} [{q1_val:.2f}, {q3_val:.2f}]")
 
                 try:
                     plot_continuous(self.data[col].dropna(), col)
                 except Exception as e:
                     if not self.quiet:
                         print(f"  ⚠️ 图表生成失败: {e}")
+
+            else:
+                n_unique = summary.get('n_unique', 'N/A')
+                print(f"唯一值数: {n_unique}")
 
     def generate_full_report(self, show_outlier_details=False):
         """生成完整报告"""

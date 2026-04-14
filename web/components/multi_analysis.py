@@ -15,6 +15,7 @@ from autostat.loader import DataLoader
 from autostat.reporter import Reporter
 from web.components.chat_interface import render_chat_interface
 from web.utils.helpers import capture_and_run, get_raw_data_preview
+from web.utils.data_preprocessor import render_multi_preprocessing_interface
 
 
 def multi_file_mode():
@@ -24,40 +25,44 @@ def multi_file_mode():
     # 注意事项提示
     with st.expander("ℹ️ 使用说明与注意事项", expanded=False):
         st.markdown("""
-        **适用场景：**
-        - 多个相关表需要联合分析（如订单表、用户表、产品表）
-        - 需要发现表间关联关系
+            **适用场景：**
+            - 多个相关表需要联合分析（如订单表、用户表、产品表）
+            - 需要发现表间关联关系
 
-        **文件要求：**
-        - 至少上传 2 个文件
-        - 支持格式：CSV、Excel、JSON、TXT
-        - 建议表名使用英文或拼音（用于关系识别）
+            **文件要求：**
+            - 至少上传 2 个文件
+            - 支持格式：CSV、Excel、JSON、TXT
+            - 建议表名使用英文或拼音（用于关系识别）
 
-        **限制建议：**
-        - 表数量：建议 < 10 个
-        - 每个表行数：建议 < 5万行
-        - 每个表列数：建议 < 100列
-        - 总数据量：建议 < 50万行
-        - 文件大小：每个文件建议 < 50MB
+            **限制建议：**
+            - 表数量：建议 < 10 个
+            - 每个表行数：建议 < 5万行
+            - 每个表列数：建议 < 100列
+            - 总数据量：建议 < 50万行
+            - 文件大小：每个文件建议 < 50MB
 
-        **关联关系识别：**
-        - 自动发现：通过相同列名自动识别表间关系
-        - 手动定义：可在下方文本框中定义关系
-          - 格式：`表A.列名 = 表B.列名`
-          - 示例：`orders.user_id = users.user_id`
+            **关联关系识别：**
+            - 自动发现：通过相同列名自动识别表间关系
+            - 手动定义：可在下方"表间关系管理"中定义关系
+              - 格式：`源表.源列 → 目标表.目标列`
 
-        **分析内容：**
-        - 各表独立分析（变量类型、数据质量）
-        - 自动发现表间关联关系
-        - 合并关联表进行综合分析
-        - 生成多表关联报告
+            **分析内容：**
+            - 各表独立分析（变量类型、数据质量）
+            - 自动发现表间关联关系
+            - 合并关联表进行综合分析
+            - 生成多表关联报告
 
-        **注意事项：**
-        - 表间关联键建议命名为相同名称（如 user_id）
-        - 大表建议先采样或限制加载行数
-        - 主表（数据量最大的表）将作为分析基准
-        - 合并后的表可能很大，请注意内存使用
-        """)
+            **预处理功能：**
+            - 可以为每个表勾选要保留的字段
+            - 可以调整每个字段的变量类型
+            - 可以添加/删除/修改表间关系
+
+            **注意事项：**
+            - 表间关联键建议命名为相同名称（如 user_id）
+            - 大表建议先采样或限制加载行数
+            - 主表（数据量最大的表）将作为分析基准
+            - 合并后的表可能很大，请注意内存使用
+            """)
 
     files = st.file_uploader(
         "选择多个数据文件", type=['csv', 'xlsx', 'xls', 'json', 'txt'],
@@ -68,7 +73,7 @@ def multi_file_mode():
     if files and len(files) >= 2:
         # 表数量检查
         if len(files) > 10:
-            st.warning(f"⚠️ 表数量 {len(files)} 超过建议限制 10个，分析可能较慢，建议减少表数量。")
+            st.warning(f"⚠️ 表数量 {len(files)} 超过建议限制 10个，分析可能较慢。")
         elif len(files) > 5:
             st.info(f"📊 表数量 {len(files)}，分析可能需要一些时间。")
 
@@ -76,21 +81,16 @@ def multi_file_mode():
 
         # 显示文件列表和预估大小
         info = []
-        total_rows_estimate = 0
         total_size_mb = 0
         for f in files:
             size_mb = len(f.getvalue()) / (1024 * 1024)
             total_size_mb += size_mb
-            # 粗略估算行数（CSV每行约1KB）
-            est_rows = int(size_mb * 1000) if size_mb > 0 else 0
-            total_rows_estimate += est_rows
             info.append({
                 "文件名": f.name,
-                "大小": f"{size_mb:.1f} KB" if size_mb < 1 else f"{size_mb:.1f} MB",
-                "估算行数": f"~{est_rows:,}" if est_rows > 0 else "未知"
+                "大小": f"{size_mb:.1f} KB" if size_mb < 1 else f"{size_mb:.1f} MB"
             })
 
-        st.dataframe(pd.DataFrame(info), use_container_width=True)
+        st.dataframe(pd.DataFrame(info), width="stretch")
 
         # 总量警告
         if total_size_mb > 200:
@@ -98,137 +98,114 @@ def multi_file_mode():
         elif total_size_mb > 100:
             st.info(f"📊 总文件大小 {total_size_mb:.1f}MB，分析可能需要一些时间。")
 
-        if total_rows_estimate > 500000:
-            st.warning(f"⚠️ 估算总行数约 {total_rows_estimate:,} 行，超过建议限制 50万行，分析可能较慢或内存不足。")
-
         # 单个文件大小警告
-        large_files = [f for f in files if len(f.getvalue()) > 50 * 1024 * 1024]  # 50MB
+        large_files = [f for f in files if len(f.getvalue()) > 50 * 1024 * 1024]
         if large_files:
             st.warning(f"⚠️ 以下文件较大（>50MB），加载可能较慢：{', '.join([f.name for f in large_files])}")
 
-        with st.expander("🔗 手动定义表间关系（可选）"):
-            st.caption("如果不定义，系统将尝试通过相同列名自动发现关系")
-            rel_text = st.text_area(
-                "关系定义（每行一个）",
-                placeholder="orders.user_id = users.user_id\norders.product_id = products.product_id",
-                key="multi_rel",
-                height=100,
-                help="格式: 表名.列名 = 表名.列名"
-            )
-            relationships = parse_relationships(rel_text)
-            if relationships:
-                st.success(f"已定义 {len(relationships)} 个关系")
+        # 加载表
+        preprocess_key = "multi_preprocess"
 
-        if st.button("🚀 开始分析", type="primary", key="multi_start"):
-            # 进度条
-            status_placeholder = st.empty()
-            progress_bar = st.progress(0)
+        if preprocess_key not in st.session_state:
+            st.session_state[preprocess_key] = {
+                "tables": None,
+                "tmp_dir": None
+            }
 
-            try:
-                status_placeholder.info("📁 正在加载表数据...")
-                progress_bar.progress(20)
-
+        # 加载表（只加载一次）
+        if st.session_state[preprocess_key]["tables"] is None:
+            with st.spinner("正在加载文件..."):
                 tmp_dir, tables = load_tables(files)
-
-                if not tables:
+                if tables:
+                    st.session_state[preprocess_key]["tables"] = tables
+                    st.session_state[preprocess_key]["tmp_dir"] = tmp_dir
+                else:
                     st.error("没有成功加载任何表")
-                    shutil.rmtree(tmp_dir)
                     return
 
-                st.info(f"成功加载 {len(tables)} 个表")
+        tables = st.session_state[preprocess_key]["tables"]
 
-                # 显示加载后统计
-                total_rows = 0
-                total_cols = 0
-                for name, df in tables.items():
-                    rows, cols = df.shape
-                    total_rows += rows
-                    total_cols += cols
-                    st.caption(f"  📊 {name}: {rows}行 x {cols}列")
+        # 显示加载结果统计
+        st.subheader("📊 已加载的表")
+        for name, df in tables.items():
+            st.caption(f"  📋 {name}: {len(df)}行 x {len(df.columns)}列")
 
-                if total_rows > 500000:
-                    st.warning(f"⚠️ 总行数 {total_rows:,} 超过建议限制，分析可能较慢")
+        # 显示预处理界面（包含自动关系发现）
+        confirmed, filtered_tables, variable_types_dict, filtered_relationships = render_multi_preprocessing_interface(
+            tables,
+            relationships=None,  # 让预处理界面自动发现关系
+            initial_types_dict=None
+        )
 
-                status_placeholder.info("🔍 正在分析数据...")
-                progress_bar.progress(50)
+        if confirmed:
+            # 开始分析
+            with st.spinner("分析中..."):
+                status_placeholder = st.empty()
+                progress_bar = st.progress(0)
 
-                def run():
-                    if relationships:
-                        a = MultiTableStatisticalAnalyzer(tables, relationships={'foreign_keys': relationships})
-                    else:
-                        a = MultiTableStatisticalAnalyzer(tables)
-                    a.analyze_all_tables()
-                    return a
+                try:
+                    status_placeholder.info("📁 正在准备数据...")
+                    progress_bar.progress(20)
 
-                analyzer, output = capture_and_run(run)
+                    status_placeholder.info("🔍 正在分析数据...")
+                    progress_bar.progress(50)
 
-                status_placeholder.info("📝 正在生成报告...")
-                progress_bar.progress(80)
+                    def run():
+                        if filtered_relationships:
+                            a = MultiTableStatisticalAnalyzer(
+                                filtered_tables,
+                                relationships={'foreign_keys': filtered_relationships},
+                                predefined_types=variable_types_dict
+                            )
+                        else:
+                            a = MultiTableStatisticalAnalyzer(
+                                filtered_tables,
+                                predefined_types=variable_types_dict
+                            )
+                        a.analyze_all_tables()
+                        return a
 
-                shutil.rmtree(tmp_dir)
+                    analyzer, output = capture_and_run(run)
 
-                st.session_state.multi_analyzer = analyzer
-                st.session_state.multi_output = output
-                st.session_state.current_analysis_type = "multi"
-                st.session_state.current_source_name = f"{len(files)}个文件"
+                    status_placeholder.info("📝 正在生成报告...")
+                    progress_bar.progress(80)
 
-                merged_analyzer = analyzer.get_merged_analyzer()
-                reporter = Reporter(merged_analyzer)
-                st.session_state.current_html = reporter.to_html()
-                st.session_state.current_json_data = json.loads(merged_analyzer.to_json())
+                    # 清理临时文件
+                    if "tmp_dir" in st.session_state[preprocess_key]:
+                        shutil.rmtree(st.session_state[preprocess_key]["tmp_dir"], ignore_errors=True)
 
-                st.session_state.raw_data_preview = get_raw_data_preview(merged_analyzer.data)
+                    st.session_state.multi_analyzer = analyzer
+                    st.session_state.multi_output = output
+                    st.session_state.current_analysis_type = "multi"
+                    st.session_state.current_source_name = f"{len(files)}个文件"
 
-                st.session_state.chat_messages = []
+                    merged_analyzer = analyzer.get_merged_analyzer()
+                    reporter = Reporter(merged_analyzer)
+                    st.session_state.current_html = reporter.to_html()
+                    st.session_state.current_json_data = json.loads(merged_analyzer.to_json())
+                    st.session_state.raw_data_preview = get_raw_data_preview(merged_analyzer.data)
+                    st.session_state.chat_messages = []
 
-                progress_bar.progress(100)
-                status_placeholder.success("✅ 分析完成！")
+                    progress_bar.progress(100)
+                    status_placeholder.success("✅ 分析完成！")
 
-                import time
-                time.sleep(0.5)
-                status_placeholder.empty()
-                progress_bar.empty()
+                    import time
+                    time.sleep(0.5)
+                    status_placeholder.empty()
+                    progress_bar.empty()
 
-                st.rerun()
+                    st.rerun()
 
-            except Exception as e:
-                progress_bar.empty()
-                status_placeholder.empty()
-                st.error(f"分析失败: {str(e)}")
+                except Exception as e:
+                    progress_bar.empty()
+                    status_placeholder.empty()
+                    st.error(f"分析失败: {str(e)}")
 
     elif files and len(files) == 1:
         st.warning("多文件分析需要至少2个文件，请继续添加")
 
-    # 结果显示放在最下面
+    # 显示结果
     display_results()
-
-
-def parse_relationships(rel_text):
-    """解析关系定义"""
-    relationships = []
-    if rel_text.strip():
-        for line in rel_text.strip().split('\n'):
-            line = line.strip()
-            if not line:
-                continue
-            if '=' in line:
-                parts = line.split('=')
-                if len(parts) == 2:
-                    from_part, to_part = parts[0].strip(), parts[1].strip()
-                    if '.' in from_part and '.' in to_part:
-                        ft, fc = from_part.split('.')
-                        tt, tc = to_part.split('.')
-                        relationships.append({
-                            'from_table': ft.strip(),
-                            'from_col': fc.strip(),
-                            'to_table': tt.strip(),
-                            'to_col': tc.strip()
-                        })
-                    else:
-                        st.warning(f"关系格式错误，应为 '表名.列名 = 表名.列名': {line}")
-            else:
-                st.warning(f"关系格式错误，缺少 '=' : {line}")
-    return relationships
 
 
 def load_tables(files):
@@ -270,10 +247,10 @@ def display_results():
         col_success, col_dl1, col_dl2 = st.columns([3, 1, 1])
         with col_dl1:
             st.download_button("📥 下载 HTML 报告", st.session_state.current_html,
-                              "autostat_multi_report.html", "text/html", use_container_width=True)
+                              "autostat_multi_report.html", "text/html", width="stretch")
         with col_dl2:
             st.download_button("📥 下载 JSON 结果", analyzer.to_json(),
-                              "autostat_multi_result.json", "application/json", use_container_width=True)
+                              "autostat_multi_result.json", "application/json", width="stretch")
 
         with st.expander("📝 分析过程日志", expanded=False):
             st.code(output, language='text')
