@@ -21,6 +21,35 @@ def single_file_mode():
     """单文件分析模式"""
     st.markdown("### 📁 单文件分析")
 
+    # 注意事项提示
+    with st.expander("ℹ️ 使用说明与注意事项", expanded=False):
+        st.markdown("""
+        **支持的文件格式：**
+        - CSV、Excel(.xlsx/.xls)、JSON、TXT
+
+        **数据要求：**
+        - 文件编码建议使用 UTF-8（会自动尝试其他编码）
+        - 首行应为列名（表头）
+        - 避免包含特殊控制字符（会自动清理）
+
+        **限制建议：**
+        - 行数：建议 < 10万行（大文件建议先采样）
+        - 列数：建议 < 200列
+        - 文件大小：建议 < 100MB
+
+        **分析内容：**
+        - 自动识别变量类型（连续/分类/日期/标识符）
+        - 数据质量检查（缺失值、异常值、重复值）
+        - 相关性分析
+        - 时间序列分析（如有日期列）
+        - 生成 HTML/JSON/Markdown/Excel 报告
+
+        **注意事项：**
+        - 大文件（>100MB）建议先采样后再分析
+        - 日期列建议命名为包含"date""时间""日期"等关键词
+        - 标识符列（如ID）会被自动识别并排除分析
+        """)
+
     uploaded = st.file_uploader(
         "选择数据文件", type=['csv', 'xlsx', 'xls', 'json', 'txt'],
         help="支持 CSV、Excel、JSON、TXT 格式",
@@ -28,8 +57,22 @@ def single_file_mode():
     )
 
     if uploaded:
+        # 文件大小检查
+        file_size = len(uploaded.getvalue()) / (1024 * 1024)  # MB
+        if file_size > 100:
+            st.warning(
+                f"⚠️ 文件大小 {file_size:.1f}MB，超过建议限制 100MB，加载可能较慢或内存不足。建议先对文件进行采样或分割。")
+        elif file_size > 50:
+            st.info(f"📊 文件大小 {file_size:.1f}MB，加载可能需要一些时间，请耐心等待。")
+
         ext = uploaded.name.split('.')[-1].lower()
-        date_level = st.selectbox("日期特征级别", ['basic', 'none'], index=0, key="single_date")
+        date_level = st.selectbox(
+            "日期特征级别",
+            ['basic', 'none'],
+            index=0,
+            key="single_date",
+            help="basic: 提取年/月/季度；none: 不提取日期特征"
+        )
 
         try:
             df = load_file(uploaded, ext)
@@ -37,6 +80,18 @@ def single_file_mode():
             if df is None:
                 st.error("文件加载失败")
                 return
+
+            # 行列数检查
+            rows, cols = df.shape
+            if rows > 100000:
+                st.warning(f"⚠️ 数据行数 {rows:,} 超过建议限制 10万行，分析可能较慢或内存不足。建议先采样。")
+            elif rows > 50000:
+                st.info(f"📊 数据行数 {rows:,}，分析可能需要一些时间。")
+
+            if cols > 200:
+                st.warning(f"⚠️ 数据列数 {cols} 超过建议限制 200列，建议先筛选相关列。")
+            elif cols > 100:
+                st.info(f"📊 数据列数 {cols}，报告将只显示前30个变量详情。")
 
             # 清理列名
             df.columns = [str(col).strip().replace('\n', '_').replace('\r', '_') for col in df.columns]
@@ -54,13 +109,46 @@ def single_file_mode():
 
             st.subheader("📄 数据预览")
             st.dataframe(df.head(100))
-            st.write(f"形状: {df.shape[0]} 行 × {df.shape[1]} 列")
+            st.write(f"形状: {rows:,} 行 × {cols} 列")
+
+            # 数据质量快速提示
+            col_info = []
+            for col in df.columns:
+                missing_pct = df[col].isna().mean() * 100
+                if missing_pct > 50:
+                    col_info.append(f"⚠️ {col}: 缺失率 {missing_pct:.1f}%")
+                elif missing_pct > 20:
+                    col_info.append(f"📌 {col}: 缺失率 {missing_pct:.1f}%")
+            if col_info:
+                with st.expander("📊 数据质量提醒", expanded=False):
+                    for info in col_info[:5]:
+                        st.caption(info)
+                    if len(col_info) > 5:
+                        st.caption(f"... 还有 {len(col_info) - 5} 个字段")
+
+            # 建议采样选项（大文件时显示）
+            sampled_df = df
+            if rows > 50000:
+                sample_btn = st.checkbox("📌 建议：对数据进行采样分析（随机抽取 10000 行）", value=False)
+                if sample_btn:
+                    sampled_df = df.sample(n=min(10000, rows), random_state=42)
+                    st.info(f"已采样至 {len(sampled_df)} 行")
 
             if st.button("🚀 开始分析", type="primary", key="single_start"):
-                with st.spinner("分析中..."):
+                # 进度条
+                status_placeholder = st.empty()
+                progress_bar = st.progress(0)
+
+                try:
+                    status_placeholder.info("📁 正在准备数据...")
+                    progress_bar.progress(20)
+
                     with tempfile.NamedTemporaryFile(mode='w', suffix=f'.{ext}', delete=False) as tmp:
-                        save_file(df, tmp, ext)
+                        save_file(sampled_df, tmp, ext)
                         path = tmp.name
+
+                    status_placeholder.info("🔍 正在分析数据...")
+                    progress_bar.progress(50)
 
                     def run():
                         a = AutoStatisticalAnalyzer(path, auto_clean=False, quiet=False, date_features_level=date_level)
@@ -68,6 +156,9 @@ def single_file_mode():
                         return a
 
                     analyzer, output = capture_and_run(run)
+
+                    status_placeholder.info("📝 正在生成报告...")
+                    progress_bar.progress(80)
 
                     try:
                         os.unlink(path)
@@ -85,17 +176,30 @@ def single_file_mode():
                     st.session_state.current_json_data = json.loads(analyzer.to_json())
 
                     # 保存原始数据预览
-                    st.session_state.raw_data_preview = get_raw_data_preview(df)
+                    st.session_state.raw_data_preview = get_raw_data_preview(sampled_df)
 
                     # 重置聊天历史
                     st.session_state.chat_messages = []
 
+                    progress_bar.progress(100)
+                    status_placeholder.success("✅ 分析完成！")
+
+                    import time
+                    time.sleep(0.5)
+                    status_placeholder.empty()
+                    progress_bar.empty()
+
                     st.rerun()
+
+                except Exception as e:
+                    progress_bar.empty()
+                    status_placeholder.empty()
+                    st.error(f"分析失败: {str(e)}")
 
         except Exception as e:
             st.error(f"读取失败: {str(e)}")
 
-    # 显示结果
+    # 结果显示放在最下面
     display_results()
 
 
@@ -182,10 +286,10 @@ def display_results():
         col_success, col_dl1, col_dl2 = st.columns([3, 1, 1])
         with col_dl1:
             st.download_button("📥 下载 HTML 报告", st.session_state.current_html,
-                               "autostat_report.html", "text/html", use_container_width=True)
+                              "autostat_report.html", "text/html", use_container_width=True)
         with col_dl2:
             st.download_button("📥 下载 JSON 结果", analyzer.to_json(),
-                               "autostat_result.json", "application/json", use_container_width=True)
+                              "autostat_result.json", "application/json", use_container_width=True)
 
         with st.expander("📝 分析过程日志", expanded=False):
             st.code(output, language='text')

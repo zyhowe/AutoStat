@@ -1,50 +1,46 @@
 """
-客户端配置存储 - 使用浏览器的 localStorage
+客户端配置存储 - 保存到服务器文件
 """
 
 import streamlit as st
 import json
+import os
+from pathlib import Path
 from typing import List, Dict, Any, Optional
 
-# localStorage 的 key 前缀
-STORAGE_PREFIX = "autostat_"
-DB_CONFIGS_KEY = f"{STORAGE_PREFIX}db_configs"
-LLM_CONFIGS_KEY = f"{STORAGE_PREFIX}llm_configs"
+# 配置文件路径
+CONFIG_DIR = Path.home() / ".autostat"
+DB_CONFIG_FILE = CONFIG_DIR / "db_config.json"
+LLM_CONFIG_FILE = CONFIG_DIR / "llm_config.json"
 
 
-def _get_storage() -> dict:
-    """获取 session_state 中的存储对象"""
-    if "local_storage" not in st.session_state:
-        st.session_state.local_storage = {}
-    return st.session_state.local_storage
-
-
-def _save_to_session(key: str, data: Any):
-    """保存到 session_state"""
-    storage = _get_storage()
-    storage[key] = data
-
-
-def _load_from_session(key: str) -> Any:
-    """从 session_state 加载"""
-    storage = _get_storage()
-    return storage.get(key, [])
+def ensure_config_dir():
+    """确保配置目录存在"""
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def load_db_configs() -> List[Dict[str, Any]]:
     """加载数据库配置列表"""
-    return _load_from_session(DB_CONFIGS_KEY)
+    ensure_config_dir()
+    if DB_CONFIG_FILE.exists():
+        try:
+            with open(DB_CONFIG_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except:
+            return []
+    return []
 
 
 def save_db_configs(configs: List[Dict[str, Any]]):
     """保存数据库配置列表"""
-    _save_to_session(DB_CONFIGS_KEY, configs)
+    ensure_config_dir()
+    with open(DB_CONFIG_FILE, 'w', encoding='utf-8') as f:
+        json.dump(configs, f, ensure_ascii=False, indent=2)
 
 
 def add_db_config(config: Dict[str, Any]) -> bool:
     """添加数据库配置"""
     configs = load_db_configs()
-    # 检查名称是否已存在
     if any(c.get('name') == config.get('name') for c in configs):
         return False
     configs.append(config)
@@ -75,12 +71,21 @@ def delete_db_config(name: str) -> bool:
 
 def load_llm_configs() -> List[Dict[str, Any]]:
     """加载大模型配置列表"""
-    return _load_from_session(LLM_CONFIGS_KEY)
+    ensure_config_dir()
+    if LLM_CONFIG_FILE.exists():
+        try:
+            with open(LLM_CONFIG_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except:
+            return []
+    return []
 
 
 def save_llm_configs(configs: List[Dict[str, Any]]):
     """保存大模型配置列表"""
-    _save_to_session(LLM_CONFIGS_KEY, configs)
+    ensure_config_dir()
+    with open(LLM_CONFIG_FILE, 'w', encoding='utf-8') as f:
+        json.dump(configs, f, ensure_ascii=False, indent=2)
 
 
 def add_llm_config(config: Dict[str, Any]) -> bool:
@@ -115,10 +120,7 @@ def delete_llm_config(name: str) -> bool:
 
 
 def test_llm_connection(config: Dict[str, Any]) -> tuple:
-    """测试大模型连接
-
-    返回: (success, message)
-    """
+    """测试大模型连接"""
     import requests
 
     api_base = config.get('api_base', '').rstrip('/')
