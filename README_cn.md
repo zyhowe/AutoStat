@@ -107,12 +107,10 @@ Web 界面支持：
 
 #### AI智能解读功能
 
-Web 界面内置 AI 智能解读功能，可以：
-
-- 根据选择的上下文（JSON结果、HTML报告、源数据）回答数据相关问题
-- 提供数据质量评估和清洗建议
-- 推荐合适的统计方法和模型
+- 可选择分析上下文（JSON结果、HTML报告、源数据）
+- 获取数据质量评估和清洗建议
 - 支持数据范围查询和筛选
+- 提供推荐问题快速获取洞察
 
 ### MCP服务（供AI Agent调用）
 
@@ -264,52 +262,56 @@ AutoStat 提供 MCP (Model Context Protocol) 服务，可供 AI Agent 调用。
 ## 项目结构
 
     autostat/
-    ├── autostat/
+    ├── autostat/                          # 核心分析引擎
     │   ├── __init__.py
-    │   ├── analyzer.py      # 核心分析引擎
-    │   ├── loader.py        # 数据加载器
-    │   ├── multi_analyzer.py # 多表分析器
-    │   ├── checker.py       # 条件检查器
-    │   ├── reporter.py      # 报告生成器
-    │   ├── cli.py           # 命令行入口
-    │   ├── mcp_server.py    # MCP服务
-    │   ├── llm_client.py    # 大模型客户端
-    │   ├── prompts.py       # 提示词模板
-    │   └── core/
+    │   ├── __main__.py                    # python -m autostat 入口
+    │   ├── analyzer.py                    # 主分析器（向后兼容）
+    │   ├── checker.py                     # 条件检查器
+    │   ├── cli.py                         # 命令行入口
+    │   ├── config_manager.py              # 配置管理
+    │   ├── llm_client.py                  # 大模型客户端
+    │   ├── loader.py                      # 数据加载器
+    │   ├── mcp_server.py                  # MCP服务
+    │   ├── multi_analyzer.py              # 多表分析器
+    │   ├── prompts.py                     # 提示词模板
+    │   ├── reporter.py                    # 报告生成器
+    │   └── core/                          # 核心模块
     │       ├── __init__.py
-    │       ├── base.py
-    │       ├── timeseries.py
-    │       ├── relationship.py
-    │       ├── recommendation.py
-    │       ├── report_data.py
-    │       └── plots.py
-    ├── web/
-    │   ├── app.py           # Streamlit 主入口
-    │   ├── components/      # UI组件
-    |   |   ├── __init__.py
-    │   │   ├── sidebar.py
-    │   │   ├── single_analysis.py
-    │   │   ├── multi_analysis.py
-    │   │   ├── db_analysis.py
-    │   │   └── chat_interface.py
-    │   ├── utils/           # 工具函数
-    |   |   ├── __init__.py
-    │   │   ├── helpers.py
-    │   │   └── context_builder.py
-    │   └── config/          # 客户端存储
-    │       └── storage.py
+    │       ├── analyzer.py                # 主分析器实现
+    │       ├── base.py                    # 基础分析（类型识别、质量检查）
+    │       ├── plots.py                   # 可视化
+    │       ├── recommendation.py          # 模型推荐
+    │       ├── relationship.py            # 关系分析
+    │       ├── report_data.py             # 报告数据构建
+    │       └── timeseries.py              # 时间序列分析
+    ├── web/                               # Web界面
+    │   ├── app.py                         # Streamlit 主入口
+    │   ├── components/                    # UI组件
+    │   │   ├── __init__.py
+    │   │   ├── chat_interface.py          # AI智能解读
+    │   │   ├── db_analysis.py             # 数据库分析
+    │   │   ├── multi_analysis.py          # 多文件分析
+    │   │   ├── sidebar.py                 # 侧边栏（配置管理）
+    │   │   └── single_analysis.py         # 单文件分析
+    │   ├── config/                        # 客户端存储
+    │   │   └── storage.py                 # 配置管理
+    │   └── utils/                         # 工具函数
+    │       ├── __init__.py
+    │       ├── data_preprocessor.py       # 数据预处理
+    │       └── helpers.py                 # 辅助函数
     ├── templates/
-    │   └── report.html      # HTML报告模板
+    │   └── report.html                    # HTML报告模板
     ├── tests/
-    │   └── test_analyzer.py # 单元测试
+    │   └── test_analyzer.py               # 单元测试
     ├── examples/
-    │   └── example.py       # 使用示例
-    ├── setup.py
-    ├── pyproject.toml
-    ├── requirements.txt
+    │   └── example.py                     # 使用示例
+    ├── .gitignore
     ├── LICENSE
+    ├── pyproject.toml
     ├── README.md
-    └── README_cn.md
+    ├── README_cn.md
+    ├── requirements.txt
+    └── setup.py
 
 ## 许可证
 

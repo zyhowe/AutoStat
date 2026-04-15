@@ -107,12 +107,10 @@ The web interface supports:
 
 #### AI Smart Interpretation Features
 
-The web interface includes an AI-powered chat feature that can:
-
-- Answer questions about your data based on selected context (JSON results, HTML reports, raw data)
-- Provide data quality assessments and cleaning recommendations
-- Suggest appropriate statistical methods and models
+- Select analysis context (JSON results, HTML reports, raw data)
+- Get data quality assessments and cleaning recommendations
 - Query specific data ranges and perform filtering
+- Recommended questions for quick insights
 
 ### MCP Service (for AI Agents)
 
@@ -264,52 +262,56 @@ Or using pip installation:
 ## Project Structure
 
     autostat/
-    ├── autostat/
+    ├── autostat/                          # Core analysis engine
     │   ├── __init__.py
-    │   ├── analyzer.py      # Core analysis engine
-    │   ├── loader.py        # Data loader
-    │   ├── multi_analyzer.py # Multi-table analysis
-    │   ├── checker.py       # Condition checker
-    │   ├── reporter.py      # Report generator
-    │   ├── cli.py           # Command line interface
-    │   ├── mcp_server.py    # MCP service
-    │   ├── llm_client.py    # LLM client
-    │   ├── prompts.py       # Prompt templates
-    │   └── core/
+    │   ├── __main__.py                    # Entry for python -m autostat
+    │   ├── analyzer.py                    # Main analyzer (backward compatibility)
+    │   ├── checker.py                     # Condition checker
+    │   ├── cli.py                         # Command line interface
+    │   ├── config_manager.py              # Configuration management
+    │   ├── llm_client.py                  # LLM client
+    │   ├── loader.py                      # Data loader
+    │   ├── mcp_server.py                  # MCP service
+    │   ├── multi_analyzer.py              # Multi-table analysis
+    │   ├── prompts.py                     # Prompt templates
+    │   ├── reporter.py                    # Report generator
+    │   └── core/                          # Core modules
     │       ├── __init__.py
-    │       ├── base.py
-    │       ├── timeseries.py
-    │       ├── relationship.py
-    │       ├── recommendation.py
-    │       ├── report_data.py
-    │       └── plots.py
-    ├── web/
-    │   ├── app.py           # Streamlit main entry
-    │   ├── components/      # UI components
-    |   |   ├── __init__.py
-    │   │   ├── sidebar.py
-    │   │   ├── single_analysis.py
-    │   │   ├── multi_analysis.py
-    │   │   ├── db_analysis.py
-    │   │   └── chat_interface.py
-    │   ├── utils/           # Utility functions
-    |   |   ├── __init__.py
-    │   │   ├── helpers.py
-    │   │   └── context_builder.py
-    │   └── config/          # Client-side storage
-    │       └── storage.py
+    │       ├── analyzer.py                # Main analyzer implementation
+    │       ├── base.py                    # Base analyzer (type inference, quality check)
+    │       ├── plots.py                   # Visualization
+    │       ├── recommendation.py          # Model recommendations
+    │       ├── relationship.py            # Relationship analysis
+    │       ├── report_data.py             # Report data builder
+    │       └── timeseries.py              # Time series analysis
+    ├── web/                               # Web interface
+    │   ├── app.py                         # Streamlit main entry
+    │   ├── components/                    # UI components
+    │   │   ├── __init__.py
+    │   │   ├── chat_interface.py          # AI smart interpretation
+    │   │   ├── db_analysis.py             # Database analysis
+    │   │   ├── multi_analysis.py          # Multi-file analysis
+    │   │   ├── sidebar.py                 # Sidebar with config
+    │   │   └── single_analysis.py         # Single file analysis
+    │   ├── config/                        # Client-side storage
+    │   │   └── storage.py                 # Config management
+    │   └── utils/                         # Utilities
+    │       ├── __init__.py
+    │       ├── data_preprocessor.py       # Data preprocessing
+    │       └── helpers.py                 # Helper functions
     ├── templates/
-    │   └── report.html      # HTML report template
+    │   └── report.html                    # HTML report template
     ├── tests/
-    │   └── test_analyzer.py # Unit tests
+    │   └── test_analyzer.py               # Unit tests
     ├── examples/
-    │   └── example.py       # Usage examples
-    ├── setup.py
-    ├── pyproject.toml
-    ├── requirements.txt
+    │   └── example.py                     # Usage examples
+    ├── .gitignore
     ├── LICENSE
+    ├── pyproject.toml
     ├── README.md
-    └── README_cn.md
+    ├── README_cn.md
+    ├── requirements.txt
+    └── setup.py
 
 ## License
 
