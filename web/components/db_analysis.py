@@ -5,6 +5,7 @@ import json
 import sys
 import os
 import traceback
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
@@ -23,49 +24,17 @@ def database_mode():
     # 注意事项提示
     with st.expander("ℹ️ 使用说明与注意事项", expanded=False):
         st.markdown("""
-            **适用场景：**
-            - 需要分析 SQL Server 数据库中的数据
-            - 多表关联分析
+        **适用场景：** 需要分析 SQL Server 数据库中的数据，多表关联分析
 
-            **前置要求：**
-            - 需要安装 pyodbc 驱动：`pip install pyodbc`
-            - 确保网络可以访问数据库服务器
-            - 需要有相应的数据库访问权限
+        **前置要求：** 安装 pyodbc 驱动，确保网络可访问数据库服务器
 
-            **配置说明：**
-            - 在侧边栏"数据库配置"中添加连接信息
-            - 支持 Windows 身份认证和 SQL Server 身份认证
+        **限制建议：** 表数量 < 10，每个表记录数 < 5万，字段数 < 100
 
-            **限制建议：**
-            - 表数量：建议 < 10 个
-            - 每个表记录数：建议 < 5万行（通过 limit 控制）
-            - 每个表字段数：建议 < 100列
-            - 文本字段会自动截断（默认保留100字符）
-
-            **分析内容：**
-            - 各表独立分析（变量类型、数据质量）
-            - 自动发现表间关联关系
-            - 智能采样（基于外键关联）
-            - 生成多表关联报告
-
-            **预处理功能：**
-            - 可以为每个表勾选要保留的字段
-            - 可以调整每个字段的变量类型
-            - 可以添加/删除/修改表间关系
-
-            **常见错误及解决：**
-            - 连接失败：检查服务器地址、端口、防火墙
-            - 登录失败：检查用户名/密码，或尝试 Windows 身份认证
-            - 找不到表：检查表名是否正确（区分大小写）
-            - 超时：增加 limit 值或检查网络
-
-            **注意事项：**
-            - 大表建议设置较小的加载行数（limit）
-            - 文本字段会被截断（默认保留100字符）
-            - 大字段类型（text、ntext、MAX类型）会自动过滤
-            - 系统字段（如 tmstamp、entrydt 等）默认会被标记为"排除"
-            - 建议在非高峰时段进行大规模数据分析
-            """)
+        **预处理功能：** 
+        - 可以勾选要保留的字段，调整变量类型
+        - 系统会自动发现表间关系，你可以在"表间关系管理"中修改或删除
+        - 也可以手动添加新的关系
+        """)
 
     if st.session_state.selected_db_config is None:
         st.warning("请先在侧边栏配置并选择数据库")
@@ -73,6 +42,7 @@ def database_mode():
 
     config = st.session_state.selected_db_config
 
+    # 数据库连接表单
     with st.form("db_form"):
         st.info(f"📡 使用配置: {config.get('name')}")
         st.caption(f"服务器: {config.get('server')} | 数据库: {config.get('database')}")
@@ -115,6 +85,7 @@ def database_mode():
 
         submitted = st.form_submit_button("🔌 连接并分析", type="primary")
 
+    # 处理连接和分析
     if submitted:
         if not tables_input.strip():
             st.error("请至少输入一个表名")
@@ -155,7 +126,7 @@ def database_mode():
                 password=config.get('password') if not config.get('trusted_connection') else None,
                 trusted_connection=config.get('trusted_connection', False),
                 limit=limit,
-                relationships=None,  # 不传关系，让预处理界面自动发现
+                relationships=None,
                 max_text_length=max_text_length
             )
 
@@ -165,68 +136,12 @@ def database_mode():
                 st.error("没有成功加载任何表")
                 return
 
-            progress_bar.progress(40)
-            status_placeholder.info("🔧 正在准备预处理界面...")
-
-            # 显示预处理界面（包含自动关系发现）
-            confirmed, filtered_tables, variable_types_dict, filtered_relationships = render_multi_preprocessing_interface(
-                success,
-                relationships=None,  # 让预处理界面自动发现关系
-                initial_types_dict=None
-            )
-
-            if not confirmed:
-                progress_bar.empty()
-                status_placeholder.empty()
-                return
-
-            progress_bar.progress(60)
-            status_placeholder.info("🔍 正在分析数据...")
-
-            def run():
-                if filtered_relationships:
-                    a = MultiTableStatisticalAnalyzer(
-                        filtered_tables,
-                        relationships={'foreign_keys': filtered_relationships},
-                        predefined_types=variable_types_dict
-                    )
-                else:
-                    a = MultiTableStatisticalAnalyzer(
-                        filtered_tables,
-                        predefined_types=variable_types_dict
-                    )
-                a.analyze_all_tables()
-                return a
-
-            analyzer, output = capture_and_run(run)
-
-            progress_bar.progress(80)
-            status_placeholder.info("📝 正在生成报告...")
-
-            st.session_state.db_analyzer = analyzer
-            st.session_state.db_output = output
-            st.session_state.current_analysis_type = "database"
-            st.session_state.current_source_name = f"{config.get('name')}/{config.get('database')}"
-
-            merged_analyzer = analyzer.get_merged_analyzer()
-            reporter = Reporter(merged_analyzer)
-            st.session_state.current_html = reporter.to_html()
-            json_data = json.loads(merged_analyzer.to_json())
-            json_data['db_server'] = config.get('server')
-            json_data['db_database'] = config.get('database')
-            st.session_state.current_json_data = json_data
-            st.session_state.raw_data_preview = get_raw_data_preview(merged_analyzer.data)
-            st.session_state.chat_messages = []
-
-            progress_bar.progress(100)
-            status_placeholder.success("✅ 分析完成！")
-
-            import time
-            time.sleep(0.5)
-            status_placeholder.empty()
+            # 数据加载完成，清除进度条，显示预处理界面
             progress_bar.empty()
+            status_placeholder.empty()
 
-            st.rerun()
+            # 将加载的表保存到 session_state，供预处理界面使用
+            st.session_state.db_loaded_tables = success
 
         except Exception as e:
             error_msg = str(e)
@@ -234,7 +149,7 @@ def database_mode():
             progress_bar.empty()
             status_placeholder.empty()
 
-            st.error(f"分析失败: {error_msg}")
+            st.error(f"连接失败: {error_msg}")
 
             if "Login failed" in error_msg:
                 st.info("🔧 请检查用户名和密码是否正确")
@@ -247,6 +162,89 @@ def database_mode():
 
             with st.expander("📋 详细错误信息", expanded=False):
                 st.code(error_traceback, language='python')
+
+            return
+
+    # 预处理界面（放在 submitted 块外面）
+    if "db_loaded_tables" in st.session_state and st.session_state.db_loaded_tables:
+        tables = st.session_state.db_loaded_tables
+
+        # 显示加载结果统计
+        st.subheader("📊 已加载的表")
+        for name, df in tables.items():
+            st.caption(f"  📋 {name}: {len(df)}行 x {len(df.columns)}列")
+
+        # 显示预处理界面
+        confirmed, filtered_tables, variable_types_dict, filtered_relationships = render_multi_preprocessing_interface(
+            tables,
+            relationships=None,
+            initial_types_dict=None
+        )
+
+        if confirmed:
+            # 用户确认后，显示分析进度条
+            status_placeholder = st.empty()
+            progress_bar = st.progress(0)
+
+            try:
+                status_placeholder.info("📁 正在准备数据...")
+                progress_bar.progress(20)
+
+                status_placeholder.info("🔍 正在分析数据...")
+                progress_bar.progress(50)
+
+                def run():
+                    if filtered_relationships:
+                        a = MultiTableStatisticalAnalyzer(
+                            filtered_tables,
+                            relationships={'foreign_keys': filtered_relationships},
+                            predefined_types=variable_types_dict
+                        )
+                    else:
+                        a = MultiTableStatisticalAnalyzer(
+                            filtered_tables,
+                            predefined_types=variable_types_dict
+                        )
+                    a.analyze_all_tables()
+                    return a
+
+                analyzer, output = capture_and_run(run)
+
+                status_placeholder.info("📝 正在生成报告...")
+                progress_bar.progress(80)
+
+                st.session_state.db_analyzer = analyzer
+                st.session_state.db_output = output
+                st.session_state.current_analysis_type = "database"
+                st.session_state.current_source_name = f"{config.get('name')}/{config.get('database')}"
+
+                merged_analyzer = analyzer.get_merged_analyzer()
+                reporter = Reporter(merged_analyzer)
+                st.session_state.current_html = reporter.to_html()
+                json_data = json.loads(merged_analyzer.to_json())
+                json_data['db_server'] = config.get('server')
+                json_data['db_database'] = config.get('database')
+                st.session_state.current_json_data = json_data
+                st.session_state.raw_data_preview = get_raw_data_preview(merged_analyzer.data)
+                st.session_state.chat_messages = []
+
+                progress_bar.progress(100)
+                status_placeholder.success("✅ 分析完成！")
+
+                import time
+                time.sleep(0.5)
+                status_placeholder.empty()
+                progress_bar.empty()
+
+                st.rerun()
+
+            except Exception as e:
+                progress_bar.empty()
+                status_placeholder.empty()
+                st.error(f"分析失败: {str(e)}")
+        else:
+            # 用户还没有确认，继续显示预处理界面
+            pass
 
     # 显示结果
     display_results()
@@ -285,30 +283,6 @@ def test_db_connection(config):
                 continue
 
     return None
-
-
-def parse_relationships(rel_input):
-    """解析关系定义"""
-    relationships = []
-    if rel_input.strip():
-        for line in rel_input.strip().split('\n'):
-            line = line.strip()
-            if not line:
-                continue
-            if '=' in line:
-                parts = line.split('=')
-                if len(parts) == 2:
-                    from_part, to_part = parts[0].strip(), parts[1].strip()
-                    if '.' in from_part and '.' in to_part:
-                        ft, fc = from_part.split('.')
-                        tt, tc = to_part.split('.')
-                        relationships.append({
-                            'from_table': ft.strip(),
-                            'from_col': fc.strip(),
-                            'to_table': tt.strip(),
-                            'to_col': tc.strip()
-                        })
-    return relationships
 
 
 def display_results():

@@ -7,6 +7,7 @@ import os
 import json
 import shutil
 import sys
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
@@ -25,44 +26,17 @@ def multi_file_mode():
     # 注意事项提示
     with st.expander("ℹ️ 使用说明与注意事项", expanded=False):
         st.markdown("""
-            **适用场景：**
-            - 多个相关表需要联合分析（如订单表、用户表、产品表）
-            - 需要发现表间关联关系
-
-            **文件要求：**
-            - 至少上传 2 个文件
-            - 支持格式：CSV、Excel、JSON、TXT
-            - 建议表名使用英文或拼音（用于关系识别）
-
-            **限制建议：**
-            - 表数量：建议 < 10 个
-            - 每个表行数：建议 < 5万行
-            - 每个表列数：建议 < 100列
-            - 总数据量：建议 < 50万行
-            - 文件大小：每个文件建议 < 50MB
-
-            **关联关系识别：**
-            - 自动发现：通过相同列名自动识别表间关系
-            - 手动定义：可在下方"表间关系管理"中定义关系
-              - 格式：`源表.源列 → 目标表.目标列`
-
-            **分析内容：**
-            - 各表独立分析（变量类型、数据质量）
-            - 自动发现表间关联关系
-            - 合并关联表进行综合分析
-            - 生成多表关联报告
-
-            **预处理功能：**
-            - 可以为每个表勾选要保留的字段
-            - 可以调整每个字段的变量类型
-            - 可以添加/删除/修改表间关系
-
-            **注意事项：**
-            - 表间关联键建议命名为相同名称（如 user_id）
-            - 大表建议先采样或限制加载行数
-            - 主表（数据量最大的表）将作为分析基准
-            - 合并后的表可能很大，请注意内存使用
-            """)
+        **适用场景：** 多个相关表需要联合分析（如订单表、用户表、产品表）
+        
+        **文件要求：** 至少上传 2 个文件，支持 CSV、Excel、JSON、TXT
+        
+        **限制建议：** 表数量 < 10，每个表行数 < 5万，总数据量 < 50万行
+        
+        **预处理功能：** 
+        - 可以勾选要保留的字段，调整变量类型
+        - 系统会自动发现表间关系，你可以在"表间关系管理"中修改或删除
+        - 也可以手动添加新的关系
+        """)
 
     files = st.file_uploader(
         "选择多个数据文件", type=['csv', 'xlsx', 'xls', 'json', 'txt'],
@@ -73,7 +47,7 @@ def multi_file_mode():
     if files and len(files) >= 2:
         # 表数量检查
         if len(files) > 10:
-            st.warning(f"⚠️ 表数量 {len(files)} 超过建议限制 10个，分析可能较慢。")
+            st.warning(f"⚠️ 表数量 {len(files)} 超过建议限制 10个，分析可能较慢，建议减少表数量。")
         elif len(files) > 5:
             st.info(f"📊 表数量 {len(files)}，分析可能需要一些时间。")
 
@@ -90,7 +64,7 @@ def multi_file_mode():
                 "大小": f"{size_mb:.1f} KB" if size_mb < 1 else f"{size_mb:.1f} MB"
             })
 
-        st.dataframe(pd.DataFrame(info), width="stretch")
+        st.dataframe(pd.DataFrame(info), use_container_width=True)
 
         # 总量警告
         if total_size_mb > 200:
@@ -133,7 +107,7 @@ def multi_file_mode():
         # 显示预处理界面（包含自动关系发现）
         confirmed, filtered_tables, variable_types_dict, filtered_relationships = render_multi_preprocessing_interface(
             tables,
-            relationships=None,  # 让预处理界面自动发现关系
+            relationships=None,
             initial_types_dict=None
         )
 

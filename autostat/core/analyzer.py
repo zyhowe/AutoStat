@@ -59,7 +59,8 @@ class AutoStatisticalAnalyzer:
             if not os.path.exists(data):
                 raise FileNotFoundError(f"文件不存在: {data}")
             try:
-                self.raw_data = DataLoader.load_from_file(data, parse_dates=parse_dates, date_columns=date_columns).copy()
+                self.raw_data = DataLoader.load_from_file(data, parse_dates=parse_dates,
+                                                          date_columns=date_columns).copy()
             except Exception as e:
                 raise ValueError(f"文件加载失败: {e}")
         elif isinstance(data, pd.DataFrame):
@@ -130,34 +131,25 @@ class AutoStatisticalAnalyzer:
             if not quiet:
                 print("  ✅ 自动类型识别完成")
 
+        # 阶段3：日期特征提取（派生列类型在提取时直接设置，不需要二次识别）
         if not quiet:
             print("\n【阶段3】日期特征提取...")
         self._extract_all_date_features()
         if not quiet:
             print("  ✅ 完成")
 
-        # 阶段4：二次类型识别（仅当自动模式且新加了日期特征时）
-        if not (predefined_types and skip_auto_inference) and self._has_new_date_features():
-            if not quiet:
-                print("\n【阶段4】二次类型识别...")
-            base.variable_types = self.variable_types
-            base.type_reasons = self.type_reasons
-            base._infer_variable_types()
-            self.variable_types = base.variable_types
-            self.type_reasons = base.type_reasons
-            if not quiet:
-                print("  ✅ 日期特征列识别完成")
-
+        # 阶段4：数据质量体检（总是执行）
         if not quiet:
-            print("\n【阶段5】深度数据质量体检...")
+            print("\n【阶段4】深度数据质量体检...")
         base.variable_types = self.variable_types
         base.quality_report = base._comprehensive_quality_check()
         self.quality_report = base.quality_report
         if not quiet:
             base._print_quality_summary()
 
+        # 阶段5：生成清洗建议（总是执行）
         if not quiet:
-            print("\n【阶段6】生成清洗建议...")
+            print("\n【阶段5】生成清洗建议...")
         base.cleaning_suggestions = base._generate_cleaning_suggestions()
         self.cleaning_suggestions = base.cleaning_suggestions
         if not quiet:
@@ -193,16 +185,6 @@ class AutoStatisticalAnalyzer:
             print("✅ 初始化完成")
             print("=" * 70)
 
-    def _has_new_date_features(self):
-        if not hasattr(self, 'date_features'):
-            return False
-        for date_col, info in self.date_features.items():
-            if isinstance(info, dict) and 'columns' in info:
-                for col in info['columns']:
-                    if col not in self.variable_types:
-                        return True
-        return False
-
     def _extract_all_date_features(self):
         date_cols = [col for col, typ in self.variable_types.items() if typ == 'datetime']
         for date_col in date_cols:
@@ -230,36 +212,57 @@ class AutoStatisticalAnalyzer:
             col_name = f'{date_col}_year'
             features[col_name] = dates.dt.year
             new_columns.append(col_name)
+            # 固定为数值型分类变量
+            self.variable_types[col_name] = 'ordinal'
+            self.type_reasons[col_name] = '日期派生列（年份）'
 
         if 'month' in features_to_extract:
             col_name = f'{date_col}_month'
             features[col_name] = dates.dt.month.astype('category')
             new_columns.append(col_name)
+            # 固定为分类变量
+            self.variable_types[col_name] = 'categorical'
+            self.type_reasons[col_name] = '日期派生列（月份）'
 
         if 'quarter' in features_to_extract:
             col_name = f'{date_col}_quarter'
             features[col_name] = dates.dt.quarter.astype('category')
             new_columns.append(col_name)
+            # 固定为分类变量
+            self.variable_types[col_name] = 'categorical'
+            self.type_reasons[col_name] = '日期派生列（季度）'
 
         if 'week' in features_to_extract:
             col_name = f'{date_col}_week'
             features[col_name] = dates.dt.isocalendar().week.astype('category')
             new_columns.append(col_name)
+            # 固定为数值型分类变量
+            self.variable_types[col_name] = 'ordinal'
+            self.type_reasons[col_name] = '日期派生列（周数）'
 
         if 'weekday' in features_to_extract:
             col_name = f'{date_col}_weekday'
             features[col_name] = dates.dt.dayofweek.astype('category')
             new_columns.append(col_name)
+            # 固定为分类变量
+            self.variable_types[col_name] = 'categorical'
+            self.type_reasons[col_name] = '日期派生列（星期几）'
 
         if 'day' in features_to_extract:
             col_name = f'{date_col}_day'
             features[col_name] = dates.dt.day
             new_columns.append(col_name)
+            # 固定为数值型分类变量
+            self.variable_types[col_name] = 'ordinal'
+            self.type_reasons[col_name] = '日期派生列（日）'
 
         if 'is_weekend' in features_to_extract:
             col_name = f'{date_col}_is_weekend'
             features[col_name] = (dates.dt.dayofweek >= 5).astype('category')
             new_columns.append(col_name)
+            # 固定为分类变量
+            self.variable_types[col_name] = 'categorical'
+            self.type_reasons[col_name] = '日期派生列（是否周末）'
 
         for name, values in features.items():
             if name not in self.data.columns:

@@ -22,7 +22,7 @@ def single_file_mode():
     """单文件分析模式"""
     st.markdown("### 📁 单文件分析")
 
-    # 注意事项提示（保持原有完整内容）
+    # 注意事项提示
     with st.expander("ℹ️ 使用说明与注意事项", expanded=False):
         st.markdown("""
         **支持的文件格式：** CSV、Excel(.xlsx/.xls)、JSON、TXT
@@ -77,116 +77,137 @@ def single_file_mode():
             help="basic: 提取年/月/季度；none: 不提取日期特征"
         )
 
-        # 加载数据
-        try:
-            df = load_file(uploaded, ext)
-            if df is None or df.empty:
-                st.error("文件加载失败")
+        # 检查是否已有预处理数据
+        preprocess_key = f"preprocess_{uploaded.name}_{date_level}"
+
+        # 初始化或加载预处理状态
+        if preprocess_key not in st.session_state:
+            st.session_state[preprocess_key] = {
+                "df": None,
+                "confirmed": False,
+                "variable_types": None,
+                "selected_columns": None
+            }
+
+        # 加载数据（只加载一次）
+        if st.session_state[preprocess_key]["df"] is None:
+            try:
+                df = load_file(uploaded, ext)
+                if df is not None and not df.empty:
+                    # 清理列名
+                    df.columns = [str(col).strip().replace('\n', '_').replace('\r', '_') for col in df.columns]
+                    df = df.replace(r'^\s*$', pd.NA, regex=True)
+                    st.session_state[preprocess_key]["df"] = df
+                    st.session_state[preprocess_key]["confirmed"] = False
+                else:
+                    st.error("文件加载失败")
+                    return
+            except Exception as e:
+                st.error(f"读取失败: {str(e)}")
                 return
 
-            # 清理列名
-            df.columns = [str(col).strip().replace('\n', '_').replace('\r', '_') for col in df.columns]
-            df = df.replace(r'^\s*$', pd.NA, regex=True)
+        df = st.session_state[preprocess_key]["df"]
 
-            # 显示原始数据预览
-            rows, cols = df.shape
-            st.subheader("📄 原始数据预览")
-            st.dataframe(df.head(100))
-            st.write(f"形状: {rows:,} 行 × {cols} 列")
+        # 显示数据预览
+        rows, cols = df.shape
+        st.subheader("📄 原始数据预览")
+        st.dataframe(df.head(100))
+        st.write(f"形状: {rows:,} 行 × {cols} 列")
 
-            # 数据质量快速提示
-            col_info = []
-            for col in df.columns:
-                missing_pct = df[col].isna().mean() * 100
-                if missing_pct > 50:
-                    col_info.append(f"⚠️ {col}: 缺失率 {missing_pct:.1f}%")
-                elif missing_pct > 20:
-                    col_info.append(f"📌 {col}: 缺失率 {missing_pct:.1f}%")
-            if col_info:
-                with st.expander("📊 数据质量提醒", expanded=False):
-                    for info in col_info[:5]:
-                        st.caption(info)
-                    if len(col_info) > 5:
-                        st.caption(f"... 还有 {len(col_info) - 5} 个字段")
+        # 数据质量快速提示
+        col_info = []
+        for col in df.columns:
+            missing_pct = df[col].isna().mean() * 100
+            if missing_pct > 50:
+                col_info.append(f"⚠️ {col}: 缺失率 {missing_pct:.1f}%")
+            elif missing_pct > 20:
+                col_info.append(f"📌 {col}: 缺失率 {missing_pct:.1f}%")
+        if col_info:
+            with st.expander("📊 数据质量提醒", expanded=False):
+                for info in col_info[:5]:
+                    st.caption(info)
+                if len(col_info) > 5:
+                    st.caption(f"... 还有 {len(col_info) - 5} 个字段")
 
-            # 预处理界面
-            confirmed, filtered_df, variable_types = render_preprocessing_interface(df, "数据预处理")
+        # 显示预处理界面
+        confirmed, filtered_df, variable_types = render_preprocessing_interface(
+            df,
+            "数据预处理",
+            initial_types=None
+        )
 
-            if confirmed:
-                # 采样建议（大文件时）
-                sampled_df = filtered_df
-                if len(filtered_df) > 50000:
-                    sample_btn = st.checkbox("📌 建议：对数据进行采样分析（随机抽取 10000 行）", value=False)
-                    if sample_btn:
-                        sampled_df = filtered_df.sample(n=min(10000, len(filtered_df)), random_state=42)
-                        st.info(f"已采样至 {len(sampled_df)} 行")
+        if confirmed:
+            # 保存预处理结果到 session_state
+            st.session_state[preprocess_key]["confirmed"] = True
+            st.session_state[preprocess_key]["variable_types"] = variable_types
+            st.session_state[preprocess_key]["selected_columns"] = list(filtered_df.columns)
 
-                # 开始分析
-                with st.spinner("分析中..."):
-                    status_placeholder = st.empty()
-                    progress_bar = st.progress(0)
+            # 开始分析
+            with st.spinner("分析中..."):
+                status_placeholder = st.empty()
+                progress_bar = st.progress(0)
+
+                try:
+                    status_placeholder.info("📁 正在准备数据...")
+                    progress_bar.progress(20)
+
+                    with tempfile.NamedTemporaryFile(mode='w', suffix=f'.{ext}', delete=False) as tmp:
+                        save_file(filtered_df, tmp, ext)
+                        path = tmp.name
+
+                    status_placeholder.info("🔍 正在分析数据...")
+                    progress_bar.progress(50)
+
+                    def run():
+                        a = AutoStatisticalAnalyzer(
+                            path,
+                            auto_clean=False,
+                            quiet=False,
+                            date_features_level=date_level,
+                            predefined_types=variable_types,
+                            skip_auto_inference=True
+                        )
+                        a.generate_full_report()
+                        return a
+
+                    analyzer, output = capture_and_run(run)
+
+                    status_placeholder.info("📝 正在生成报告...")
+                    progress_bar.progress(80)
 
                     try:
-                        status_placeholder.info("📁 正在准备数据...")
-                        progress_bar.progress(20)
+                        os.unlink(path)
+                    except:
+                        pass
 
-                        with tempfile.NamedTemporaryFile(mode='w', suffix=f'.{ext}', delete=False) as tmp:
-                            save_file(sampled_df, tmp, ext)
-                            path = tmp.name
+                    st.session_state.single_analyzer = analyzer
+                    st.session_state.single_output = output
+                    st.session_state.current_analysis_type = "single"
+                    st.session_state.current_source_name = uploaded.name
 
-                        status_placeholder.info("🔍 正在分析数据...")
-                        progress_bar.progress(50)
+                    reporter = Reporter(analyzer)
+                    st.session_state.current_html = reporter.to_html()
+                    st.session_state.current_json_data = json.loads(analyzer.to_json())
+                    st.session_state.raw_data_preview = get_raw_data_preview(filtered_df)
+                    st.session_state.chat_messages = []
 
-                        def run():
-                            a = AutoStatisticalAnalyzer(
-                                path,
-                                auto_clean=False,
-                                quiet=False,
-                                date_features_level=date_level,
-                                predefined_types=variable_types,
-                                skip_auto_inference=True
-                            )
-                            a.generate_full_report()
-                            return a
+                    progress_bar.progress(100)
+                    status_placeholder.success("✅ 分析完成！")
 
-                        analyzer, output = capture_and_run(run)
+                    import time
+                    time.sleep(0.5)
+                    status_placeholder.empty()
+                    progress_bar.empty()
 
-                        status_placeholder.info("📝 正在生成报告...")
-                        progress_bar.progress(80)
+                    st.rerun()
 
-                        try:
-                            os.unlink(path)
-                        except:
-                            pass
-
-                        st.session_state.single_analyzer = analyzer
-                        st.session_state.single_output = output
-                        st.session_state.current_analysis_type = "single"
-                        st.session_state.current_source_name = uploaded.name
-
-                        reporter = Reporter(analyzer)
-                        st.session_state.current_html = reporter.to_html()
-                        st.session_state.current_json_data = json.loads(analyzer.to_json())
-                        st.session_state.raw_data_preview = get_raw_data_preview(sampled_df)
-                        st.session_state.chat_messages = []
-
-                        progress_bar.progress(100)
-                        status_placeholder.success("✅ 分析完成！")
-
-                        import time
-                        time.sleep(0.5)
-                        status_placeholder.empty()
-                        progress_bar.empty()
-
-                        st.rerun()
-
-                    except Exception as e:
-                        progress_bar.empty()
-                        status_placeholder.empty()
-                        st.error(f"分析失败: {str(e)}")
-
-        except Exception as e:
-            st.error(f"读取失败: {str(e)}")
+                except Exception as e:
+                    progress_bar.empty()
+                    status_placeholder.empty()
+                    st.error(f"分析失败: {str(e)}")
+        else:
+            # 如果用户取消或重置，清除确认状态
+            st.session_state[preprocess_key]["confirmed"] = False
 
     # 显示结果
     display_results()
