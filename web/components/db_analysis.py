@@ -25,11 +25,11 @@ def database_mode():
     with st.expander("ℹ️ 使用说明与注意事项", expanded=False):
         st.markdown("""
         **适用场景：** 需要分析 SQL Server 数据库中的数据，多表关联分析
-
+        
         **前置要求：** 安装 pyodbc 驱动，确保网络可访问数据库服务器
-
+        
         **限制建议：** 表数量 < 10，每个表记录数 < 5万，字段数 < 100
-
+        
         **预处理功能：** 
         - 可以勾选要保留的字段，调整变量类型
         - 系统会自动发现表间关系，你可以在"表间关系管理"中修改或删除
@@ -136,9 +136,22 @@ def database_mode():
                 st.error("没有成功加载任何表")
                 return
 
-            # 数据加载完成，清除进度条，显示预处理界面
+            # 数据加载完成，清除进度条
             progress_bar.empty()
             status_placeholder.empty()
+
+            # 清除数据库相关的缓存
+            if "multi_relationships" in st.session_state:
+                del st.session_state.multi_relationships
+            if "relationship_refresh_ts" in st.session_state:
+                del st.session_state.relationship_refresh_ts
+            if "multi_table_type_keys" in st.session_state:
+                del st.session_state.multi_table_type_keys
+            keys_to_delete = [k for k in st.session_state.keys() if k.startswith("saved_variable_types_")]
+            for key in keys_to_delete:
+                del st.session_state[key]
+            if "field_selector_refresh_ts" in st.session_state:
+                del st.session_state.field_selector_refresh_ts
 
             # 将加载的表保存到 session_state，供预处理界面使用
             st.session_state.db_loaded_tables = success

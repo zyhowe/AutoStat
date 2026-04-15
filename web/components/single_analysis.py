@@ -77,6 +77,16 @@ def single_file_mode():
             help="basic: 提取年/月/季度；none: 不提取日期特征"
         )
 
+        # 检测文件是否变化
+        current_file_key = f"{uploaded.name}_{uploaded.size}"
+        if current_file_key != st.session_state.get("last_single_file_key"):
+            st.session_state.last_single_file_key = current_file_key
+            # 清除单文件相关的缓存
+            if "saved_variable_types" in st.session_state:
+                del st.session_state.saved_variable_types
+            if "field_selector_refresh_ts" in st.session_state:
+                del st.session_state.field_selector_refresh_ts
+
         # 检查是否已有预处理数据
         preprocess_key = f"preprocess_{uploaded.name}_{date_level}"
 

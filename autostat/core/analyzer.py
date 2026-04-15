@@ -564,7 +564,7 @@ class AutoStatisticalAnalyzer:
 
         numeric_vars = [col for col, typ in self.variable_types.items() if typ == 'continuous']
         categorical_vars = [col for col, typ in self.variable_types.items()
-                           if typ in ['categorical', 'categorical_numeric', 'ordinal']]
+                            if typ in ['categorical', 'categorical_numeric', 'ordinal']]
         date_cols = [col for col, typ in self.variable_types.items() if typ == 'datetime']
 
         base = BaseAnalyzer(self.data, self.variable_types, self.type_reasons, self.quiet)
@@ -577,19 +577,19 @@ class AutoStatisticalAnalyzer:
                 variable_summaries[col] = {
                     'type': var_type,
                     'type_desc': self._get_type_description(var_type),
-                    'count': summary['n'],
-                    'missing': summary['n_missing'],
-                    'missing_pct': summary['missing_pct'],
-                    'mean': summary['mean'],
-                    'std': summary['std'],
-                    'median': summary['median'],
-                    'q1': summary['q1'],
-                    'q3': summary['q3'],
-                    'min': summary['min'],
-                    'max': summary['max'],
-                    'skew': summary['skew'],
-                    'kurtosis': summary['kurtosis'],
-                    'is_normal': summary['is_normal']
+                    'count': summary.get('n', 0),
+                    'missing': summary.get('n_missing', 0),
+                    'missing_pct': summary.get('missing_pct', 0),
+                    'mean': summary.get('mean', 0),
+                    'std': summary.get('std', 0),
+                    'median': summary.get('median', 0),
+                    'q1': summary.get('q1', 0),
+                    'q3': summary.get('q3', 0),
+                    'min': summary.get('min', 0),
+                    'max': summary.get('max', 0),
+                    'skew': summary.get('skew', 0),
+                    'kurtosis': summary.get('kurtosis', 0),
+                    'is_normal': summary.get('is_normal', False)
                 }
             elif var_type in ['categorical', 'categorical_numeric', 'ordinal']:
                 top_categories = {}
@@ -598,34 +598,36 @@ class AutoStatisticalAnalyzer:
                 variable_summaries[col] = {
                     'type': var_type,
                     'type_desc': self._get_type_description(var_type),
-                    'count': summary['n'],
-                    'missing': summary['n_missing'],
-                    'missing_pct': summary['missing_pct'],
-                    'n_unique': summary['n_unique'],
-                    'mode': str(summary['mode']) if summary['mode'] else None,
-                    'mode_freq': summary['mode_freq'],
-                    'mode_pct': summary['mode_pct'],
+                    'count': summary.get('n', 0),
+                    'missing': summary.get('n_missing', 0),
+                    'missing_pct': summary.get('missing_pct', 0),
+                    'n_unique': summary.get('n_unique', 0),
+                    'mode': str(summary.get('mode', '')) if summary.get('mode') else None,
+                    'mode_freq': summary.get('mode_freq', 0),
+                    'mode_pct': summary.get('mode_pct', 0),
                     'top_categories': top_categories
                 }
             elif var_type == 'datetime':
                 variable_summaries[col] = {
                     'type': var_type,
                     'type_desc': self._get_type_description(var_type),
-                    'count': summary['n'],
-                    'missing': summary['n_missing'],
-                    'missing_pct': summary['missing_pct'],
-                    'min_date': str(summary['min_date']),
-                    'max_date': str(summary['max_date']),
-                    'date_range_days': summary['date_range'].days if hasattr(summary['date_range'], 'days') else None,
-                    'n_unique': summary['n_unique']
+                    'count': summary.get('n', 0),
+                    'missing': summary.get('n_missing', 0),
+                    'missing_pct': summary.get('missing_pct', 0),
+                    'min_date': str(summary.get('min_date', '')) if summary.get('min_date') else None,
+                    'max_date': str(summary.get('max_date', '')) if summary.get('max_date') else None,
+                    'date_range_days': summary.get('date_range').days if hasattr(summary.get('date_range'),
+                                                                                 'days') else None,
+                    'n_unique': summary.get('n_unique', 0)
                 }
             else:
                 variable_summaries[col] = {
                     'type': var_type,
                     'type_desc': self._get_type_description(var_type),
-                    'count': summary['n'],
-                    'missing': summary['n_missing'],
-                    'missing_pct': summary['missing_pct']
+                    'count': summary.get('n', 0),
+                    'missing': summary.get('n_missing', 0),
+                    'missing_pct': summary.get('missing_pct', 0),
+                    'n_unique': summary.get('n_unique', 0)
                 }
 
         correlation_matrix = None

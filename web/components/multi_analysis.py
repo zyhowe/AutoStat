@@ -44,6 +44,24 @@ def multi_file_mode():
         help="按住 Ctrl 或 Cmd 键可选择多个文件，建议不超过10个"
     )
 
+    # 检测文件是否变化
+    current_files_key = tuple(sorted([f.name for f in files])) if files else None
+    if current_files_key != st.session_state.get("last_multi_files_key"):
+        st.session_state.last_multi_files_key = current_files_key
+        # 清除多文件相关的缓存
+        if "multi_relationships" in st.session_state:
+            del st.session_state.multi_relationships
+        if "relationship_refresh_ts" in st.session_state:
+            del st.session_state.relationship_refresh_ts
+        if "multi_table_type_keys" in st.session_state:
+            del st.session_state.multi_table_type_keys
+        # 清除每个表的类型缓存
+        keys_to_delete = [k for k in st.session_state.keys() if k.startswith("saved_variable_types_")]
+        for key in keys_to_delete:
+            del st.session_state[key]
+        if "field_selector_refresh_ts" in st.session_state:
+            del st.session_state.field_selector_refresh_ts
+
     if files and len(files) >= 2:
         # 表数量检查
         if len(files) > 10:

@@ -73,8 +73,7 @@ def get_default_variable_type(col: str, df: pd.DataFrame) -> str:
     return "exclude"
 
 
-def render_field_selector(df: pd.DataFrame, initial_types: Dict[str, str] = None, prefix: str = "",
-                          save_key: str = None) -> Tuple[List[str], Dict[str, str]]:
+def render_field_selector(df: pd.DataFrame, initial_types: Dict[str, str] = None, prefix: str = "", save_key: str = None) -> Tuple[List[str], Dict[str, str]]:
     """渲染字段选择器
 
     参数:
@@ -167,15 +166,14 @@ def render_field_selector(df: pd.DataFrame, initial_types: Dict[str, str] = None
 
 
 def render_preprocessing_interface(
-        df: pd.DataFrame,
-        title: str = "数据预处理",
-        initial_types: Dict[str, str] = None
+    df: pd.DataFrame,
+    title: str = "数据预处理",
+    initial_types: Dict[str, str] = None
 ) -> Tuple[bool, pd.DataFrame, Dict[str, str]]:
     """渲染预处理界面（单表模式）"""
     st.markdown(f"### 🔧 {title}")
 
-    selected_columns, variable_types = render_field_selector(df, initial_types, prefix="",
-                                                             save_key="saved_variable_types")
+    selected_columns, variable_types = render_field_selector(df, initial_types, prefix="", save_key="saved_variable_types")
 
     if not selected_columns:
         st.warning("⚠️ 请至少保留一个字段")
@@ -200,6 +198,16 @@ def render_relationship_manager(table_names: List[str]) -> List[Dict]:
 
     # 获取刷新时间戳
     refresh_ts = st.session_state.get("relationship_refresh_ts", int(time.time()))
+
+    # 显示关系摘要（放在最上面）
+    if relationships:
+        st.markdown("---")
+        st.markdown("**关系摘要：**")
+        for rel in relationships:
+            if rel.get('from_col') and rel.get('to_col'):
+                st.caption(f"  • {rel.get('from_table')}.{rel.get('from_col')} → {rel.get('to_table')}.{rel.get('to_col')}")
+            else:
+                st.caption(f"  • ⚠️ 不完整关系: {rel.get('from_table')}.{rel.get('from_col')} → {rel.get('to_table')}.{rel.get('to_col')}")
 
     # 显示现有关系（支持修改和删除）
     if relationships:
@@ -420,9 +428,9 @@ def auto_discover_relationships(tables: Dict[str, pd.DataFrame]) -> List[Dict]:
 
 
 def render_multi_preprocessing_interface(
-        tables: Dict[str, pd.DataFrame],
-        relationships: List[Dict] = None,
-        initial_types_dict: Dict[str, Dict[str, str]] = None
+    tables: Dict[str, pd.DataFrame],
+    relationships: List[Dict] = None,
+    initial_types_dict: Dict[str, Dict[str, str]] = None
 ) -> Tuple[bool, Dict[str, pd.DataFrame], Dict[str, Dict[str, str]], List[Dict]]:
     """渲染多表预处理界面 - 自动发现关系"""
     st.markdown(f"### 🔧 数据预处理")
@@ -431,6 +439,24 @@ def render_multi_preprocessing_interface(
     variable_types_dict = {}
 
     table_names = list(tables.keys())
+
+    # 检查表是否变化，如果变化则清除缓存
+    current_table_key = tuple(sorted(table_names))
+    if current_table_key != st.session_state.get("last_table_key"):
+        st.session_state.last_table_key = current_table_key
+        if "multi_relationships" in st.session_state:
+            del st.session_state.multi_relationships
+        if "relationship_refresh_ts" in st.session_state:
+            del st.session_state.relationship_refresh_ts
+        if "multi_table_type_keys" in st.session_state:
+            del st.session_state.multi_table_type_keys
+        # 清除每个表的类型缓存
+        keys_to_delete = [k for k in st.session_state.keys() if k.startswith("saved_variable_types_")]
+        for key in keys_to_delete:
+            del st.session_state[key]
+        if "field_selector_refresh_ts" in st.session_state:
+            del st.session_state.field_selector_refresh_ts
+
     tabs = st.tabs(table_names)
 
     # 初始化每个表的类型保存 key
@@ -483,8 +509,7 @@ def render_multi_preprocessing_interface(
 
     # 开始分析按钮
     if st.button("▶️ 开始分析", type="primary", width="stretch", key="multi_preprocess_confirm"):
-        valid_relationships = [rel for rel in st.session_state.multi_relationships if
-                               rel.get('from_col') and rel.get('to_col')]
+        valid_relationships = [rel for rel in st.session_state.multi_relationships if rel.get('from_col') and rel.get('to_col')]
         return True, valid_tables, variable_types_dict, valid_relationships
 
     return False, None, None, None
