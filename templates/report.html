@@ -287,34 +287,51 @@
         <div class="info-box">
             💡 以下是基于您的数据特征推荐的分析任务和模型
         </div>
-        <table class="model-table">
-            <thead>
+        <div style="overflow-x: auto;">
+            <table class="model-table" style="min-width: 1200px;">
+                <thead>
+                    <tr>
+                        <th style="width: 60px;">优先级</th>
+                        <th style="width: 180px;">任务类型</th>
+                        <th style="width: 120px;">目标字段</th>
+                        <th style="width: 200px;">推荐特征</th>
+                        <th style="width: 100px;">传统模型</th>
+                        <th style="width: 150px;">机器学习</th>
+                        <th style="width: 120px;">深度学习</th>
+                        <th style="width: 150px;">大模型</th>
+                        <th style="width: 200px;">建议原因</th>
+                    </tr>
+                </thead>
+                <tbody>
+                {% for rec in model_recommendations %}
                 <tr>
-                    <th>优先级</th>
-                    <th>任务类型</th>
-                    <th>目标字段</th>
-                    <th>传统模型</th>
-                    <th>机器学习</th>
-                    <th>深度学习</th>
-                    <th>大模型</th>
-                    <th>建议原因</th>
+                    <td><span class="{% if rec.priority == '高' %}badge-high{% elif rec.priority == '中' %}badge-mid{% else %}badge-low{% endif %}">{{ rec.priority }}</span></td>
+                    <td>{{ rec.task_type }}</td>
+                    <td><strong>{{ rec.target_column }}</strong></td>
+                    <td>
+                        {% if rec.feature_columns %}
+                            <span style="font-size: 12px; color: #555;">
+                            {% for feat in rec.feature_columns[:5] %}
+                                {{ feat }}{% if not loop.last %}, {% endif %}
+                            {% endfor %}
+                            {% if rec.feature_columns|length > 5 %}
+                                ... 等{{ rec.feature_columns|length }}个
+                            {% endif %}
+                            </span>
+                        {% else %}
+                            <span style="color: #999;">-</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ rec.traditional }}</td>
+                    <td>{{ rec.ml }}</td>
+                    <td>{{ rec.dl }}</td>
+                    <td>{{ rec.llm }}</td>
+                    <td>{{ rec.reason }}</td>
                 </tr>
-            </thead>
-            <tbody>
-            {% for rec in model_recommendations %}
-            <tr>
-                <td><span class="{% if rec.priority == '高' %}badge-high{% elif rec.priority == '中' %}badge-mid{% else %}badge-low{% endif %}">{{ rec.priority }}</span></td>
-                <td>{{ rec.task_type }}</td>
-                <td><strong>{{ rec.target_column }}</strong></td>
-                <td>{{ rec.traditional }}</td>
-                <td>{{ rec.ml }}</td>
-                <td>{{ rec.dl }}</td>
-                <td>{{ rec.llm }}</td>
-                <td>{{ rec.reason }}</td>
-            </tr>
-            {% endfor %}
-            </tbody>
-        </table>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
         {% else %}
         <div class="warning-box">
             ⚠️ 数据特征不足，无法生成建模建议<br>

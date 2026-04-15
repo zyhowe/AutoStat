@@ -1,10 +1,9 @@
 """AI智能解读组件"""
 
 import streamlit as st
-import json
 import pandas as pd
 import re
-from autostat.llm_client import LLMClient
+from autostat.prompts import get_recommended_questions
 
 
 def get_initial_question(analysis_type: str) -> str:
@@ -19,41 +18,8 @@ def get_initial_question(analysis_type: str) -> str:
         return "请根据这份数据分析报告，帮我解读一下主要内容。"
 
 
-def get_recommended_questions(analysis_type: str, json_data: dict) -> list:
-    """根据分析类型和数据特征生成推荐问题"""
-    questions = []
-
-    if analysis_type == "single":
-        questions.append("📊 解读数据的主要特征")
-        questions.append("⚠️ 分析数据质量问题和清洗建议")
-        questions.append("🔗 分析变量之间的相关性")
-        questions.append("📈 时间序列分析和预测建议")
-        questions.append("🤖 推荐适合的建模方案")
-
-        if json_data:
-            date_cols = [col for col, info in json_data.get('variable_types', {}).items()
-                         if info.get('type') == 'datetime']
-            if date_cols:
-                questions.append(f"📅 分析{date_cols[0]}的时间趋势")
-                questions.append(f"🔍 查询特定时间范围的数据")
-
-    elif analysis_type == "multi":
-        questions.append("🔗 解读表间关系和关联方式")
-        questions.append("📊 各表的数据质量分析")
-        questions.append("🏗️ 建议构建什么样的数据模型")
-        questions.append("🔍 跨表关联分析建议")
-
-    elif analysis_type == "database":
-        questions.append("🏗️ 评估数据库设计合理性")
-        questions.append("⚡ 索引优化和性能建议")
-        questions.append("📈 BI分析和核心指标建议")
-        questions.append("🛡️ 数据治理建议")
-
-    return questions
-
-
-def build_json_context_prompt(json_data: dict, analysis_type: str) -> str:
-    """从 JSON 数据构建上下文提示词"""
+def extract_json_context(json_data: dict, analysis_type: str) -> str:
+    """从 JSON 数据提取上下文信息（纯数据提取，不含提示词前缀）"""
 
     data_shape = json_data.get('data_shape', {})
     variable_types = json_data.get('variable_types', {})
@@ -64,10 +30,6 @@ def build_json_context_prompt(json_data: dict, analysis_type: str) -> str:
     variable_summaries = json_data.get('variable_summaries', {})
 
     type_counts = {}
-    for col, info in variable_types.items():
-        typ = info.get('type', 'unknown')
-        type_counts[typ] = type_counts.get(typ, 0) + 1
-
     type_display = {
         'continuous': '连续变量',
         'categorical': '分类变量',
@@ -77,11 +39,16 @@ def build_json_context_prompt(json_data: dict, analysis_type: str) -> str:
         'identifier': '标识符',
         'text': '文本'
     }
+    for col, info in variable_types.items():
+        typ = info.get('type', 'unknown')
+        type_counts[typ] = type_counts.get(typ, 0) + 1
 
     type_summary = ", ".join([f"{type_display.get(t, t)}: {c}" for t, c in type_counts.items()])
 
     missing_list = quality_report.get('missing', [])
     missing_summary = "\n".join([f"  - {m['column']}: {m['percent']:.1f}%" for m in missing_list[:10]])
+    if len(missing_list) > 10:
+        missing_summary += f"\n  - ... 还有 {len(missing_list) - 10} 个字段"
 
     outliers = quality_report.get('outliers', {})
     outlier_summary = "\n".join([f"  - {col}: {info.get('count', 0)}个 ({info.get('percent', 0):.1f}%)"
@@ -145,53 +112,51 @@ def build_json_context_prompt(json_data: dict, analysis_type: str) -> str:
                     multi_info += f"  - {rel.get('from_table')}.{rel.get('from_col')} → {rel.get('to_table')}.{rel.get('to_col')}\n"
 
     return f"""
-## JSON 分析结果数据
+### JSON 分析结果数据
 
-### 数据概览
+**数据概览**
 - 总行数: {data_shape.get('rows', 0):,}
 - 总列数: {data_shape.get('columns', 0)}
 - 变量类型分布: {type_summary}
 
-### 日期范围
+**日期范围**
 {date_range_info if date_range_info else '  无日期列'}
 
-### 数值变量分布
+**数值变量分布**
 {numeric_summary if numeric_summary else '  无数值变量'}
 
-### 数据质量
-**缺失值:**
+**数据质量**
+缺失值:
 {missing_summary if missing_summary else '  无缺失值'}
 
-**异常值:**
+异常值:
 {outlier_summary if outlier_summary else '  无异常值'}
 
-**重复记录:** {quality_report.get('duplicates', {}).get('count', 0)}条
+重复记录: {quality_report.get('duplicates', {}).get('count', 0)}条
 
-### 清洗建议
+**清洗建议**
 {chr(10).join([f"  - {s}" for s in cleaning_suggestions[:5]]) if cleaning_suggestions else '  无清洗建议'}
 
-### 相关性分析
+**相关性分析**
 {corr_summary if corr_summary else '  无强相关对'}
 
-### 建模建议
+**建模建议**
 {model_summary if model_summary else '  无建模建议'}
 
 {multi_info}
 """
 
 
-def build_html_context_prompt(html_content: str) -> str:
-    """从 HTML 报告提取关键信息构建上下文提示词"""
+def extract_html_context(html_content: str) -> str:
+    """从 HTML 报告提取关键信息（纯数据提取，不含提示词前缀）"""
 
     context_parts = []
-    context_parts.append("## HTML 分析报告摘要")
 
     title_match = re.search(r'<h1>(.*?)</h1>', html_content)
     if title_match:
         context_parts.append(f"报告标题: {title_match.group(1)}")
 
-    stat_cards = re.findall(r'<div class="stat-card"><div class="value">(.*?)</div><div class="label">(.*?)</div>',
-                            html_content)
+    stat_cards = re.findall(r'<div class="stat-card"><div class="value">(.*?)</div><div class="label">(.*?)</div>', html_content)
     if stat_cards:
         stats_summary = "**关键指标:**\n"
         for value, label in stat_cards:
@@ -216,15 +181,13 @@ def build_html_context_prompt(html_content: str) -> str:
         if cleaning_items:
             context_parts.append("**清洗建议:** " + ", ".join(cleaning_items[:3]))
 
-    context_parts.append("\n*注：完整的 HTML 报告包含图表可视化，以上为提取的关键文本信息*")
-
-    return "\n".join(context_parts)
+    return "\n".join(context_parts) if context_parts else "无法提取HTML摘要信息"
 
 
-def build_data_context_prompt(raw_data_preview: dict) -> str:
-    """从原始数据构建上下文提示词"""
+def extract_data_context(raw_data_preview: dict) -> str:
+    """从原始数据提取上下文信息（纯数据提取，不含提示词前缀）"""
     if raw_data_preview is None:
-        return "## 源数据\n无源数据信息"
+        return "无源数据信息"
 
     shape = raw_data_preview.get('shape', (0, 0))
     dtypes = raw_data_preview.get('dtypes', {})
@@ -235,7 +198,6 @@ def build_data_context_prompt(raw_data_preview: dict) -> str:
     date_cols = raw_data_preview.get('date_cols', [])
 
     context_parts = []
-    context_parts.append("## 源数据信息")
     context_parts.append(f"- 数据形状: {shape[0]} 行 × {shape[1]} 列")
 
     type_counts = {}
@@ -264,7 +226,7 @@ def build_data_context_prompt(raw_data_preview: dict) -> str:
             stats = summary_stats.get(col, {})
             if stats.get('type') == 'datetime':
                 context_parts.append(f"- {col}: {stats.get('min', 'N/A')} 至 {stats.get('max', 'N/A')} "
-                                     f"(共{stats.get('unique_dates', 0)}个日期)")
+                                   f"(共{stats.get('unique_dates', 0)}个日期)")
 
     if numeric_cols:
         context_parts.append("\n### 数值列统计")
@@ -272,8 +234,8 @@ def build_data_context_prompt(raw_data_preview: dict) -> str:
             stats = summary_stats.get(col, {})
             if stats.get('type') == 'numeric':
                 context_parts.append(f"- {col}: 范围=[{stats.get('min', 'N/A'):.2f}, {stats.get('max', 'N/A'):.2f}], "
-                                     f"均值={stats.get('mean', 'N/A'):.2f}, "
-                                     f"中位数={stats.get('median', 'N/A'):.2f}")
+                                   f"均值={stats.get('mean', 'N/A'):.2f}, "
+                                   f"中位数={stats.get('median', 'N/A'):.2f}")
 
     if cat_cols:
         context_parts.append("\n### 分类列统计")
@@ -283,24 +245,18 @@ def build_data_context_prompt(raw_data_preview: dict) -> str:
                 top_vals = stats.get('top_values', {})
                 top_str = ", ".join([f"{k}:{v}" for k, v in list(top_vals.items())[:3]])
                 context_parts.append(f"- {col}: {stats.get('unique_count', 0)}个唯一值, "
-                                     f"最高频占比={stats.get('top_percent', 0):.1f}%, "
-                                     f"前3: {top_str}")
+                                   f"最高频占比={stats.get('top_percent', 0):.1f}%, "
+                                   f"前3: {top_str}")
 
     if len(preview) > 0:
         preview_str = preview.head(50).to_string()
         context_parts.append(f"\n### 数据预览 (前50行)\n```\n{preview_str}\n```")
 
-    context_parts.append("\n### 数据查询说明")
-    context_parts.append("你可以根据日期范围查询具体数据，例如：")
-    context_parts.append("- 查询某个月份的所有数据")
-    context_parts.append("- 按条件筛选特定记录")
-    context_parts.append("- 统计特定时间段的汇总信息")
-
     return "\n".join(context_parts)
 
 
 def build_context_prompt(selected_contexts, analysis_type, json_data, html_content, raw_data_preview, source_name):
-    """根据选中的上下文构建提示词"""
+    """根据选中的上下文构建完整提示词"""
 
     context_parts = []
 
@@ -309,22 +265,27 @@ def build_context_prompt(selected_contexts, analysis_type, json_data, html_conte
         "multi": "多文件分析",
         "database": "数据库分析"
     }
-    context_parts.append(
-        f"## 分析概况\n- 分析类型: {analysis_type_map.get(analysis_type, '未知')}\n- 数据源: {source_name}\n")
+    context_parts.append(f"**分析类型:** {analysis_type_map.get(analysis_type, '未知')}")
+    context_parts.append(f"**数据源:** {source_name}")
+    context_parts.append("")
 
     if "json_result" in selected_contexts and json_data:
-        context_parts.append(build_json_context_prompt(json_data, analysis_type))
+        context_parts.append(extract_json_context(json_data, analysis_type))
 
     if "html_report" in selected_contexts and html_content:
-        context_parts.append(build_html_context_prompt(html_content))
+        html_summary = extract_html_context(html_content)
+        if html_summary:
+            context_parts.append(f"### HTML 报告摘要\n{html_summary}")
 
     if "raw_data" in selected_contexts and raw_data_preview:
-        context_parts.append(build_data_context_prompt(raw_data_preview))
+        context_parts.append(f"### 源数据信息\n{extract_data_context(raw_data_preview)}")
+
+    full_context = "\n\n".join(context_parts)
 
     full_prompt = f"""
 你是一位专业的数据分析师。以下是根据用户选择的上下文提供的分析数据。
 
-{chr(10).join(context_parts)}
+{full_context}
 
 ---
 
@@ -333,7 +294,7 @@ def build_context_prompt(selected_contexts, analysis_type, json_data, html_conte
 - 源数据包含完整的数据预览（前50行）和统计信息
 - 你可以根据日期范围、数值范围等条件查询具体数据
 - 如果用户询问具体数据（如某年某月的数据），请根据数据预览和统计信息回答
-- 用中文回答，结构清晰，使用markdown格式
+- 用中文回答，结构清晰
 """
     return full_prompt
 
@@ -448,9 +409,16 @@ def render_chat_interface():
                 st.markdown(msg["content"])
 
     if st.session_state.current_json_data:
+        has_datetime = False
+        if st.session_state.current_json_data.get('variable_types'):
+            for info in st.session_state.current_json_data.get('variable_types', {}).values():
+                if info.get('type') == 'datetime':
+                    has_datetime = True
+                    break
+
         recommended_qs = get_recommended_questions(
             st.session_state.current_analysis_type,
-            st.session_state.current_json_data
+            has_datetime
         )
 
         st.markdown("#### 💡 推荐问题")
@@ -459,7 +427,7 @@ def render_chat_interface():
         cols = st.columns(min(len(recommended_qs), 3))
         for i, q in enumerate(recommended_qs):
             col_idx = i % 3
-            if cols[col_idx].button(q, key=f"rec_q_{i}", width="stretch"):
+            if cols[col_idx].button(q, key=f"rec_q_{i}", use_container_width=True):
                 send_message(q)
                 st.rerun()
 

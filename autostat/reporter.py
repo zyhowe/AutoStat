@@ -412,3 +412,4 @@ class Reporter:
                 numeric_vars, categorical_vars, datetime_vars
             )
         return []
+
