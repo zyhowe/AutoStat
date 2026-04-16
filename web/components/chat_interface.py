@@ -299,7 +299,7 @@ def build_context_prompt(selected_contexts, analysis_type, json_data, html_conte
     return full_prompt
 
 
-def send_message(question: str):
+def send_message(question: str, analysis_type: str = None):
     """发送消息到 AI（使用当前选中的上下文）"""
     if not question or not question.strip():
         return False
@@ -341,6 +341,505 @@ def send_message(question: str):
     st.session_state.chat_messages.append({"role": "assistant", "content": full_response})
     return True
 
+
+def render_scenario_recommendation():
+    """渲染业务场景推荐Tab"""
+    st.markdown("#### 🎯 业务场景推荐")
+    st.caption("基于JSON分析结果和源数据，自动识别业务场景并提供分析建议")
+
+    # 检查是否有JSON结果
+    if st.session_state.current_json_data is None:
+        st.warning("⚠️ 请先完成数据分析，生成JSON报告")
+        return
+
+    # 检查是否有源数据
+    if "raw_data" not in st.session_state.selected_contexts:
+        st.info("💡 提示：场景推荐需要基于JSON分析结果和源数据，建议勾选「JSON结果」和「源数据」")
+
+    # 提取数据特征用于展示
+    json_data = st.session_state.current_json_data
+    variable_types = json_data.get('variable_types', {})
+    quality_report = json_data.get('quality_report', {})
+    time_series_diagnostics = json_data.get('time_series_diagnostics', {})
+
+    # 统计变量类型
+    type_counts = {}
+    for col, info in variable_types.items():
+        typ = info.get('type', 'unknown')
+        type_counts[typ] = type_counts.get(typ, 0) + 1
+
+    type_names = {
+        'continuous': '连续变量',
+        'categorical': '分类变量',
+        'datetime': '日期时间',
+        'identifier': '标识符',
+        'text': '文本'
+    }
+
+    # 显示数据特征摘要
+    with st.expander("📊 数据特征摘要", expanded=False):
+        st.caption("**变量类型分布：**")
+        for typ, name in type_names.items():
+            if typ in type_counts:
+                st.caption(f"  - {name}: {type_counts[typ]}个")
+
+        # 时间序列信息
+        if time_series_diagnostics:
+            st.caption("\n**时间序列检测：**")
+            for key, diag in list(time_series_diagnostics.items())[:3]:
+                st.caption(f"  - {key}: 平稳性={'是' if diag.get('is_stationary') else '否'}, "
+                           f"自相关={'有' if diag.get('has_autocorrelation') else '无'}")
+
+        # 数据质量
+        missing_count = len(quality_report.get('missing', []))
+        outlier_count = len(quality_report.get('outliers', {}))
+        if missing_count > 0 or outlier_count > 0:
+            st.caption("\n**数据质量提示：**")
+            if missing_count > 0:
+                st.caption(f"  - 存在 {missing_count} 个字段有缺失值")
+            if outlier_count > 0:
+                st.caption(f"  - 存在 {outlier_count} 个字段有异常值")
+
+    if st.button("🔍 自动识别业务场景", key="detect_scenario", use_container_width=True):
+        with st.spinner("正在分析数据特征，识别业务场景..."):
+            # 提取关键信息用于场景识别
+            numeric_cols = [col for col, info in variable_types.items()
+                            if info.get('type') == 'continuous']
+            categorical_cols = [col for col, info in variable_types.items()
+                                if info.get('type') in ['categorical', 'categorical_numeric', 'ordinal']]
+            date_cols = [col for col, info in variable_types.items()
+                         if info.get('type') == 'datetime']
+
+            # 构建场景识别问题
+            question = f"""请根据以下数据特征，自动识别业务场景：
+
+## 数据特征
+- 连续变量: {len(numeric_cols)}个 ({', '.join(numeric_cols[:8])})
+- 分类变量: {len(categorical_cols)}个 ({', '.join(categorical_cols[:8])})
+- 日期变量: {len(date_cols)}个 ({', '.join(date_cols[:8])})
+- 是否包含时间序列: {'是' if time_series_diagnostics else '否'}
+
+## 主要字段
+{', '.join(list(variable_types.keys())[:20])}
+
+## 任务
+1. 根据字段特征判断这是什么业务场景（如：销售分析、用户分析、财务分析、运营分析、风控分析等）
+2. 给出判断依据（哪些字段支持这个判断）
+3. 推荐该场景下的核心分析维度和关键指标
+4. 提供2-3个具体的分析问题和业务洞察建议
+
+请用中文回答，结构清晰。"""
+            send_message(question)
+            st.rerun()
+
+    st.divider()
+
+    # 动态生成快速开始按钮（基于实际字段）
+    st.markdown("**快速开始：**")
+
+    # 根据实际字段生成推荐视角
+    col1, col2 = st.columns(2)
+
+    # 检测是否有销售相关字段
+    sales_keywords = ['销售', '销售额', '销量', '价格', '金额', '收入', 'sales', 'revenue', 'amount', 'price']
+    has_sales = any(any(kw in col.lower() for kw in sales_keywords) for col in variable_types.keys())
+
+    # 检测是否有用户相关字段
+    user_keywords = ['用户', '会员', '客户', 'user', 'customer', 'member']
+    has_user = any(any(kw in col.lower() for kw in user_keywords) for col in variable_types.keys())
+
+    # 检测是否有财务相关字段
+    finance_keywords = ['成本', '利润', '费用', '支出', '预算', 'cost', 'profit', 'expense', 'budget']
+    has_finance = any(any(kw in col.lower() for kw in finance_keywords) for col in variable_types.keys())
+
+    # 检测是否有运营相关字段
+    operation_keywords = ['点击', '曝光', '转化', 'pv', 'uv', 'click', 'view', 'conversion']
+    has_operation = any(any(kw in col.lower() for kw in operation_keywords) for col in variable_types.keys())
+
+    with col1:
+        if has_sales:
+            if st.button("📊 销售分析视角", key="scene_sales", use_container_width=True):
+                # 提取销售相关字段
+                sales_fields = [col for col in variable_types.keys()
+                                if any(kw in col.lower() for kw in sales_keywords)]
+                fields_str = ", ".join(sales_fields[:5]) if sales_fields else "相关字段"
+                question = f"""请从销售分析的角度解读数据，重点关注以下字段：
+{fields_str}
+
+请分析：
+1. 销售额/销量的时间趋势（如有日期字段）
+2. 产品/类别排行分析
+3. 客户贡献度分析（如有客户字段）
+4. 销售预测建议
+
+请基于实际数据特征回答。"""
+                send_message(question)
+                st.rerun()
+        else:
+            st.button("📊 销售分析视角", key="scene_sales_disabled", disabled=True, use_container_width=True,
+                      help="未检测到销售相关字段")
+
+    with col2:
+        if has_user:
+            if st.button("👥 用户分析视角", key="scene_user", use_container_width=True):
+                user_fields = [col for col in variable_types.keys()
+                               if any(kw in col.lower() for kw in user_keywords)]
+                fields_str = ", ".join(user_fields[:5]) if user_fields else "相关字段"
+                question = f"""请从用户分析的角度解读数据，重点关注以下字段：
+{fields_str}
+
+请分析：
+1. 用户画像特征
+2. 用户行为模式
+3. 用户分层和价值分析
+4. 用户留存/流失建议
+
+请基于实际数据特征回答。"""
+                send_message(question)
+                st.rerun()
+        else:
+            st.button("👥 用户分析视角", key="scene_user_disabled", disabled=True, use_container_width=True,
+                      help="未检测到用户相关字段")
+
+    col1, col2 = st.columns(2)
+    with col1:
+        if has_finance:
+            if st.button("💰 财务分析视角", key="scene_finance", use_container_width=True):
+                finance_fields = [col for col in variable_types.keys()
+                                  if any(kw in col.lower() for kw in finance_keywords)]
+                fields_str = ", ".join(finance_fields[:5]) if finance_fields else "相关字段"
+                question = f"""请从财务分析的角度解读数据，重点关注以下字段：
+{fields_str}
+
+请分析：
+1. 收入成本结构
+2. 利润率分析
+3. 预算执行情况（如有预算字段）
+4. 财务风险提示
+
+请基于实际数据特征回答。"""
+                send_message(question)
+                st.rerun()
+        else:
+            st.button("💰 财务分析视角", key="scene_finance_disabled", disabled=True, use_container_width=True,
+                      help="未检测到财务相关字段")
+
+    with col2:
+        if has_operation:
+            if st.button("📈 运营分析视角", key="scene_operation", use_container_width=True):
+                op_fields = [col for col in variable_types.keys()
+                             if any(kw in col.lower() for kw in operation_keywords)]
+                fields_str = ", ".join(op_fields[:5]) if op_fields else "相关字段"
+                question = f"""请从运营分析的角度解读数据，重点关注以下字段：
+{fields_str}
+
+请分析：
+1. 核心运营指标
+2. 效率分析
+3. 渠道效果评估（如有渠道字段）
+4. 优化建议
+
+请基于实际数据特征回答。"""
+                send_message(question)
+                st.rerun()
+        else:
+            st.button("📈 运营分析视角", key="scene_operation_disabled", disabled=True, use_container_width=True,
+                      help="未检测到运营相关字段")
+
+
+def render_natural_query():
+    """渲染自然语言查询Tab"""
+    st.markdown("#### 🔍 自然语言查询")
+    st.caption("用中文描述你想查询的数据，AI会基于JSON分析结果和源数据回答")
+
+    # 检查是否有JSON结果和源数据
+    if st.session_state.current_json_data is None:
+        st.warning("⚠️ 请先完成数据分析，生成JSON报告")
+        return
+
+    if "raw_data" not in st.session_state.selected_contexts:
+        st.info("💡 提示：自然语言查询需要基于源数据，建议在「选择分析上下文」中勾选「源数据」")
+
+    # 显示数据摘要，帮助用户理解可查询的内容
+    with st.expander("📋 数据摘要（可查询的字段）", expanded=False):
+        json_data = st.session_state.current_json_data
+        variable_types = json_data.get('variable_types', {})
+
+        # 按类型分组显示字段
+        fields_by_type = {
+            'continuous': '📊 数值字段（可计算均值、总和、最大/最小值）',
+            'categorical': '🏷️ 分类字段（可按类别分组统计）',
+            'datetime': '📅 日期字段（可按时间范围筛选）',
+            'identifier': '🔑 标识符（唯一标识）'
+        }
+
+        for typ, display_name in fields_by_type.items():
+            cols = [col for col, info in variable_types.items() if info.get('type') == typ]
+            if cols:
+                st.markdown(f"**{display_name}**")
+                # 每行显示5个字段
+                for i in range(0, len(cols), 5):
+                    st.caption("  " + ", ".join(cols[i:i + 5]))
+
+    # 动态生成示例查询（基于实际字段）
+    json_data = st.session_state.current_json_data
+    variable_types = json_data.get('variable_types', {})
+    variable_summaries = json_data.get('variable_summaries', {})
+
+    # 获取日期字段
+    date_cols = [col for col, info in variable_types.items() if info.get('type') == 'datetime']
+
+    # 获取数值字段
+    numeric_cols = [col for col, info in variable_types.items() if info.get('type') == 'continuous']
+
+    # 获取分类字段
+    cat_cols = [col for col, info in variable_types.items()
+                if info.get('type') in ['categorical', 'categorical_numeric', 'ordinal']]
+
+    st.markdown("**💡 示例查询（点击使用）：**")
+
+    # 生成示例列表
+    examples = []
+
+    # 时间范围查询示例
+    if date_cols:
+        date_field = date_cols[0]
+        examples.append(f"查询{date_field}在最近30天的数据")
+        examples.append(f"按{date_field}统计每天的记录数")
+
+    # 数值统计示例
+    if numeric_cols:
+        num_field = numeric_cols[0]
+        examples.append(f"统计{num_field}的平均值、最大值和最小值")
+        examples.append(f"{num_field}最高的前10条记录")
+        if len(numeric_cols) >= 2:
+            examples.append(f"分析{numeric_cols[0]}和{numeric_cols[1]}的相关性")
+
+    # 分类统计示例
+    if cat_cols:
+        cat_field = cat_cols[0]
+        examples.append(f"按{cat_field}分组统计记录数")
+        if numeric_cols:
+            examples.append(f"按{cat_field}分组统计{numeric_cols[0]}的平均值")
+
+    # 综合查询示例
+    if date_cols and numeric_cols:
+        examples.append(f"查询{date_cols[0]}在2024年且{numeric_cols[0]}大于平均值的记录")
+
+    # 显示示例按钮
+    for ex in examples[:8]:
+        if st.button(f"🔍 {ex}", key=f"ex_{hash(ex)}", use_container_width=True):
+            send_message(ex)
+            st.rerun()
+
+    st.divider()
+
+    query = st.text_input("输入您的查询", key="natural_query",
+                          placeholder="例如：查询销售额大于1000的订单，或统计每个月的销售额变化趋势")
+
+    col1, col2 = st.columns([1, 5])
+    with col1:
+        if st.button("查询", key="run_natural_query", use_container_width=True):
+            if "raw_data" not in st.session_state.selected_contexts:
+                st.error("请先在「选择分析上下文」中勾选「源数据」")
+            elif st.session_state.current_json_data is None:
+                st.error("请先完成数据分析")
+            elif query.strip():
+                # 获取数据范围信息
+                data_shape = json_data.get('data_shape', {})
+                rows = data_shape.get('rows', 0)
+
+                question = f"""请根据JSON分析结果和源数据回答以下查询：
+
+用户查询：{query}
+
+## 数据概况
+- 总行数: {rows}
+- 字段数: {len(variable_types)}
+- 主要字段: {', '.join(list(variable_types.keys())[:15])}
+
+## 字段类型
+{chr(10).join([f"- {col}: {info.get('type_desc', info.get('type', 'unknown'))}"
+               for col, info in list(variable_types.items())[:20]])}
+
+## 要求
+1. 如果查询的是具体数据，请列出相关记录
+2. 如果查询的是统计信息，请给出计算结果
+3. 请用中文回答，格式清晰
+4. 如果无法从数据中获取，请说明原因"""
+                send_message(question)
+                st.rerun()
+            else:
+                st.warning("请输入查询内容")
+
+
+def render_sql_generator():
+    """渲染SQL生成Tab（仅数据库模式）"""
+    st.markdown("#### 📝 SQL查询生成")
+    st.caption("用中文描述你想查询的数据，AI会基于表结构和关联关系生成SQL语句")
+
+    # 检查是否有JSON结果和源数据
+    if st.session_state.current_json_data is None:
+        st.warning("⚠️ 请先完成数据分析，生成JSON报告")
+        return
+
+    if "raw_data" not in st.session_state.selected_contexts:
+        st.info("💡 提示：SQL生成需要基于源数据，建议在「选择分析上下文」中勾选「源数据」")
+
+    # 显示表结构信息
+    with st.expander("📋 表结构信息", expanded=False):
+        json_data = st.session_state.current_json_data
+        variable_types = json_data.get('variable_types', {})
+
+        st.markdown("**字段列表：**")
+        for col, info in variable_types.items():
+            type_desc = info.get('type_desc', info.get('type', 'unknown'))
+            # 根据类型添加图标
+            icon = "📊" if type_desc == "连续变量" else "🏷️" if "分类" in type_desc else "📅" if "日期" in type_desc else "🔑"
+            st.caption(f"  {icon} {col}: {type_desc}")
+
+        # 显示表间关系（多表模式）
+        if st.session_state.current_analysis_type in ["multi", "database"]:
+            multi_info = json_data.get('multi_table_info', {})
+            relationships = multi_info.get('relationships', [])
+            tables = multi_info.get('tables', {})
+
+            if tables:
+                st.markdown("\n**表名列表：**")
+                for name in tables.keys():
+                    st.caption(f"  - {name}")
+
+            if relationships:
+                st.markdown("\n**表间关系：**")
+                for rel in relationships:
+                    st.caption(
+                        f"  - {rel.get('from_table')}.{rel.get('from_col')} → {rel.get('to_table')}.{rel.get('to_col')}")
+
+    # 动态生成示例SQL查询（基于实际字段）
+    json_data = st.session_state.current_json_data
+    variable_types = json_data.get('variable_types', {})
+    multi_info = json_data.get('multi_table_info', {})
+    tables = multi_info.get('tables', {})
+
+    # 获取主表名
+    main_table = list(tables.keys())[0] if tables else "your_table"
+
+    # 获取字段
+    numeric_cols = [col for col, info in variable_types.items() if info.get('type') == 'continuous']
+    cat_cols = [col for col, info in variable_types.items()
+                if info.get('type') in ['categorical', 'categorical_numeric', 'ordinal']]
+    date_cols = [col for col, info in variable_types.items() if info.get('type') == 'datetime']
+
+    st.markdown("**💡 示例SQL查询（点击使用）：**")
+
+    # 生成示例
+    sql_examples = []
+
+    if date_cols:
+        date_field = date_cols[0]
+        sql_examples.append(f"查询{date_field}在2024年的所有记录")
+        sql_examples.append(f"按{date_field}分组统计每天的记录数")
+
+    if numeric_cols:
+        num_field = numeric_cols[0]
+        sql_examples.append(f"查询{num_field}大于1000的记录")
+        sql_examples.append(f"按{num_field}降序排序，取前10条")
+
+    if cat_cols:
+        cat_field = cat_cols[0]
+        sql_examples.append(f"按{cat_field}分组统计记录数")
+        if numeric_cols:
+            sql_examples.append(f"按{cat_field}分组计算{numeric_cols[0]}的平均值")
+
+    if len(numeric_cols) >= 2:
+        sql_examples.append(f"计算{numeric_cols[0]}和{numeric_cols[1]}的相关性")
+
+    # 多表关联示例
+    relationships = multi_info.get('relationships', [])
+    if relationships:
+        rel = relationships[0]
+        sql_examples.append(f"关联{rel.get('from_table')}和{rel.get('to_table')}，查询完整信息")
+
+    # 显示示例按钮
+    for ex in sql_examples[:6]:
+        if st.button(f"📝 {ex}", key=f"sql_ex_{hash(ex)}", use_container_width=True):
+            # 构建表结构信息
+            table_info = "\n".join([f"  - {col}: {info.get('type_desc', info.get('type', 'unknown'))}"
+                                    for col, info in variable_types.items()])
+
+            # 获取表间关系
+            rel_info = ""
+            if relationships:
+                rel_info = "\n\n**表间关系：**\n"
+                for rel in relationships:
+                    rel_info += f"  - {rel.get('from_table')}.{rel.get('from_col')} = {rel.get('to_table')}.{rel.get('to_col')}\n"
+
+            question = f"""请根据以下表结构生成SQL查询语句：
+
+## 用户需求
+{ex}
+
+## 表名
+{main_table}
+
+## 表结构
+{table_info}
+{rel_info}
+
+## 要求
+1. 只输出SQL语句，用```sql```代码块包裹
+2. 添加必要的注释说明
+3. 考虑性能优化（如索引使用）
+4. 如果涉及多表，请正确使用JOIN"""
+            send_message(question)
+            st.rerun()
+
+    st.divider()
+
+    query = st.text_input("输入您的查询", key="sql_query",
+                          placeholder="例如：查询销售额最高的前10个产品，或关联订单表和用户表")
+
+    col1, col2 = st.columns([1, 5])
+    with col1:
+        if st.button("生成SQL", key="generate_sql", use_container_width=True):
+            if "raw_data" not in st.session_state.selected_contexts:
+                st.error("请先在「选择分析上下文」中勾选「源数据」")
+            elif st.session_state.current_json_data is None:
+                st.error("请先完成数据分析")
+            elif query.strip():
+                # 构建表结构信息
+                variable_types = st.session_state.current_json_data.get('variable_types', {})
+                table_info = "\n".join([f"  - {col}: {info.get('type_desc', info.get('type', 'unknown'))}"
+                                        for col, info in variable_types.items()])
+
+                # 获取表间关系
+                multi_info = st.session_state.current_json_data.get('multi_table_info', {})
+                relationships = multi_info.get('relationships', [])
+                rel_info = ""
+                if relationships:
+                    rel_info = "\n\n**表间关系：**\n"
+                    for rel in relationships:
+                        rel_info += f"  - {rel.get('from_table')}.{rel.get('from_col')} = {rel.get('to_table')}.{rel.get('to_col')}\n"
+
+                question = f"""请根据以下表结构生成SQL查询语句：
+
+## 用户需求
+{query}
+
+## 表结构
+{table_info}
+{rel_info}
+
+## 要求
+1. 只输出SQL语句，用```sql```代码块包裹
+2. 添加必要的注释说明
+3. 考虑性能优化（如索引使用）
+4. 如果涉及多表，请正确使用JOIN
+5. 表名使用实际表名"""
+                send_message(question)
+                st.rerun()
+            else:
+                st.warning("请输入查询内容")
 
 def render_chat_interface():
     """渲染聊天界面"""
@@ -400,6 +899,7 @@ def render_chat_interface():
 
     st.divider()
 
+    # 历史消息显示
     for msg in st.session_state.chat_messages:
         if msg["role"] == "user":
             with st.chat_message("user"):
@@ -408,36 +908,56 @@ def render_chat_interface():
             with st.chat_message("assistant"):
                 st.markdown(msg["content"])
 
-    if st.session_state.current_json_data:
-        has_datetime = False
-        if st.session_state.current_json_data.get('variable_types'):
-            for info in st.session_state.current_json_data.get('variable_types', {}).values():
-                if info.get('type') == 'datetime':
-                    has_datetime = True
-                    break
+    # Tab页
+    is_database = st.session_state.current_analysis_type == "database"
 
-        recommended_qs = get_recommended_questions(
-            st.session_state.current_analysis_type,
-            has_datetime
-        )
+    if is_database:
+        tab_labels = ["💬 对话", "🎯 场景推荐", "🔍 自然查询", "📝 SQL生成"]
+    else:
+        tab_labels = ["💬 对话", "🎯 场景推荐", "🔍 自然查询"]
 
-        st.markdown("#### 💡 推荐问题")
-        st.caption("点击下方问题快速提问")
+    tabs = st.tabs(tab_labels)
 
-        cols = st.columns(min(len(recommended_qs), 3))
-        for i, q in enumerate(recommended_qs):
-            col_idx = i % 3
-            if cols[col_idx].button(q, key=f"rec_q_{i}", use_container_width=True):
-                send_message(q)
-                st.rerun()
+    with tabs[0]:
+        if st.session_state.current_json_data:
+            has_datetime = False
+            if st.session_state.current_json_data.get('variable_types'):
+                for info in st.session_state.current_json_data.get('variable_types', {}).values():
+                    if info.get('type') == 'datetime':
+                        has_datetime = True
+                        break
 
-        st.divider()
+            recommended_qs = get_recommended_questions(
+                st.session_state.current_analysis_type,
+                has_datetime
+            )
 
-    prompt = st.chat_input("输入您的问题...", key="chat_input")
+            st.markdown("#### 💡 推荐问题")
+            st.caption("点击下方问题快速提问")
 
-    if prompt and prompt.strip():
-        send_message(prompt.strip())
-        st.rerun()
+            cols = st.columns(min(len(recommended_qs), 3))
+            for i, q in enumerate(recommended_qs):
+                col_idx = i % 3
+                if cols[col_idx].button(q, key=f"rec_q_{i}", use_container_width=True):
+                    send_message(q)
+                    st.rerun()
 
-    if len(st.session_state.chat_messages) == 0:
-        st.info("💡 提示：点击上方推荐问题快速提问，或在下方输入框输入您的问题。")
+            st.divider()
+
+        prompt = st.chat_input("输入您的问题...", key="chat_input")
+        if prompt and prompt.strip():
+            send_message(prompt.strip())
+            st.rerun()
+
+        if len(st.session_state.chat_messages) == 0:
+            st.info("💡 提示：点击上方推荐问题快速提问，或在下方输入框输入您的问题。")
+
+    with tabs[1]:
+        render_scenario_recommendation()
+
+    with tabs[2]:
+        render_natural_query()
+
+    if is_database:
+        with tabs[3]:
+            render_sql_generator()

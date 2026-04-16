@@ -73,7 +73,6 @@ def build_single_table_prompt(report_data: Dict[str, Any]) -> str:
     model_recommendations = report_data.get('model_recommendations', [])
     variable_summaries = report_data.get('variable_summaries', {})
 
-    # 变量类型统计
     type_counts = {}
     type_display = {
         'continuous': '连续变量',
@@ -90,33 +89,27 @@ def build_single_table_prompt(report_data: Dict[str, Any]) -> str:
 
     type_summary = ", ".join([f"{type_display.get(t, t)}: {c}" for t, c in type_counts.items()])
 
-    # 缺失值
     missing_list = quality_report.get('missing', [])
     missing_summary = "\n".join([f"  - {m['column']}: {m['percent']:.1f}%" for m in missing_list[:10]])
     if len(missing_list) > 10:
         missing_summary += f"\n  - ... 还有 {len(missing_list) - 10} 个字段"
 
-    # 异常值
     outliers = quality_report.get('outliers', {})
     outlier_summary = "\n".join([f"  - {col}: {info.get('count', 0)}个 ({info.get('percent', 0):.1f}%)"
                                  for col, info in list(outliers.items())[:5]])
 
-    # 强相关对
     high_corrs = correlations.get('high_correlations', [])
     corr_summary = "\n".join([f"  - {c['var1']} ↔ {c['var2']}: r={c['value']}" for c in high_corrs[:5]])
 
-    # 偏态变量
     skewed = distribution_insights.get('skewed_variables', [])
     skewed_summary = "\n".join([f"  - {s['name']}: 偏度={s['skew']}" for s in skewed[:5]])
 
-    # 时间序列
     ts_summary = ""
     if time_series_diagnostics:
         for key, diag in list(time_series_diagnostics.items())[:3]:
             ts_summary += f"  - {key}: 平稳性={'是' if diag.get('is_stationary') else '否'}, "
             ts_summary += f"自相关={'有' if diag.get('has_autocorrelation') else '无'}\n"
 
-    # 日期范围
     date_range_info = ""
     for col, summary in variable_summaries.items():
         if summary.get('type') == 'datetime':
@@ -125,7 +118,6 @@ def build_single_table_prompt(report_data: Dict[str, Any]) -> str:
             if min_date and max_date:
                 date_range_info = f"  - {col}: {min_date} 至 {max_date}"
 
-    # 建模建议摘要
     model_summary = ""
     for rec in model_recommendations[:3]:
         model_summary += f"  - {rec.get('task_type', '')}: {rec.get('ml', '')}\n"
@@ -298,7 +290,6 @@ def build_chat_prompt(report_data: Dict[str, Any], analysis_type: str,
     - user_question: 用户当前问题
     - chat_history: 对话历史
     """
-    # 根据分析类型构建上下文
     if analysis_type == "single":
         context = build_single_table_prompt(report_data)
     elif analysis_type == "multi":
@@ -312,9 +303,8 @@ def build_chat_prompt(report_data: Dict[str, Any], analysis_type: str,
     else:
         context = build_single_table_prompt(report_data)
 
-    # 构建对话历史
     history_text = ""
-    for msg in chat_history[-10:]:  # 保留最近10条
+    for msg in chat_history[-10:]:
         role = "用户" if msg["role"] == "user" else "助手"
         history_text += f"{role}: {msg['content']}\n\n"
 
@@ -337,4 +327,83 @@ def build_chat_prompt(report_data: Dict[str, Any], analysis_type: str,
 
 请基于上述数据集的分析结果，回答用户的问题。如果问题与数据集无关，请礼貌地引导用户询问数据相关问题。
 用中文回答，结构清晰。
+"""
+
+
+def build_scenario_recognition_prompt() -> str:
+    """
+    构建业务场景识别提示词
+    """
+    return """
+请根据当前数据的字段特征，自动识别这是什么业务场景。
+
+可能的场景类型包括（但不限于）：
+- 销售分析：包含销售额、销量、产品、客户等字段
+- 用户分析：包含用户ID、注册时间、活跃度、留存等字段
+- 财务分析：包含收入、成本、利润、预算等字段
+- 运营分析：包含PV、UV、转化率、渠道等字段
+- 风控分析：包含风险评分、逾期、坏账、欺诈等字段
+- 其他场景：请根据实际字段判断
+
+请输出：
+1. 识别的业务场景类型
+2. 判断依据（哪些字段支持这个判断）
+3. 该场景下建议的分析维度和核心指标
+4. 该场景下常见的分析问题和业务洞察
+
+请用中文回答，结构清晰。
+"""
+
+
+def build_sql_generation_prompt(user_query: str, table_names: list) -> str:
+    """
+    构建SQL生成提示词（用于数据库模式）
+
+    参数:
+    - user_query: 用户的自然语言查询
+    - table_names: 可用的表名列表
+    """
+    tables_info = "\n".join([f"  - {name}" for name in table_names])
+
+    return f"""
+请根据以下用户需求生成SQL查询语句。
+
+## 可用的表
+{tables_info}
+
+## 用户需求
+{user_query}
+
+## 要求
+1. 只输出SQL语句，用 ```sql ``` 代码块包裹
+2. 添加必要的注释说明
+3. 考虑性能优化（如索引使用）
+4. 如果涉及多表，请正确使用JOIN
+5. 如果需求不明确，给出最合理的解释
+
+请生成SQL语句。
+"""
+
+
+def build_natural_query_prompt(user_query: str) -> str:
+    """
+    构建自然语言查询提示词
+
+    参数:
+    - user_query: 用户的自然语言查询
+    """
+    return f"""
+请根据数据回答以下查询。
+
+## 用户查询
+{user_query}
+
+## 要求
+1. 如果查询的是具体数据，请列出相关记录
+2. 如果查询的是统计信息，请给出计算结果
+3. 如果需要聚合，请说明聚合方式
+4. 如果无法从数据中获取，请说明原因
+5. 用中文回答，格式清晰
+
+请回答。
 """
