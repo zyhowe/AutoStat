@@ -395,33 +395,58 @@ def auto_discover_relationships(tables: Dict[str, pd.DataFrame]) -> List[Dict]:
             table_info = []
             for tbl in tbls:
                 df = tables[tbl]
-                unique_count = df[col].nunique()
-                total_count = len(df[col].dropna())
+                # 检查列是否存在（防止 KeyError）
+                if col not in df.columns:
+                    # 尝试用原始列名（不转小写）查找
+                    original_col = None
+                    for c in df.columns:
+                        if c.lower() == col:
+                            original_col = c
+                            break
+                    if original_col is None:
+                        continue
+                    actual_col = original_col
+                else:
+                    actual_col = col
+
+                unique_count = df[actual_col].nunique()
+                total_count = len(df[actual_col].dropna())
                 unique_ratio = unique_count / total_count if total_count > 0 else 0
                 table_info.append({
                     'table': tbl,
+                    'col': actual_col,
                     'unique_count': unique_count,
                     'total_count': total_count,
                     'unique_ratio': unique_ratio
                 })
 
-            table_info.sort(key=lambda x: x['unique_ratio'], reverse=True)
-
             if len(table_info) >= 2:
+                table_info.sort(key=lambda x: x['unique_ratio'], reverse=True)
+
                 from_table = table_info[-1]['table']
                 to_table = table_info[0]['table']
+                from_col = table_info[-1]['col']
+                to_col = table_info[0]['col']
 
+                # 检查是否已存在相同关系
                 is_duplicate = False
                 for rel in relationships:
-                    if rel['from_table'] == from_table and rel['to_table'] == to_table and rel['from_col'] == col:
+                    if (rel['from_table'] == from_table and rel['to_table'] == to_table and
+                            rel['from_col'] == from_col and rel['to_col'] == to_col):
                         is_duplicate = True
                         break
+                    # 检查反向关系
+                    if (rel['from_table'] == to_table and rel['to_table'] == from_table and
+                            rel['from_col'] == to_col and rel['to_col'] == from_col):
+                        is_duplicate = True
+                        break
+
                 if not is_duplicate:
                     relationships.append({
                         'from_table': from_table,
-                        'from_col': col,
+                        'from_col': from_col,
                         'to_table': to_table,
-                        'to_col': col
+                        'to_col': to_col
                     })
 
     return relationships

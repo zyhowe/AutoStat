@@ -9,7 +9,37 @@ from web.components.sql_generator import render_sql_generator
 
 def render_preview_tab():
     """渲染预览报告标签页"""
-    if st.session_state.current_html:
+    if st.session_state.current_html and st.session_state.current_json_data:
+        # 下载按钮行
+        col1, col2 = st.columns(2)
+        with col1:
+            st.download_button(
+                "📥 下载 HTML 报告",
+                st.session_state.current_html,
+                "autostat_report.html",
+                "text/html",
+                use_container_width=True
+            )
+        with col2:
+            # 获取当前分析器的 JSON 输出
+            if st.session_state.current_analysis_type == "single":
+                json_output = st.session_state.single_analyzer.to_json() if st.session_state.single_analyzer else ""
+            elif st.session_state.current_analysis_type == "multi":
+                json_output = st.session_state.multi_analyzer.to_json() if st.session_state.multi_analyzer else ""
+            elif st.session_state.current_analysis_type == "database":
+                json_output = st.session_state.db_analyzer.to_json() if st.session_state.db_analyzer else ""
+            else:
+                json_output = ""
+
+            st.download_button(
+                "📥 下载 JSON 结果",
+                json_output,
+                "autostat_result.json",
+                "application/json",
+                use_container_width=True
+            )
+
+        st.divider()
         st.html(st.session_state.current_html)
     else:
         st.info("暂无报告预览")
@@ -41,16 +71,16 @@ def render_ai_tab():
 
     st.divider()
 
-    # ==================== 中间：聊天界面 ====================
+    # ==================== 中间：聊天界面（历史消息 + 输入框） ====================
     render_chat_interface()
 
     st.divider()
 
     # ==================== 底部：二级标签页 ====================
     if is_database:
-        sub_tab_labels = ["💬 自由提问", "🎯 场景推荐", "🔍 自然查询", "📝 SQL生成"]
+        sub_tab_labels = ["💬 自由提问", "🎯 场景推荐", "🔍 自然查询", "📝 SQL生成", "🔮 推理预测"]
     else:
-        sub_tab_labels = ["💬 自由提问", "🎯 场景推荐", "🔍 自然查询"]
+        sub_tab_labels = ["💬 自由提问", "🎯 场景推荐", "🔍 自然查询", "🔮 推理预测"]
 
     sub_tabs = st.tabs(sub_tab_labels)
 
@@ -72,12 +102,27 @@ def render_ai_tab():
         else:
             render_natural_query()
 
-    if is_database:
-        with sub_tabs[3]:
+    with sub_tabs[3]:
+        if is_database:
             if st.session_state.llm_client is None:
                 st.warning("请先在侧边栏配置大模型")
             else:
                 render_sql_generator()
+        else:
+            # 推理预测标签页
+            from web.components.inference import render_inference_interface
+            if st.session_state.llm_client is None:
+                st.warning("请先在侧边栏配置大模型")
+            else:
+                render_inference_interface()
+
+    if is_database:
+        with sub_tabs[4]:
+            from web.components.inference import render_inference_interface
+            if st.session_state.llm_client is None:
+                st.warning("请先在侧边栏配置大模型")
+            else:
+                render_inference_interface()
 
 
 def render_context_selector():

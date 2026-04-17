@@ -177,7 +177,7 @@ def extract_html_context(html_content: str) -> str:
 
     cleaning_match = re.search(r'<h2>🧹 数据清洗建议</h2>(.*?)</div>', html_content, re.DOTALL)
     if cleaning_match:
-        cleaning_items = re.findall(r'<tr>(.*?)</td>', cleaning_match.group(1))
+        cleaning_items = re.findall(r'<tr>(.*?)</tr>', cleaning_match.group(1))
         if cleaning_items:
             context_parts.append("**清洗建议:** " + ", ".join(cleaning_items[:3]))
 
@@ -300,30 +300,26 @@ def build_context_prompt(selected_contexts, analysis_type, json_data, html_conte
 
 
 def render_chat_interface():
-    """
-    渲染聊天界面（历史 + 临时 + 输入框）
+    """渲染聊天界面（历史消息 + 临时消息 + 输入框）"""
 
-    历史区块：显示 session_state.chat_messages 中的消息
-    临时区块：显示当前正在生成的 AI 回答（流式）
-    """
-    # ==================== 历史区块 ====================
+    # 历史消息
     for msg in st.session_state.chat_messages:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
 
-    # ==================== 临时区块 ====================
-    # 检查是否有正在处理的请求
+    # 处理待发送的问题（流式输出）
     if st.session_state.get("pending_question"):
-        # 显示用户消息（临时区块）
+        question = st.session_state.pending_question
+
+        # 显示用户消息
         with st.chat_message("user"):
-            st.markdown(st.session_state.pending_question)
+            st.markdown(question)
 
         # 流式显示 AI 回答
         with st.chat_message("assistant"):
             response_placeholder = st.empty()
             full_response = ""
 
-            # 构建消息
             system_prompt = build_context_prompt(
                 st.session_state.selected_contexts,
                 st.session_state.current_analysis_type,
@@ -336,9 +332,8 @@ def render_chat_interface():
             messages = [{"role": "system", "content": system_prompt}]
             for msg in st.session_state.chat_messages:
                 messages.append({"role": msg["role"], "content": msg["content"]})
-            messages.append({"role": "user", "content": st.session_state.pending_question})
+            messages.append({"role": "user", "content": question})
 
-            # 流式输出
             for chunk in st.session_state.llm_client.chat_stream(messages):
                 if chunk:
                     full_response += chunk
@@ -346,24 +341,23 @@ def render_chat_interface():
 
             response_placeholder.markdown(full_response)
 
-        # 将完整对话追加到历史
-        st.session_state.chat_messages.append({"role": "user", "content": st.session_state.pending_question})
+        # 追加到历史
+        st.session_state.chat_messages.append({"role": "user", "content": question})
         st.session_state.chat_messages.append({"role": "assistant", "content": full_response})
 
-        # 清除临时状态并刷新
+        # 清除 pending
         del st.session_state.pending_question
         st.rerun()
 
-    # ==================== 输入框 ====================
+    # 输入框
     prompt = st.chat_input("输入您的问题...", key="chat_input")
     if prompt and prompt.strip():
-        # 设置临时状态，触发临时区块显示
         st.session_state.pending_question = prompt.strip()
         st.rerun()
 
 
 def render_recommended_questions():
-    """渲染推荐问题（对话标签页专用）"""
+    """渲染推荐问题（自由提问标签页专用）"""
     st.markdown("#### 💡 推荐问题")
     st.caption("点击下方问题快速提问")
 

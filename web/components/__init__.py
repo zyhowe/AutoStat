@@ -7,6 +7,8 @@ from web.components.chat_interface import render_chat_interface, render_recommen
 from web.components.scenario_recommendation import render_scenario_recommendation
 from web.components.natural_query import render_natural_query
 from web.components.sql_generator import render_sql_generator
+from web.components.model_training import render_model_training
+from web.components.inference import render_inference_interface
 
 __all__ = [
     'render_sidebar',
@@ -20,5 +22,7 @@ __all__ = [
     'render_recommended_questions',
     'render_scenario_recommendation',
     'render_natural_query',
-    'render_sql_generator'
+    'render_sql_generator',
+    'render_model_training',
+    'render_inference_interface'
 ]

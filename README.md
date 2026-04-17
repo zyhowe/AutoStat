@@ -8,17 +8,17 @@ AutoStat is an intelligent statistical analysis tool that automatically identifi
 
 ## Features
 
-- **Automatic Data Type Recognition** - Identifies continuous, categorical, datetime, identifier, and ordinal variables
-- **Data Quality Inspection** - Detects missing values, outliers, duplicates, and inconsistent types
-- **Smart Statistical Method Selection** - Automatically chooses between t-test, ANOVA, Mann-Whitney, chi-square, Fisher's exact test
-- **Multi-table Association Analysis** - Automatically discovers relationships between tables and performs joint analysis
-- **Time Series Analysis** - Stationarity test (ADF), autocorrelation test (Ljung-Box), seasonality detection
-- **Relationship Analysis** - Correlation matrix, Cramer's V, Eta-squared with visual heatmaps
-- **Intelligent Sampling** - Foreign-key-aware stratified sampling for large datasets
-- **Multiple Output Formats** - HTML reports, JSON, Markdown, Excel
-- **Multiple Data Sources** - CSV, Excel, JSON, TXT, SQL Server
-- **MCP Service** - Can be called by AI agents (Claude Desktop, etc.)
-- **Web Interface** - Streamlit-based UI with AI-powered data interpretation
+- Automatic Data Type Recognition - Identifies continuous, categorical, datetime, identifier, and ordinal variables
+- Data Quality Inspection - Detects missing values, outliers, duplicates, and inconsistent types
+- Smart Statistical Method Selection - Automatically chooses between t-test, ANOVA, Mann-Whitney, chi-square, Fisher's exact test
+- Multi-table Association Analysis - Automatically discovers relationships between tables and performs joint analysis
+- Time Series Analysis - Stationarity test (ADF), autocorrelation test (Ljung-Box), seasonality detection
+- Relationship Analysis - Correlation matrix, Cramer's V, Eta-squared with visual heatmaps
+- Intelligent Sampling - Foreign-key-aware stratified sampling for large datasets
+- Multiple Output Formats - HTML reports, JSON, Markdown, Excel
+- Multiple Data Sources - CSV, Excel, JSON, TXT, SQL Server
+- MCP Service - Can be called by AI agents (Claude Desktop, etc.)
+- Web Interface - Streamlit-based UI with AI-powered data interpretation
 
 ## Quick Start
 
@@ -70,12 +70,6 @@ Install MCP version from PyPI:
     # Generate JSON output
     reporter.to_json("result.json")
 
-    # Generate Markdown output
-    reporter.to_markdown("report.md")
-
-    # Generate Excel output
-    reporter.to_excel("report.xlsx")
-
 ### Multi-table Analysis
 
     from autostat import MultiTableStatisticalAnalyzer
@@ -102,18 +96,18 @@ The web interface features a 4-tab layout:
 
 | Tab | Description |
 |-----|-------------|
-| 📁 **Data Preparation** | Upload files, select fields, adjust variable types, manage table relationships, start analysis |
-| 📄 **Preview Report** | View the generated HTML analysis report |
-| 📝 **Analysis Log** | View console output and execution logs |
-| 🤖 **AI Interpretation** | AI-powered chat with context selection (JSON results, HTML reports, raw data) |
+| Data Preparation | Upload files, select fields, adjust variable types, manage table relationships, start analysis |
+| Preview Report | View the generated HTML analysis report |
+| Analysis Log | View console output and execution logs |
+| AI Interpretation | AI-powered chat with context selection (JSON results, HTML reports, raw data) |
 
 #### AI Interpretation Features
 
-- **Context Selection** - Choose from JSON results, HTML reports, or raw data as context
-- **Free Questions** - Ask any questions about your data
-- **Scenario Recommendations** - Auto-detect business scenarios and get analysis perspectives
-- **Natural Query** - Query data using natural language
-- **SQL Generation** - Generate SQL queries from natural language (database mode only)
+- Context Selection - Choose from JSON results, HTML reports, or raw data as context
+- Free Questions - Ask any questions about your data
+- Scenario Recommendations - Auto-detect business scenarios and get analysis perspectives
+- Natural Query - Query data using natural language
+- SQL Generation - Generate SQL queries from natural language (database mode only)
 
 ## Output Formats
 
@@ -146,13 +140,13 @@ The HTML report includes:
 
 ## Supported Data Sources
 
-| Format   | Extension          | Method          |
-|----------|--------------------|-----------------|
-| CSV      | .csv               | load_csv()      |
-| Excel    | .xlsx, .xls        | load_excel()    |
-| JSON     | .json              | load_json()     |
-| TXT      | .txt               | load_txt()      |
-| SQL Server| -                 | load_sql_server()|
+| Format | Extension | Method |
+|--------|-----------|--------|
+| CSV | .csv | load_csv() |
+| Excel | .xlsx, .xls | load_excel() |
+| JSON | .json | load_json() |
+| TXT | .txt | load_txt() |
+| SQL Server | - | load_sql_server() |
 
 ## MCP Service Configuration
 
@@ -204,19 +198,19 @@ Or using pip installation:
 
 ### Environment Variables
 
-| Variable        | Description                    | Required | Default     |
-|-----------------|--------------------------------|----------|-------------|
-| AUTOSTAT_HOST   | HTTP/SSE service bind address  | No       | 0.0.0.0     |
-| AUTOSTAT_PORT   | HTTP/SSE service port          | No       | 6011        |
+| Variable | Description | Required | Default |
+|----------|-------------|----------|---------|
+| AUTOSTAT_HOST | HTTP/SSE service bind address | No | 0.0.0.0 |
+| AUTOSTAT_PORT | HTTP/SSE service port | No | 6011 |
 
 ### MCP Tools
 
-| Tool Name                  | Description                                           |
-|----------------------------|-------------------------------------------------------|
-| analyze_from_file          | Analyze a single file (CSV, Excel, JSON, TXT)         |
-| analyze_multiple_files     | Analyze multiple files, auto-discover relationships   |
-| analyze_from_db            | Analyze data from SQL Server database                 |
-| get_data_quality_report    | Quick data quality report                             |
+| Tool Name | Description |
+|-----------|-------------|
+| analyze_from_file | Analyze a single file (CSV, Excel, JSON, TXT) |
+| analyze_multiple_files | Analyze multiple files, auto-discover relationships |
+| analyze_from_db | Analyze data from SQL Server database |
+| get_data_quality_report | Quick data quality report |
 
 ### Using with Claude Desktop
 
@@ -245,12 +239,12 @@ Or using pip installation:
 
 ## Optional Dependencies
 
-| Dependency | Purpose              |
-|------------|----------------------|
-| streamlit  | Web interface        |
-| fastmcp    | MCP service          |
-| pyodbc     | SQL Server support   |
-| openpyxl   | Excel export         |
+| Dependency | Purpose |
+|------------|---------|
+| streamlit | Web interface |
+| fastmcp | MCP service |
+| pyodbc | SQL Server support |
+| openpyxl | Excel export |
 
 ## Project Structure
 
@@ -281,19 +275,25 @@ Or using pip installation:
     │   ├── app.py                         # Streamlit main entry
     │   ├── components/                    # UI components
     │   │   ├── __init__.py
-    │   │   ├── chat_interface.py          # AI chat interface
-    │   │   ├── data_preparation.py        # Data preparation (upload, field selection)
-    │   │   ├── natural_query.py           # Natural language query
-    │   │   ├── results.py                 # Results display (preview, log, AI)
-    │   │   ├── scenario_recommendation.py # Scenario recommendations
     │   │   ├── sidebar.py                 # Sidebar with config
+    │   │   ├── tabs.py                    # Tab navigation
+    │   │   ├── data_preparation.py        # Data preparation UI
+    │   │   ├── results.py                 # Results display
+    │   │   ├── chat_interface.py          # AI chat interface
+    │   │   ├── scenario_recommendation.py # Scenario recommendations
+    │   │   ├── natural_query.py           # Natural language query
     │   │   └── sql_generator.py           # SQL generator
+    │   ├── services/                      # Business logic layer
+    │   │   ├── __init__.py
+    │   │   ├── cache_service.py           # Cache management
+    │   │   ├── file_service.py            # File operations
+    │   │   └── analysis_service.py        # Analysis execution
     │   ├── config/                        # Client-side storage
     │   │   └── storage.py                 # Config management
     │   └── utils/                         # Utilities
     │       ├── __init__.py
-    │       ├── data_preprocessor.py       # Data preprocessing
-    │       └── helpers.py                 # Helper functions
+    │       ├── helpers.py                 # Helper functions
+    │       └── data_preprocessor.py       # Data preprocessing
     ├── templates/
     │   └── report.html                    # HTML report template
     ├── tests/

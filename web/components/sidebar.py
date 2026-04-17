@@ -10,11 +10,21 @@ from autostat.llm_client import LLMClient
 
 def render_sidebar():
     """渲染侧边栏"""
-    st.sidebar.title("⚙️ 分析模式")
+
+    # 侧边栏头部
+    st.sidebar.markdown("""
+    <div style="text-align: center; margin-bottom: 20px;">
+        <div style="font-size: 1.8rem; font-weight: bold; color: #1f77b4;">📊 AutoStat</div>
+        <div style="font-size: 0.8rem; color: #666;">智能数据分析助手</div>
+        <div style="font-size: 0.7rem; color: #999; margin-top: 5px;">自动识别数据类型、检测数据质量、选择统计方法、生成分析报告</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    st.sidebar.markdown("---")
 
     # 1. 分析模式选择
     analysis_mode = st.sidebar.selectbox(
-        "选择分析模式",
+        "分析模式",
         ["📁 单文件分析", "📚 多文件分析", "🗄️ 数据库分析"],
         key="analysis_mode_select"
     )
@@ -58,7 +68,7 @@ def render_sidebar():
     **单文件分析**：上传 CSV、Excel、JSON、TXT 文件
     **多文件分析**：上传多个相关文件，自动发现表间关系
     **数据库分析**：连接 SQL Server 数据库
-    **大模型解读**：分析完成后，在下方展开"AI 智能解读"获取解读
+    **大模型解读**：分析完成后，在 AI 解读标签页使用
     """)
 
     return analysis_mode

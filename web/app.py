@@ -12,6 +12,8 @@ from web.components.sidebar import render_sidebar
 from web.components.tabs import render_tabs, scroll_to_top
 from web.components.data_preparation import render_data_preparation
 from web.components.results import render_preview_tab, render_log_tab, render_ai_tab
+from web.components.model_training import render_model_training
+from web.components.inference import render_inference_interface
 from web.services.cache_service import CacheService
 
 st.set_page_config(
@@ -24,17 +26,16 @@ st.set_page_config(
 # 初始化 Session State
 CacheService.init_session_state()
 
+# 初始化滚动标志
+if 'scroll_to_top' not in st.session_state:
+    st.session_state.scroll_to_top = False
+
 # 样式
 st.markdown("""
 <style>
-    .main-header { font-size: 2.5rem; font-weight: bold; color: #1f77b4; text-align: center; margin-bottom: 0.5rem; }
-    .sub-header { font-size: 1.2rem; color: #666; text-align: center; margin-bottom: 1rem; }
     hr { margin: 10px 0; }
 </style>
 """, unsafe_allow_html=True)
-
-st.markdown('<div class="main-header">📊 AutoStat 智能数据分析助手</div>', unsafe_allow_html=True)
-st.markdown('<div class="sub-header">自动识别数据类型、检测数据质量、选择统计方法、生成分析报告</div>', unsafe_allow_html=True)
 
 # 侧边栏
 analysis_mode = render_sidebar()
@@ -44,13 +45,13 @@ if analysis_mode != st.session_state.get('analysis_mode'):
     st.session_state.analysis_mode = analysis_mode
     CacheService.reset_analysis_state()
 
-# 渲染标签页
-current_tab = render_tabs()
-
-# 滚动到顶部（分析完成时）
-if st.session_state.get('scroll_to_top', False):
+# 检查是否需要滚动到顶部
+if st.session_state.scroll_to_top:
     scroll_to_top()
     st.session_state.scroll_to_top = False
+
+# 渲染标签页
+current_tab = render_tabs()
 
 # 根据当前标签页渲染内容
 if current_tab == 0:
@@ -68,6 +69,10 @@ elif current_tab == 2:
         st.info("📌 请先在「数据准备」中上传数据并点击「开始分析」")
         st.caption("分析完成后，日志将显示在此处")
 elif current_tab == 3:
+    # 模型训练标签页
+    render_model_training()
+elif current_tab == 4:
+    # AI解读标签页
     if st.session_state.analysis_completed and st.session_state.current_json_data:
         render_ai_tab()
     else:

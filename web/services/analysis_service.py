@@ -69,6 +69,7 @@ class AnalysisService:
             # 标记分析完成并跳转到预览报告
             st.session_state.analysis_completed = True
             st.session_state.current_tab = 1
+            st.session_state.scroll_to_top = True
 
             progress_bar.progress(100)
             status_placeholder.success("✅ 分析完成！")
@@ -132,6 +133,7 @@ class AnalysisService:
             # 标记分析完成并跳转到预览报告
             st.session_state.analysis_completed = True
             st.session_state.current_tab = 1
+            st.session_state.scroll_to_top = True
 
             progress_bar.progress(100)
             status_placeholder.success("✅ 分析完成！")
@@ -198,6 +200,7 @@ class AnalysisService:
             # 标记分析完成并跳转到预览报告
             st.session_state.analysis_completed = True
             st.session_state.current_tab = 1
+            st.session_state.scroll_to_top = True
 
             progress_bar.progress(100)
             status_placeholder.success("✅ 分析完成！")

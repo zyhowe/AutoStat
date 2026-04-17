@@ -6,16 +6,21 @@ import streamlit as st
 def render_tabs():
     """渲染标签页按钮，返回当前选中的标签页"""
 
-    tab_names = ["📁 数据准备", "📄 预览报告", "📝 分析日志", "🤖 AI 解读"]
+    # 锚点用于滚动定位
+    st.markdown('<div id="top-anchor"></div>', unsafe_allow_html=True)
 
-    cols = st.columns(4)
+    # 减少顶部空白
+    st.markdown("<style>div.block-container {padding-top: 1rem;}</style>", unsafe_allow_html=True)
+
+    tab_names = ["📁 数据准备", "📄 预览报告", "📝 分析日志", "🧠 模型训练", "🤖 AI 解读"]
+
+    cols = st.columns(5)
 
     for i, (col, name) in enumerate(zip(cols, tab_names)):
         with col:
             is_active = (st.session_state.current_tab == i)
 
             if is_active:
-                # 激活状态：使用 HTML 模拟高亮按钮
                 st.markdown(f"""
                 <div style="
                     background-color: #1f77b4;
@@ -28,7 +33,6 @@ def render_tabs():
                 ">{name}</div>
                 """, unsafe_allow_html=True)
             else:
-                # 非激活状态：使用 st.button
                 if st.button(name, key=f"tab_{i}", use_container_width=True):
                     st.session_state.current_tab = i
                     st.rerun()
@@ -40,8 +44,12 @@ def render_tabs():
 
 def scroll_to_top():
     """滚动到页面顶部"""
+    # 使用锚点 + JavaScript 滚动
     st.markdown("""
     <script>
-        window.scrollTo({ top: 0, behavior: 'smooth' });
+        var element = document.getElementById('top-anchor');
+        if (element) {
+            element.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
     </script>
     """, unsafe_allow_html=True)
