@@ -11,19 +11,48 @@ from autostat.llm_client import LLMClient
 def render_sidebar():
     """渲染侧边栏"""
     st.sidebar.title("⚙️ 分析模式")
+
+    # 1. 分析模式选择
     analysis_mode = st.sidebar.selectbox(
         "选择分析模式",
         ["📁 单文件分析", "📚 多文件分析", "🗄️ 数据库分析"],
-        key="analysis_mode"
+        key="analysis_mode_select"
     )
 
-    # 数据库配置管理
+    st.sidebar.markdown("---")
+
+    # 2. 日期特征级别（仅在单文件分析模式下显示）
+    if analysis_mode == "📁 单文件分析":
+        date_features_level = st.sidebar.selectbox(
+            "📅 日期特征级别",
+            ["基础", "无"],
+            index=0,
+            key="date_features_level_select",
+            help="基础: 提取年/月/季度；无: 不提取日期特征"
+        )
+
+        # 转换为内部使用的值
+        if date_features_level == "基础":
+            st.session_state.date_features_level = "basic"
+        else:
+            st.session_state.date_features_level = "none"
+    else:
+        # 多文件/数据库模式默认使用基础
+        st.session_state.date_features_level = "basic"
+
+    st.sidebar.markdown("---")
+
+    # 3. 数据库配置管理
     render_db_config_section()
 
-    # 大模型配置管理
+    st.sidebar.markdown("---")
+
+    # 4. 大模型配置管理
     render_llm_config_section()
 
     st.sidebar.markdown("---")
+
+    # 5. 使用说明
     st.sidebar.markdown("### 📖 使用说明")
     st.sidebar.markdown("""
     **单文件分析**：上传 CSV、Excel、JSON、TXT 文件
@@ -37,32 +66,31 @@ def render_sidebar():
 
 def render_db_config_section():
     """渲染数据库配置区域"""
+    st.sidebar.markdown("### 🗄️ 数据库配置")
+    db_configs = load_db_configs()
+
+    if db_configs:
+        config_names = [c.get('name', '未命名') for c in db_configs]
+        selected_idx = st.sidebar.selectbox(
+            "选择数据库配置",
+            range(len(config_names)),
+            format_func=lambda i: config_names[i],
+            key="db_select"
+        )
+        st.session_state.selected_db_config = db_configs[selected_idx]
+
+        if st.session_state.selected_db_config:
+            st.sidebar.info(f"当前配置: {st.session_state.selected_db_config.get('name')}")
+            st.sidebar.caption(f"服务器: {st.session_state.selected_db_config.get('server')}")
+            st.sidebar.caption(f"数据库: {st.session_state.selected_db_config.get('database')}")
+    else:
+        st.sidebar.info("暂无数据库配置，请添加")
+        st.session_state.selected_db_config = None
+
     st.sidebar.markdown("---")
-    with st.sidebar.expander("🗄️ 数据库配置"):
-        db_configs = load_db_configs()
 
-        if db_configs:
-            config_names = [c.get('name', '未命名') for c in db_configs]
-            selected_idx = st.selectbox(
-                "选择数据库配置",
-                range(len(config_names)),
-                format_func=lambda i: config_names[i],
-                key="db_select"
-            )
-            st.session_state.selected_db_config = db_configs[selected_idx]
-
-            if st.session_state.selected_db_config:
-                st.info(f"当前配置: {st.session_state.selected_db_config.get('name')}")
-                st.caption(f"服务器: {st.session_state.selected_db_config.get('server')}")
-                st.caption(f"数据库: {st.session_state.selected_db_config.get('database')}")
-        else:
-            st.info("暂无数据库配置，请添加")
-            st.session_state.selected_db_config = None
-
-        st.markdown("---")
-
+    with st.sidebar.expander("添加新配置"):
         with st.form("add_db_form"):
-            st.markdown("**添加新配置**")
             db_name = st.text_input("配置名称", key="db_name")
             db_server = st.text_input("服务器地址", key="db_server")
             db_database = st.text_input("数据库名称", key="db_database")
@@ -88,60 +116,60 @@ def render_db_config_section():
                 else:
                     st.error("请填写配置名称、服务器和数据库名称")
 
-        if db_configs:
-            st.markdown("---")
-            delete_name = st.selectbox("删除配置", config_names, key="db_delete")
-            if st.button("删除选中配置", key="db_delete_btn"):
-                if delete_db_config(delete_name):
-                    st.success(f"配置 {delete_name} 已删除")
-                    if st.session_state.selected_db_config and st.session_state.selected_db_config.get(
-                            'name') == delete_name:
-                        st.session_state.selected_db_config = None
-                    st.rerun()
-                else:
-                    st.error("删除失败")
+    if db_configs:
+        st.sidebar.markdown("---")
+        delete_name = st.sidebar.selectbox("删除配置", config_names, key="db_delete")
+        if st.sidebar.button("删除选中配置", key="db_delete_btn"):
+            if delete_db_config(delete_name):
+                st.success(f"配置 {delete_name} 已删除")
+                if st.session_state.selected_db_config and st.session_state.selected_db_config.get(
+                        'name') == delete_name:
+                    st.session_state.selected_db_config = None
+                st.rerun()
+            else:
+                st.error("删除失败")
 
 
 def render_llm_config_section():
     """渲染大模型配置区域"""
-    with st.sidebar.expander("🤖 大模型配置"):
-        llm_configs = load_llm_configs()
+    st.sidebar.markdown("### 🤖 大模型配置")
+    llm_configs = load_llm_configs()
 
-        if llm_configs:
-            config_names = [c.get('name', '未命名') for c in llm_configs]
-            selected_idx = st.selectbox(
-                "选择大模型配置",
-                range(len(config_names)),
-                format_func=lambda i: config_names[i],
-                key="llm_select"
-            )
-            st.session_state.selected_llm_config = llm_configs[selected_idx]
+    if llm_configs:
+        config_names = [c.get('name', '未命名') for c in llm_configs]
+        selected_idx = st.sidebar.selectbox(
+            "选择大模型配置",
+            range(len(config_names)),
+            format_func=lambda i: config_names[i],
+            key="llm_select"
+        )
+        st.session_state.selected_llm_config = llm_configs[selected_idx]
 
-            if st.session_state.selected_llm_config:
-                st.info(f"当前模型: {st.session_state.selected_llm_config.get('name')}")
-                st.caption(f"API: {st.session_state.selected_llm_config.get('api_base')}")
-                st.caption(f"模型: {st.session_state.selected_llm_config.get('model')}")
+        if st.session_state.selected_llm_config:
+            st.sidebar.info(f"当前模型: {st.session_state.selected_llm_config.get('name')}")
+            st.sidebar.caption(f"API: {st.session_state.selected_llm_config.get('api_base')}")
+            st.sidebar.caption(f"模型: {st.session_state.selected_llm_config.get('model')}")
 
-                if st.session_state.llm_client is None or st.session_state.llm_client.model != st.session_state.selected_llm_config.get(
-                        'model'):
-                    st.session_state.llm_client = LLMClient(st.session_state.selected_llm_config)
+            if st.session_state.llm_client is None or st.session_state.llm_client.model != st.session_state.selected_llm_config.get(
+                    'model'):
+                st.session_state.llm_client = LLMClient(st.session_state.selected_llm_config)
 
-                if st.button("测试连接", key="test_llm"):
-                    with st.spinner("测试中..."):
-                        success, msg = test_llm_connection(st.session_state.selected_llm_config)
-                        if success:
-                            st.success(msg)
-                        else:
-                            st.error(msg)
-        else:
-            st.info("暂无大模型配置，请添加")
-            st.session_state.selected_llm_config = None
-            st.session_state.llm_client = None
+            if st.sidebar.button("测试连接", key="test_llm"):
+                with st.spinner("测试中..."):
+                    success, msg = test_llm_connection(st.session_state.selected_llm_config)
+                    if success:
+                        st.success(msg)
+                    else:
+                        st.error(msg)
+    else:
+        st.sidebar.info("暂无大模型配置，请添加")
+        st.session_state.selected_llm_config = None
+        st.session_state.llm_client = None
 
-        st.markdown("---")
+    st.sidebar.markdown("---")
 
+    with st.sidebar.expander("添加新配置"):
         with st.form("add_llm_form"):
-            st.markdown("**添加新配置**")
             llm_name = st.text_input("配置名称", key="llm_name", placeholder="例如: DeepSeek, 本地Qwen")
             llm_api_base = st.text_input("API地址", key="llm_api_base", placeholder="https://api.deepseek.com/v1")
             llm_api_key = st.text_input("API密钥", type="password", key="llm_api_key", placeholder="sk-xxx")
@@ -164,16 +192,16 @@ def render_llm_config_section():
                 else:
                     st.error("请填写配置名称、API地址和模型名称")
 
-        if llm_configs:
-            st.markdown("---")
-            delete_llm_name = st.selectbox("删除配置", config_names, key="llm_delete")
-            if st.button("删除选中配置", key="llm_delete_btn"):
-                if delete_llm_config(delete_llm_name):
-                    st.success(f"配置 {delete_llm_name} 已删除")
-                    if st.session_state.selected_llm_config and st.session_state.selected_llm_config.get(
-                            'name') == delete_llm_name:
-                        st.session_state.selected_llm_config = None
-                        st.session_state.llm_client = None
-                    st.rerun()
-                else:
-                    st.error("删除失败")
+    if llm_configs:
+        st.sidebar.markdown("---")
+        delete_llm_name = st.sidebar.selectbox("删除配置", config_names, key="llm_delete")
+        if st.sidebar.button("删除选中配置", key="llm_delete_btn"):
+            if delete_llm_config(delete_llm_name):
+                st.success(f"配置 {delete_llm_name} 已删除")
+                if st.session_state.selected_llm_config and st.session_state.selected_llm_config.get(
+                        'name') == delete_llm_name:
+                    st.session_state.selected_llm_config = None
+                    st.session_state.llm_client = None
+                st.rerun()
+            else:
+                st.error("删除失败")

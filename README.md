@@ -98,30 +98,22 @@ Start the web interface:
 
     streamlit run web/app.py
 
-The web interface supports:
+The web interface features a 4-tab layout:
 
-- **Single File Analysis** - Upload and analyze CSV, Excel, JSON, TXT files
-- **Multi-file Analysis** - Upload multiple related files, auto-discover relationships
-- **Database Analysis** - Connect to SQL Server for data analysis
-- **AI Smart Interpretation** - Context-aware AI chat for data insights
+| Tab | Description |
+|-----|-------------|
+| 📁 **Data Preparation** | Upload files, select fields, adjust variable types, manage table relationships, start analysis |
+| 📄 **Preview Report** | View the generated HTML analysis report |
+| 📝 **Analysis Log** | View console output and execution logs |
+| 🤖 **AI Interpretation** | AI-powered chat with context selection (JSON results, HTML reports, raw data) |
 
-#### AI Smart Interpretation Features
+#### AI Interpretation Features
 
-- Select analysis context (JSON results, HTML reports, raw data)
-- Get data quality assessments and cleaning recommendations
-- Query specific data ranges and perform filtering
-- Recommended questions for quick insights
-
-### MCP Service (for AI Agents)
-
-    # STDIO mode (default)
-    autostat-mcp
-
-    # HTTP mode
-    autostat-mcp --transport http --port 6011
-
-    # SSE mode
-    autostat-mcp --transport sse --host 0.0.0.0 --port 6011
+- **Context Selection** - Choose from JSON results, HTML reports, or raw data as context
+- **Free Questions** - Ask any questions about your data
+- **Scenario Recommendations** - Auto-detect business scenarios and get analysis perspectives
+- **Natural Query** - Query data using natural language
+- **SQL Generation** - Generate SQL queries from natural language (database mode only)
 
 ## Output Formats
 
@@ -133,6 +125,7 @@ The HTML report includes:
 - Variable type distribution
 - Statistical summaries for each variable
 - Data cleaning suggestions
+- Visualizations (histograms, box plots, correlation heatmaps)
 
 ### JSON Output Structure
 
@@ -288,11 +281,13 @@ Or using pip installation:
     │   ├── app.py                         # Streamlit main entry
     │   ├── components/                    # UI components
     │   │   ├── __init__.py
-    │   │   ├── chat_interface.py          # AI smart interpretation
-    │   │   ├── db_analysis.py             # Database analysis
-    │   │   ├── multi_analysis.py          # Multi-file analysis
+    │   │   ├── chat_interface.py          # AI chat interface
+    │   │   ├── data_preparation.py        # Data preparation (upload, field selection)
+    │   │   ├── natural_query.py           # Natural language query
+    │   │   ├── results.py                 # Results display (preview, log, AI)
+    │   │   ├── scenario_recommendation.py # Scenario recommendations
     │   │   ├── sidebar.py                 # Sidebar with config
-    │   │   └── single_analysis.py         # Single file analysis
+    │   │   └── sql_generator.py           # SQL generator
     │   ├── config/                        # Client-side storage
     │   │   └── storage.py                 # Config management
     │   └── utils/                         # Utilities

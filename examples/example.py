@@ -392,7 +392,7 @@ if __name__ == "__main__":
     # 运行示例（根据需要取消注释）
 
     # 单表分析
-    example_single_table()
+    #example_single_table()
 
     # 生成HTML报告
     # example_html_report()
@@ -410,7 +410,7 @@ if __name__ == "__main__":
     # example_multi_table_from_json_strings()
 
     # 数据库分析（需要配置）
-    # example_database()
+    example_database()
 
     # 单表分析（从CSV文件加载）
     # example_single_table_from_file()
