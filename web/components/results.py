@@ -111,18 +111,12 @@ def render_ai_tab():
         else:
             # 推理预测标签页
             from web.components.inference import render_inference_interface
-            if st.session_state.llm_client is None:
-                st.warning("请先在侧边栏配置大模型")
-            else:
-                render_inference_interface()
+            render_inference_interface()
 
     if is_database:
         with sub_tabs[4]:
             from web.components.inference import render_inference_interface
-            if st.session_state.llm_client is None:
-                st.warning("请先在侧边栏配置大模型")
-            else:
-                render_inference_interface()
+            render_inference_interface()
 
 
 def render_context_selector():

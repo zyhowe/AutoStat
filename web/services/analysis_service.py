@@ -1,3 +1,5 @@
+# web/services/analysis_service.py
+
 """分析服务 - 执行数据分析的核心业务逻辑"""
 
 import streamlit as st
@@ -63,7 +65,8 @@ class AnalysisService:
             reporter = Reporter(analyzer)
             st.session_state.current_html = reporter.to_html()
             st.session_state.current_json_data = json.loads(analyzer.to_json())
-            st.session_state.raw_data_preview = get_raw_data_preview(filtered_df)
+            # 修改：使用 analyzer.data（包含日期派生列）替代 filtered_df
+            st.session_state.raw_data_preview = get_raw_data_preview(analyzer.data)
             st.session_state.chat_messages = []
 
             # 标记分析完成并跳转到预览报告
@@ -127,6 +130,7 @@ class AnalysisService:
             reporter = Reporter(merged_analyzer)
             st.session_state.current_html = reporter.to_html()
             st.session_state.current_json_data = json.loads(merged_analyzer.to_json())
+            # 修改：使用 merged_analyzer.data（包含日期派生列）替代 merged_analyzer.data
             st.session_state.raw_data_preview = get_raw_data_preview(merged_analyzer.data)
             st.session_state.chat_messages = []
 
@@ -194,6 +198,7 @@ class AnalysisService:
             json_data['db_server'] = config.get('server')
             json_data['db_database'] = config.get('database')
             st.session_state.current_json_data = json_data
+            # 修改：使用 merged_analyzer.data（包含日期派生列）
             st.session_state.raw_data_preview = get_raw_data_preview(merged_analyzer.data)
             st.session_state.chat_messages = []
 
