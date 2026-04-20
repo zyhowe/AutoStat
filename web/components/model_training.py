@@ -16,17 +16,19 @@ from web.services.model_training_service import (
     get_models_by_task_type,
     get_model_params,
     execute_training,
-    save_trained_model,
     list_saved_models,
     delete_model,
     load_model_for_inference,
     execute_inference
 )
+from web.services.storage_service import StorageService
+from web.services.session_service import SessionService
 
 
 def render_model_training():
-    """渲染模型训练标签页 - 三大区块"""
-    st.markdown("### 🧠 模型训练")
+    """渲染模型训练标签页 - 使用radio替代tabs实现编程式跳转"""
+    st.markdown("### 🤖 小模型训练")
+    st.caption("基于分析结果，训练传统机器学习/深度学习模型")
 
     # 检查是否有分析完成的数据
     if not st.session_state.analysis_completed or st.session_state.current_json_data is None:
@@ -34,57 +36,75 @@ def render_model_training():
         st.caption("分析完成后，可基于标准化数据进行模型训练")
         return
 
-    # 获取标准化数据
-    raw_data_preview = st.session_state.raw_data_preview
-    if raw_data_preview is None:
+    # 获取当前会话
+    session_id = SessionService.get_current_session()
+    if session_id is None:
         st.info("📌 请先在「数据准备」中完成数据分析")
         return
 
-    full_data = raw_data_preview.get('full_data')
-    if full_data is None or full_data.empty:
+    # 从存储加载数据
+    processed_data = StorageService.load_dataframe("processed_data", session_id)
+    if processed_data is None:
         st.info("📌 无有效数据，请检查数据文件")
         return
 
-    # 获取变量类型信息
     json_data = st.session_state.current_json_data
     variable_types = json_data.get('variable_types', {})
 
     # 提取可用的特征列
-    available_cols = get_available_features(full_data, variable_types)
+    available_cols = get_available_features(processed_data, variable_types)
 
     if not available_cols:
         st.warning("⚠️ 没有可用的特征列，请检查数据")
         return
 
-    session_id = st.session_state.current_source_name or "default"
+    # 初始化自动填充状态
+    if 'auto_fill_task_type' not in st.session_state:
+        st.session_state.auto_fill_task_type = None
+    if 'auto_fill_target_col' not in st.session_state:
+        st.session_state.auto_fill_target_col = None
+    if 'auto_fill_features' not in st.session_state:
+        st.session_state.auto_fill_features = None
+    if 'auto_fill_model_key' not in st.session_state:
+        st.session_state.auto_fill_model_key = None
+    if 'auto_fill_model_params' not in st.session_state:
+        st.session_state.auto_fill_model_params = None
+    if 'auto_fill_model_name' not in st.session_state:
+        st.session_state.auto_fill_model_name = None
 
-    # 检查是否需要刷新模型列表
-    if st.session_state.get('refresh_model_list', False):
-        st.session_state.refresh_model_list = False
-        st.rerun()
+    # 标签页控制
+    if 'model_training_tab' not in st.session_state:
+        st.session_state.model_training_tab = 0
 
-    # ==================== 区块1：模型推荐 ====================
-    st.markdown("---")
-    render_model_recommendations(json_data, full_data, available_cols, variable_types)
+    # 使用 radio 作为标签页切换器
+    tab_options = ["📊 模型推荐", "🆕 模型创建", "🔮 模型推理"]
+    selected_tab = st.radio(
+        "",
+        options=tab_options,
+        index=st.session_state.model_training_tab,
+        horizontal=True,
+        label_visibility="collapsed"
+    )
 
-    # ==================== 区块2：模型列表 ====================
-    st.markdown("---")
-    render_model_list_with_test(session_id)
+    # 添加粗线分隔
+    st.divider()
 
-    # ==================== 区块3：模型创建 ====================
-    st.markdown("---")
-    render_model_creation(full_data, available_cols, variable_types, session_id)
+    # 更新当前标签页索引
+    current_tab = tab_options.index(selected_tab)
 
-    # ==================== 训练完成后显示保存表单 ====================
-    if st.session_state.get('training_completed', False):
-        render_save_form(session_id)
+    # 根据选中的标签页渲染内容
+    if current_tab == 0:
+        render_model_recommendations(json_data, processed_data, available_cols, variable_types)
+    elif current_tab == 1:
+        render_model_creation(processed_data, available_cols, variable_types, session_id)
+    else:
+        render_model_inference(session_id)
 
 
 def render_model_recommendations(json_data: Dict, data: pd.DataFrame,
-                                  available_cols: List[str], variable_types: Dict):
-    """区块1：模型推荐"""
-    st.markdown("#### 📊 模型推荐")
-    st.caption("基于数据分析结果，自动推荐适合的模型")
+                                 available_cols: List[str], variable_types: Dict):
+    """模型推荐标签页内容"""
+    st.markdown("基于数据分析结果，自动推荐适合的模型。点击「使用」快速填充到下方表单")
 
     n_samples = len(data)
     n_features = len(available_cols)
@@ -102,344 +122,133 @@ def render_model_recommendations(json_data: Dict, data: pd.DataFrame,
     model_recommendations = get_model_recommendations_from_json(json_data)
 
     if model_recommendations:
-        html = """
-        <style>
-            .recommend-table {
-                width: 100%;
-                border-collapse: collapse;
-                font-size: 13px;
-            }
-            .recommend-table th {
-                background-color: #1f77b4;
-                color: white;
-                padding: 10px 8px;
-                text-align: center;
-                border: 1px solid #ddd;
-            }
-            .recommend-table td {
-                padding: 8px;
-                text-align: left;
-                border: 1px solid #ddd;
-                vertical-align: top;
-            }
-            .recommend-table tr:nth-child(even) {
-                background-color: #f9f9f9;
-            }
-            .recommend-table tr:hover {
-                background-color: #f0f0f0;
-            }
-            .priority-high {
-                color: #d32f2f;
-                font-weight: bold;
-            }
-            .priority-mid {
-                color: #f57c00;
-                font-weight: bold;
-            }
-            .target-col {
-                font-family: monospace;
-                background-color: #f5f5f5;
-                padding: 2px 4px;
-                border-radius: 3px;
-            }
-        </style>
-        <table class="recommend-table">
-            <thead>
-                <tr>
-                    <th>优先级</th>
-                    <th>任务类型</th>
-                    <th>目标字段</th>
-                    <th>推荐特征</th>
-                    <th>传统模型</th>
-                    <th>机器学习</th>
-                    <th>深度学习</th>
-                    <th>大模型</th>
-                    <th>建议原因</th>
-                </tr>
-            </thead>
-            <tbody>
-        """
-
-        for rec in model_recommendations:
+        for i, rec in enumerate(model_recommendations[:5]):
             priority = rec.get('priority', '中')
-            priority_class = "priority-high" if priority == "高" else "priority-mid" if priority == "中" else ""
+            priority_icon = "🔴" if priority == "高" else "🟠" if priority == "中" else "🟢"
 
-            task_type = rec.get('task_type', '')
-            target_column = rec.get('target_column', '')
-            feature_columns = rec.get('feature_columns', [])
-            feature_str = ', '.join(feature_columns[:5]) if feature_columns else '-'
-            traditional = rec.get('traditional', '-')
-            ml = rec.get('ml', '-')
-            dl = rec.get('dl', '-')
-            llm = rec.get('llm', '-')
-            reason = rec.get('reason', '')
-
-            html += f"""
-                <tr>
-                    <td class="{priority_class}">{priority}</td>
-                    <td>{task_type}</td>
-                    <td><code class="target-col">{target_column}</code></td>
-                    <td>{feature_str}</td>
-                    <td>{traditional}</td>
-                    <td>{ml}</td>
-                    <td>{dl}</td>
-                    <td>{llm}</td>
-                    <td>{reason[:60]}...</td>
-                </tr>
-            """
-
-        html += """
-            </tbody>
-        </table>
-        """
-
-        st.html(html)
-    else:
-        st.info("暂无模型推荐，请先完成数据分析")
-
-
-def render_model_list_with_test(session_id: str):
-    """区块2：模型列表 + 结构化测试表单"""
-    st.markdown("#### 📦 模型列表")
-
-    saved_models = list_saved_models(session_id)
-
-    if not saved_models:
-        st.info("暂无已保存的模型，请先在下方「模型创建」中训练模型")
-        return
-
-    if 'test_model_key' not in st.session_state:
-        st.session_state.test_model_key = None
-    if 'test_model_display_name' not in st.session_state:
-        st.session_state.test_model_display_name = None
-
-    table_data = []
-    for model_info in saved_models:
-        config = model_info.get('config', {})
-        metrics = model_info.get('metrics', {})
-
-        main_metric = ""
-        if config.get('task_type') == 'classification':
-            train_metrics = metrics.get('train_score', {})
-            if isinstance(train_metrics, dict):
-                acc = train_metrics.get('accuracy')
-                if acc:
-                    main_metric = f"准确率: {acc:.4f}"
-                else:
-                    f1 = train_metrics.get('f1_score')
-                    if f1:
-                        main_metric = f"F1: {f1:.4f}"
-        elif config.get('task_type') == 'regression':
-            train_metrics = metrics.get('train_score', {})
-            if isinstance(train_metrics, dict):
-                r2 = train_metrics.get('r2')
-                if r2:
-                    main_metric = f"R²: {r2:.4f}"
-        elif config.get('task_type') == 'clustering':
-            train_metrics = metrics.get('train_score', {})
-            if isinstance(train_metrics, dict):
-                sil = train_metrics.get('silhouette_score')
-                if sil:
-                    main_metric = f"轮廓系数: {sil:.4f}"
-
-        model_key = config.get('model_key', '')
-        model_display_name = get_model_display_name(model_key)
-        user_model_name = model_info.get('user_model_name', '')
-        display_name = user_model_name if user_model_name else f"{model_display_name}_{model_info.get('created_at', '')[:10]}"
-
-        # 获取特征列表
-        features = config.get('features', [])
-        features_str = ', '.join(features[:3]) + ('...' if len(features) > 3 else '') if features else '-'
-
-        table_data.append({
-            "model_key": model_info.get('model_key'),
-            "display_name": display_name,
-            "model_name": model_display_name,
-            "task_type": config.get('task_type', '未知'),
-            "metric": main_metric,
-            "features": features_str,
-            "feature_count": len(features),
-            "created_at": model_info.get('created_at', '')[:19],
-            "config": config
-        })
-
-    # 显示表格
-    for item in table_data:
-        with st.container():
-            col1, col2, col3, col4, col5, col6 = st.columns([1.5, 1, 1, 1.5, 1, 1])
-
-            with col1:
-                st.markdown(f"**{item['display_name']}**")
-                st.caption(item['model_name'])
-
-            with col2:
-                task_display = {
-                    "classification": "分类",
-                    "regression": "回归",
-                    "clustering": "聚类",
-                    "time_series": "时序"
-                }.get(item['task_type'], item['task_type'])
-                st.markdown(f"`{task_display}`")
-
-            with col3:
-                st.caption(item['metric'] if item['metric'] else "-")
-
-            with col4:
-                st.caption(f"{item['feature_count']}个")
-                st.caption(item['features'])
-
-            with col5:
-                st.caption(item['created_at'][:10] if item['created_at'] else "-")
-
-            with col6:
-                btn_col1, btn_col2 = st.columns(2)
-                with btn_col1:
-                    if st.button("推理", key=f"test_{item['model_key']}", use_container_width=True):
-                        st.session_state.test_model_key = item['model_key']
-                        st.session_state.test_model_display_name = item['display_name']
-                        st.session_state.test_model_config = item['config']
-                        st.rerun()
-                with btn_col2:
-                    if st.button("删除", key=f"del_{item['model_key']}", use_container_width=True):
-                        if delete_model(session_id, item['model_key']):
-                            st.success(f"已删除模型: {item['display_name']}")
-                            if st.session_state.test_model_key == item['model_key']:
-                                st.session_state.test_model_key = None
-                            st.rerun()
-                        else:
-                            st.error("删除失败")
-
-            st.markdown("---")
-
-    if st.session_state.test_model_key is not None:
-        render_test_form(session_id)
-
-
-def render_test_form(session_id: str):
-    """渲染结构化测试表单"""
-    st.markdown(f"#### 📝 结构化测试 - 模型: {st.session_state.test_model_display_name}")
-
-    try:
-        model, preprocessor, metadata = load_model_for_inference(session_id, st.session_state.test_model_key)
-        config = metadata.get('config', {})
-        features = config.get('features', [])
-
-        # 显示特征数量
-        st.info(f"模型特征数: {len(features)}，特征列表: {', '.join(features[:5])}{'...' if len(features) > 5 else ''}")
-
-        preprocess_config = config.get('preprocess_config', {})
-        categorical_features = preprocess_config.get('categorical_features', [])
-
-        if not features:
-            st.warning("模型没有特征列，无法进行推理")
-            return
-
-        input_data = {}
-        cols = st.columns(2)
-        for i, feature in enumerate(features[:20]):
-            with cols[i % 2]:
-                if feature in categorical_features:
-                    input_data[feature] = st.text_input(
-                        f"{feature}",
-                        placeholder=f"输入 {feature} 的值",
-                        key=f"test_inp_{feature}"
-                    )
-                else:
-                    input_data[feature] = st.number_input(
-                        f"{feature}",
-                        value=0.0,
-                        step=0.01,
-                        format="%.4f",
-                        key=f"test_inp_{feature}"
-                    )
-
-        if len(features) > 20:
-            st.caption(f"... 还有 {len(features) - 20} 个特征未显示")
-
-        if st.button("🔍 执行推理", key="execute_test_inference", use_container_width=True):
-            valid_data = {}
-            for feature in features:
-                value = input_data.get(feature)
-                if value is not None and value != "":
-                    valid_data[feature] = value
-                else:
-                    valid_data[feature] = None
-
-            with st.spinner("推理中..."):
-                result = execute_inference(model, preprocessor, valid_data, features, categorical_features)
-
-            if result:
-                st.markdown("**📊 推理结果**")
-
-                # 尝试多种可能的键名获取预测值
-                pred = None
-                if "prediction" in result:
-                    pred = result["prediction"]
-                elif "predictions" in result:
-                    pred = result["predictions"]
-                    # 如果是列表且只有一个元素，取出第一个
-                    if isinstance(pred, list) and len(pred) == 1:
-                        pred = pred[0]
-                elif "forecast" in result:
-                    pred = result["forecast"]
-                    if isinstance(pred, list) and len(pred) == 1:
-                        pred = pred[0]
-
-                if pred is not None:
-                    if isinstance(pred, (int, float)):
-                        st.metric("预测值", f"{pred:.4f}" if isinstance(pred, float) else str(pred))
+            with st.container():
+                cols = st.columns([1.5, 1.5, 2, 1.5, 1])
+                with cols[0]:
+                    st.markdown(f"**{priority_icon} {rec.get('task_type', '')}**")
+                    st.caption(f"目标: {rec.get('target_column', '')}")
+                with cols[1]:
+                    ml_text = rec.get('ml', '')
+                    if ml_text:
+                        ml_short = ml_text.split(' / ')[0] if ' / ' in ml_text else ml_text
+                        st.caption(f"推荐模型: {ml_short}")
                     else:
-                        st.metric("预测结果", str(pred))
-                else:
-                    # 如果都没有，显示原始结果
-                    st.json(result)
+                        st.caption("推荐模型: 随机森林")
+                with cols[2]:
+                    feature_cols = rec.get('feature_columns', [])
+                    if feature_cols:
+                        valid_features = [f for f in feature_cols if f in available_cols]
+                        if valid_features:
+                            feature_str = ', '.join(valid_features[:5])
+                            if len(valid_features) > 5:
+                                feature_str += f'... 等{len(valid_features)}个'
+                            st.caption(f"推荐特征: {feature_str}")
+                        else:
+                            st.caption("推荐特征: 自动选择所有可用特征")
+                    else:
+                        st.caption("推荐特征: 自动选择所有可用特征")
+                with cols[3]:
+                    reason = rec.get('reason', '')
+                    if len(reason) > 40:
+                        st.caption(f"原因: {reason[:40]}...")
+                    else:
+                        st.caption(f"原因: {reason}")
+                with cols[4]:
+                    if st.button("📋 使用", key=f"use_rec_{i}"):
+                        task_type_str = rec.get('task_type', '')
+                        if "分类" in task_type_str:
+                            task_type = "classification"
+                        elif "数值预测" in task_type_str or "回归" in task_type_str:
+                            task_type = "regression"
+                        elif "时间序列" in task_type_str:
+                            task_type = "time_series"
+                        elif "聚类" in task_type_str:
+                            task_type = "clustering"
+                        else:
+                            task_type = "classification"
 
-                # 置信度（分类任务可能有）
-                if "confidence" in result:
-                    conf = result["confidence"]
-                    if isinstance(conf, list) and len(conf) > 0:
-                        st.metric("置信度", f"{conf[0]:.2%}")
-                    elif isinstance(conf, (int, float)):
-                        st.metric("置信度", f"{conf:.2%}")
+                        ml_text = rec.get('ml', '随机森林')
+                        first_model = ml_text.split(' / ')[0] if ' / ' in ml_text else ml_text
 
-                # 概率分布（分类任务可能有）
-                if "probabilities" in result:
-                    probs = result["probabilities"]
-                    if probs and len(probs) > 0:
-                        st.markdown("**类别概率分布:**")
-                        prob_list = probs[0] if isinstance(probs, list) and len(probs) > 0 else probs
-                        if isinstance(prob_list, (list, np.ndarray)):
-                            for i, prob in enumerate(prob_list[:5]):
-                                if prob is not None:
-                                    st.progress(float(prob), text=f"类别 {i}: {float(prob):.2%}")
+                        if 'XGBoost' in first_model:
+                            model_key = 'xgboost' if task_type == 'classification' else 'xgboost_regressor'
+                        elif 'LightGBM' in first_model:
+                            model_key = 'lightgbm' if task_type == 'classification' else 'lightgbm_regressor'
+                        elif 'CatBoost' in first_model:
+                            model_key = 'catboost' if task_type == 'classification' else 'catboost'
+                        elif '逻辑回归' in first_model:
+                            model_key = 'logistic_regression'
+                        elif '线性回归' in first_model:
+                            model_key = 'linear_regression'
+                        elif '决策树' in first_model:
+                            model_key = 'decision_tree' if task_type == 'classification' else 'decision_tree_regressor'
+                        elif '随机森林' in first_model:
+                            model_key = 'random_forest' if task_type == 'classification' else 'random_forest_regressor'
+                        else:
+                            model_key = 'random_forest' if task_type == 'classification' else 'random_forest_regressor'
 
-                # 聚类结果
-                if "cluster_id" in result:
-                    st.metric("所属簇", result["cluster_id"])
-                if "cluster_ids" in result:
-                    cluster_ids = result["cluster_ids"]
-                    if isinstance(cluster_ids, list) and len(cluster_ids) == 1:
-                        st.metric("所属簇", cluster_ids[0])
+                        recommended_features = rec.get('feature_columns', [])
+                        valid_features = [f for f in recommended_features if f in available_cols]
+                        if not valid_features:
+                            target = rec.get('target_column', '')
+                            valid_features = [col for col in available_cols if col != target][:20]
 
-                # 如果是错误
-                if "error" in result:
-                    st.error(f"推理错误: {result['error']}")
-                    if "traceback" in result:
-                        with st.expander("详细错误信息"):
-                            st.code(result['traceback'], language='python')
-            else:
-                st.error("推理失败，未返回结果")
-    except Exception as e:
-        import traceback
-        st.error(f"加载模型失败: {str(e)}")
-        with st.expander("详细错误信息"):
-            st.code(traceback.format_exc(), language='python')
+                        model_params = get_model_params(task_type, model_key)
+                        default_params = {}
+                        for param_name, param_info in model_params.items():
+                            default_params[param_name] = param_info.get('default')
+
+                        # 生成模型名称
+                        auto_model_name = generate_model_name(task_type, rec.get('target_column', ''), model_key)
+
+                        # 填充到session state
+                        st.session_state.auto_fill_task_type = task_type
+                        st.session_state.auto_fill_target_col = rec.get('target_column', '')
+                        st.session_state.auto_fill_features = valid_features
+                        st.session_state.auto_fill_model_key = model_key
+                        st.session_state.auto_fill_model_params = default_params
+                        st.session_state.auto_fill_model_name = auto_model_name
+                        # 跳转到模型创建标签页
+                        st.session_state.model_training_tab = 1
+                        st.rerun()
+            st.divider()
+    else:
+        st.info("暂无模型推荐")
 
 
 def render_model_creation(data: pd.DataFrame, available_cols: List[str],
-                           variable_types: Dict, session_id: str):
-    """区块3：模型创建"""
-    st.markdown("#### 🆕 模型创建")
+                          variable_types: Dict, session_id: str):
+    """模型创建标签页内容"""
+    st.markdown("配置模型参数并开始训练")
+
+    # 创建新模型按钮
+    col1, col2 = st.columns([5, 1])
+    with col2:
+        if st.button("➕ 创建新模型", use_container_width=True):
+            st.session_state.auto_fill_task_type = None
+            st.session_state.auto_fill_target_col = None
+            st.session_state.auto_fill_features = None
+            st.session_state.auto_fill_model_key = None
+            st.session_state.auto_fill_model_params = None
+            st.session_state.auto_fill_model_name = None
+            st.rerun()
+
+    st.markdown("---")
+
+    # 初始化默认值
+    if 'train_task_type_selected' not in st.session_state:
+        st.session_state.train_task_type_selected = "classification"
+    if 'train_target_col_selected' not in st.session_state:
+        st.session_state.train_target_col_selected = available_cols[0] if available_cols else None
+    if 'train_features_selected' not in st.session_state:
+        st.session_state.train_features_selected = [col for col in available_cols if
+                                                    col != st.session_state.train_target_col_selected][:20]
+    if 'train_model_key_selected' not in st.session_state:
+        st.session_state.train_model_key_selected = "random_forest"
 
     # 任务配置
     st.markdown("**📋 任务配置**")
@@ -447,6 +256,10 @@ def render_model_creation(data: pd.DataFrame, available_cols: List[str],
     col1, col2 = st.columns(2)
 
     with col1:
+        if st.session_state.auto_fill_task_type:
+            st.session_state.train_task_type_selected = st.session_state.auto_fill_task_type
+            st.session_state.auto_fill_task_type = None
+
         task_type = st.selectbox(
             "任务类型",
             options=["classification", "regression", "clustering", "time_series"],
@@ -456,15 +269,19 @@ def render_model_creation(data: pd.DataFrame, available_cols: List[str],
                 "clustering": "🔘 聚类 (Clustering)",
                 "time_series": "📅 时间序列 (Time Series)"
             }.get(x, x),
-            key="train_task_type"
+            key="train_task_type_selected"
         )
 
     with col2:
         if task_type in ["classification", "regression"]:
+            if st.session_state.auto_fill_target_col:
+                st.session_state.train_target_col_selected = st.session_state.auto_fill_target_col
+                st.session_state.auto_fill_target_col = None
+
             target_col = st.selectbox(
                 "目标列",
                 options=available_cols,
-                key="train_target_col"
+                key="train_target_col_selected"
             )
         else:
             target_col = None
@@ -472,17 +289,19 @@ def render_model_creation(data: pd.DataFrame, available_cols: List[str],
 
     st.markdown("---")
 
-    # 特征选择 - 使用所有列（包括日期派生列）
+    # 特征选择
     st.markdown("**🔧 特征选择**")
 
     all_columns = list(data.columns)
-    default_features = [col for col in all_columns if col != target_col]
+
+    if st.session_state.auto_fill_features:
+        st.session_state.train_features_selected = st.session_state.auto_fill_features
+        st.session_state.auto_fill_features = None
 
     selected_features = st.multiselect(
         "选择特征列",
         options=all_columns,
-        default=default_features[:20] if len(default_features) > 20 else default_features,
-        key="train_features"
+        key="train_features_selected"
     )
 
     if not selected_features:
@@ -502,11 +321,16 @@ def render_model_creation(data: pd.DataFrame, available_cols: List[str],
         st.warning(f"⚠️ 暂无{task_type}类型的模型可用")
         return
 
+    if st.session_state.auto_fill_model_key:
+        if st.session_state.auto_fill_model_key in model_options:
+            st.session_state.train_model_key_selected = st.session_state.auto_fill_model_key
+        st.session_state.auto_fill_model_key = None
+
     selected_model_key = st.selectbox(
         "选择模型",
         options=model_options,
         format_func=lambda x: f"{get_model_display_name(x)} - {models[x]['description'][:50]}",
-        key="train_model_key"
+        key="train_model_key_selected"
     )
 
     if selected_model_key:
@@ -516,68 +340,84 @@ def render_model_creation(data: pd.DataFrame, available_cols: List[str],
 
     st.markdown("---")
 
-    # 高级配置（折叠）
+    # 高级配置
     with st.expander("⚙️ 高级配置", expanded=False):
-        # 模型参数配置
         if selected_model_key:
             st.markdown("**模型参数配置**")
             model_params = get_model_params(task_type, selected_model_key)
             user_params = {}
 
             param_items = list(model_params.items())
+            auto_params = st.session_state.auto_fill_model_params or {}
+
             if param_items:
                 param_cols = st.columns(3)
                 for i, (param_name, param_info) in enumerate(param_items):
                     with param_cols[i % 3]:
                         param_type = param_info.get('type', 'unknown')
                         default_val = param_info.get('default')
+
+                        if param_name in auto_params:
+                            default_val = auto_params[param_name]
+
                         description = param_info.get('description', '')
+                        param_key = f"param_{param_name}"
 
                         if param_type == 'int':
                             param_range = param_info.get('range', [1, 100])
-                            user_params[param_name] = st.number_input(
+                            value = st.number_input(
                                 f"{param_name}",
                                 min_value=param_range[0],
                                 max_value=param_range[1] if len(param_range) > 1 else 1000,
                                 value=default_val if default_val else param_range[0],
                                 step=1,
                                 help=description,
-                                key=f"param_{param_name}"
+                                key=param_key
                             )
+                            user_params[param_name] = value
                         elif param_type == 'float':
                             param_range = param_info.get('range', [0.0, 1.0])
-                            user_params[param_name] = st.number_input(
+                            value = st.number_input(
                                 f"{param_name}",
                                 min_value=float(param_range[0]),
                                 max_value=float(param_range[1]) if len(param_range) > 1 else 1.0,
                                 value=float(default_val) if default_val else param_range[0],
                                 step=0.01,
                                 help=description,
-                                key=f"param_{param_name}"
+                                key=param_key
                             )
+                            user_params[param_name] = value
                         elif param_type == 'choice':
                             options = param_info.get('options', [])
-                            user_params[param_name] = st.selectbox(
+                            default_idx = 0
+                            if default_val in options:
+                                default_idx = options.index(default_val)
+                            value = st.selectbox(
                                 f"{param_name}",
                                 options=options,
-                                index=options.index(default_val) if default_val in options else 0,
+                                index=default_idx,
                                 help=description,
-                                key=f"param_{param_name}"
+                                key=param_key
                             )
+                            user_params[param_name] = value
                         elif param_type == 'bool':
-                            user_params[param_name] = st.checkbox(
+                            value = st.checkbox(
                                 f"{param_name}",
                                 value=default_val if default_val else False,
                                 help=description,
-                                key=f"param_{param_name}"
+                                key=param_key
                             )
+                            user_params[param_name] = value
                         else:
-                            user_params[param_name] = st.text_input(
+                            value = st.text_input(
                                 f"{param_name}",
                                 value=str(default_val) if default_val else "",
                                 help=description,
-                                key=f"param_{param_name}"
+                                key=param_key
                             )
+                            user_params[param_name] = value
+
+                st.session_state.auto_fill_model_params = None
             else:
                 st.info("该模型无额外参数配置")
                 user_params = {}
@@ -644,11 +484,26 @@ def render_model_creation(data: pd.DataFrame, available_cols: List[str],
         with col2:
             random_seed = st.number_input("随机种子", min_value=0, max_value=9999, value=42, key="random_seed")
 
-    # 开始训练按钮
+    # 模型名称
+    st.markdown("**📝 模型名称**")
+
+    # 获取模型名称默认值
+    if st.session_state.auto_fill_model_name:
+        default_model_name = st.session_state.auto_fill_model_name
+        st.session_state.auto_fill_model_name = None
+    else:
+        default_model_name = generate_model_name(task_type, target_col if target_col else "", selected_model_key)
+
+    user_model_name = st.text_input(
+        "模型名称",
+        value=default_model_name,
+        key="model_name_input",
+        help="可为模型设置一个易于识别的名称"
+    )
+
     st.markdown("---")
 
     if st.button("▶️ 开始训练", type="primary", use_container_width=True):
-        # 获取用户参数
         user_params = {}
         if selected_model_key:
             model_params = get_model_params(task_type, selected_model_key)
@@ -660,7 +515,6 @@ def render_model_creation(data: pd.DataFrame, available_cols: List[str],
                     default_info = model_params[param_name]
                     user_params[param_name] = default_info.get('default')
 
-        # 获取高级配置参数
         train_ratio = st.session_state.get("train_ratio", 0.7)
         val_ratio = st.session_state.get("val_ratio", 0.15)
         missing_strategy = st.session_state.get("preprocess_missing", "drop")
@@ -675,76 +529,180 @@ def render_model_creation(data: pd.DataFrame, available_cols: List[str],
                 selected_model_key, user_params,
                 train_ratio, val_ratio,
                 missing_strategy, scaling, encoding,
-                cv_folds, random_seed, session_id
+                cv_folds, random_seed, session_id,
+                user_model_name
             )
 
         if success:
-            st.session_state.trained_model = result["model"]
-            st.session_state.trained_preprocessor = result["preprocessor"]
-            st.session_state.trained_config = result["config"]
-            st.session_state.trained_metrics = result["metrics"]
-            st.session_state.trained_train_result = result.get("train_result", {})
-            st.session_state.training_completed = True
-            st.rerun()
-        else:
-            st.error(f"训练失败: {result.get('error', '未知错误')}")
-
-
-def render_save_form(session_id: str):
-    """渲染保存表单"""
-    st.markdown("---")
-    st.markdown("### 💾 保存模型")
-
-    config = st.session_state.trained_config
-    task_type = config.get('task_type', 'classification')
-    target_col = config.get('target_col', '')
-    model_key = config.get('model_key', '')
-
-    default_name = generate_model_name(task_type, target_col, model_key)
-
-    user_model_name = st.text_input(
-        "模型名称",
-        value=default_name,
-        key="model_name_input",
-        help="可为模型设置一个易于识别的名称"
-    )
-
-    # 显示训练结果
-    train_result = st.session_state.get('trained_train_result', {})
-    if train_result:
-        st.markdown("**训练结果**")
-        train_score = train_result.get("train_score", {})
-        if isinstance(train_score, dict):
-            for metric_name, metric_value in train_score.items():
-                if isinstance(metric_value, (int, float)):
-                    st.metric(metric_name, f"{metric_value:.4f}")
-
-        training_time = train_result.get("training_time", 0)
-        st.caption(f"训练耗时: {training_time:.2f} 秒")
-
-    if st.button("确认保存", type="primary", use_container_width=True):
-        success = save_trained_model(
-            session_id=session_id,
-            model=st.session_state.trained_model,
-            preprocessor=st.session_state.trained_preprocessor,
-            config=config,
-            metrics=st.session_state.trained_metrics,
-            user_model_name=user_model_name
-        )
-
-        if success:
-            # 清除训练状态
-            del st.session_state.training_completed
-            del st.session_state.trained_model
-            del st.session_state.trained_preprocessor
-            del st.session_state.trained_config
-            del st.session_state.trained_metrics
-            if 'trained_train_result' in st.session_state:
-                del st.session_state.trained_train_result
-
-            st.session_state.refresh_model_list = True
-            st.success("✅ 模型已保存！")
+            st.success(f"✅ 训练完成！模型已保存: {user_model_name}")
+            # 跳转到模型推理标签页
+            st.session_state.model_training_tab = 2
             time.sleep(1)
             st.rerun()
         else:
-            st.error("保存失败")
+            st.error(f"训练失败: {result.get('error', '未知错误')}")
+            if 'traceback' in result:
+                with st.expander("详细错误信息"):
+                    st.code(result['traceback'], language='python')
+
+
+def render_model_inference(session_id: str):
+    """模型推理标签页内容"""
+    st.markdown("选择已训练的模型，输入特征值进行预测")
+
+    saved_models = list_saved_models(session_id)
+
+    if not saved_models:
+        st.info("暂无已保存的模型，请先在「模型创建」中训练模型")
+        return
+
+    # 模型列表区域（可删除）
+    st.markdown("#### 📦 已保存的模型")
+
+    for item in saved_models:
+        with st.container():
+            cols = st.columns([2, 1, 1.5, 1.5, 1])
+            with cols[0]:
+                st.markdown(f"**{item.get('user_model_name', item.get('model_key'))}**")
+            with cols[1]:
+                task_display = {
+                    "classification": "分类",
+                    "regression": "回归",
+                    "clustering": "聚类",
+                    "time_series": "时序"
+                }.get(item.get('task_type'), item.get('task_type'))
+                st.caption(task_display)
+            with cols[2]:
+                metrics = item.get('metrics', {})
+                if metrics.get('accuracy'):
+                    st.caption(f"准确率: {metrics['accuracy']:.2%}")
+                elif metrics.get('r2'):
+                    st.caption(f"R²: {metrics['r2']:.3f}")
+                else:
+                    st.caption("-")
+            with cols[3]:
+                st.caption(f"特征数: {len(item.get('features', []))}")
+            with cols[4]:
+                if st.button("🗑️ 删除", key=f"del_infer_{item.get('model_key')}", use_container_width=True):
+                    if delete_model(item.get('model_key'), session_id):
+                        st.success(f"已删除模型: {item.get('user_model_name')}")
+                        st.rerun()
+                    else:
+                        st.error("删除失败")
+        st.divider()
+
+    st.markdown("---")
+    st.markdown("#### 🔮 模型预测")
+
+    # 模型选择下拉框
+    model_options = {m.get('model_key'): m.get('user_model_name', m.get('model_key')) for m in saved_models}
+    selected_model_key = st.selectbox(
+        "选择模型",
+        options=list(model_options.keys()),
+        format_func=lambda x: model_options.get(x, x),
+        key="inference_model_select"
+    )
+
+    if not selected_model_key:
+        return
+
+    # 加载模型信息
+    try:
+        model, preprocessor, metadata, metrics = load_model_for_inference(selected_model_key, session_id)
+
+        config = metadata
+        features = config.get('features', [])
+        preprocess_config = config.get('preprocess_config', {})
+        categorical_features = preprocess_config.get('categorical_features', [])
+
+        if not features:
+            st.warning("模型没有特征列，无法进行推理")
+            return
+
+        st.info(f"特征列 ({len(features)}个): {', '.join(features[:8])}{'...' if len(features) > 8 else ''}")
+
+        # 显示模型指标
+        with st.expander("📊 模型评估指标", expanded=False):
+            train_score = metrics.get("train_score", {})
+            if train_score:
+                cols = st.columns(3)
+                for i, (metric_name, metric_value) in enumerate(train_score.items()):
+                    if isinstance(metric_value, (int, float)):
+                        with cols[i % 3]:
+                            st.metric(metric_name, f"{metric_value:.4f}")
+
+        # 特征输入表单
+        st.markdown("**📝 输入特征值**")
+
+        input_data = {}
+        cols = st.columns(2)
+        for i, feature in enumerate(features[:16]):
+            with cols[i % 2]:
+                if feature in categorical_features:
+                    input_data[feature] = st.text_input(
+                        f"{feature}",
+                        placeholder=f"输入 {feature} 的值",
+                        key=f"infer_{feature}_{selected_model_key[:10]}"
+                    )
+                else:
+                    input_data[feature] = st.number_input(
+                        f"{feature}",
+                        value=0.0,
+                        step=0.01,
+                        format="%.4f",
+                        key=f"infer_{feature}_{selected_model_key[:10]}"
+                    )
+
+        if len(features) > 16:
+            st.caption(f"... 还有 {len(features) - 16} 个特征未显示")
+
+        if st.button("🔍 执行推理", type="primary", use_container_width=True):
+            valid_data = {}
+            for feature in features:
+                value = input_data.get(feature)
+                if value is not None and value != "":
+                    valid_data[feature] = value
+                else:
+                    valid_data[feature] = None
+
+            result = execute_inference(model, preprocessor, valid_data, features, categorical_features)
+
+            if result and "error" not in result:
+                st.markdown("### 📊 推理结果")
+
+                pred = result.get("prediction")
+                if pred is None:
+                    predictions = result.get("predictions")
+                    if predictions and isinstance(predictions, list) and len(predictions) == 1:
+                        pred = predictions[0]
+
+                if pred is not None:
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        if isinstance(pred, (int, float)):
+                            st.metric("预测值", f"{pred:.4f}")
+                        else:
+                            st.metric("预测结果", str(pred))
+
+                    if result.get("confidence"):
+                        conf = result["confidence"]
+                        with col2:
+                            if isinstance(conf, list) and len(conf) > 0:
+                                st.metric("置信度", f"{conf[0]:.2%}")
+                            elif isinstance(conf, (int, float)):
+                                st.metric("置信度", f"{conf:.2%}")
+
+                if result.get("probabilities"):
+                    probs = result["probabilities"]
+                    if probs and len(probs) > 0:
+                        st.markdown("**类别概率分布:**")
+                        prob_list = probs[0] if isinstance(probs, list) and len(probs) > 0 else probs
+                        if isinstance(prob_list, (list, np.ndarray)):
+                            for i, prob in enumerate(prob_list[:5]):
+                                if prob is not None:
+                                    st.progress(float(prob), text=f"类别 {i}: {float(prob):.2%}")
+            else:
+                st.error(f"推理失败: {result.get('error', '未知错误')}")
+
+    except Exception as e:
+        st.error(f"加载模型失败: {str(e)}")

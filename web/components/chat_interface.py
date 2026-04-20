@@ -1,9 +1,13 @@
-"""AI智能解读组件 - 消息历史、输入框、推荐问题"""
+# web/components/chat_interface.py
+
+"""AI智能解读组件 - 消息历史、输入框、推荐问题（Agent模式）"""
 
 import streamlit as st
 import pandas as pd
 import re
 from autostat.prompts import get_recommended_questions
+from web.services.session_service import SessionService
+from web.components.agent_inference import parse_and_execute_tool, ModelInferenceTool
 
 
 def get_initial_question(analysis_type: str) -> str:
@@ -19,8 +23,7 @@ def get_initial_question(analysis_type: str) -> str:
 
 
 def extract_json_context(json_data: dict, analysis_type: str) -> str:
-    """从 JSON 数据提取上下文信息（纯数据提取，不含提示词前缀）"""
-
+    """从 JSON 数据提取上下文信息"""
     data_shape = json_data.get('data_shape', {})
     variable_types = json_data.get('variable_types', {})
     quality_report = json_data.get('quality_report', {})
@@ -76,25 +79,7 @@ def extract_json_context(json_data: dict, analysis_type: str) -> str:
             max_val = summary.get('max', 'N/A')
             mean_val = summary.get('mean', 'N/A')
             median_val = summary.get('median', 'N/A')
-
-            if isinstance(min_val, (int, float)):
-                min_str = f"{min_val:.2f}"
-            else:
-                min_str = str(min_val)
-            if isinstance(max_val, (int, float)):
-                max_str = f"{max_val:.2f}"
-            else:
-                max_str = str(max_val)
-            if isinstance(mean_val, (int, float)):
-                mean_str = f"{mean_val:.2f}"
-            else:
-                mean_str = str(mean_val)
-            if isinstance(median_val, (int, float)):
-                median_str = f"{median_val:.2f}"
-            else:
-                median_str = str(median_val)
-
-            numeric_summary += f"  - {col}: 均值={mean_str}, 中位数={median_str}, 范围=[{min_str}, {max_str}]\n"
+            numeric_summary += f"  - {col}: 均值={mean_val}, 中位数={median_val}, 范围=[{min_val}, {max_val}]\n"
 
     multi_info = ""
     if analysis_type in ["multi", "database"]:
@@ -148,15 +133,15 @@ def extract_json_context(json_data: dict, analysis_type: str) -> str:
 
 
 def extract_html_context(html_content: str) -> str:
-    """从 HTML 报告提取关键信息（纯数据提取，不含提示词前缀）"""
-
+    """从 HTML 报告提取关键信息"""
     context_parts = []
 
     title_match = re.search(r'<h1>(.*?)</h1>', html_content)
     if title_match:
         context_parts.append(f"报告标题: {title_match.group(1)}")
 
-    stat_cards = re.findall(r'<div class="stat-card"><div class="value">(.*?)</div><div class="label">(.*?)</div>', html_content)
+    stat_cards = re.findall(r'<div class="stat-card"><div class="value">(.*?)</div><div class="label">(.*?)</div>',
+                            html_content)
     if stat_cards:
         stats_summary = "**关键指标:**\n"
         for value, label in stat_cards:
@@ -185,7 +170,7 @@ def extract_html_context(html_content: str) -> str:
 
 
 def extract_data_context(raw_data_preview: dict) -> str:
-    """从原始数据提取上下文信息（纯数据提取，不含提示词前缀）"""
+    """从原始数据提取上下文信息"""
     if raw_data_preview is None:
         return "无源数据信息"
 
@@ -226,7 +211,7 @@ def extract_data_context(raw_data_preview: dict) -> str:
             stats = summary_stats.get(col, {})
             if stats.get('type') == 'datetime':
                 context_parts.append(f"- {col}: {stats.get('min', 'N/A')} 至 {stats.get('max', 'N/A')} "
-                                   f"(共{stats.get('unique_dates', 0)}个日期)")
+                                     f"(共{stats.get('unique_dates', 0)}个日期)")
 
     if numeric_cols:
         context_parts.append("\n### 数值列统计")
@@ -234,8 +219,8 @@ def extract_data_context(raw_data_preview: dict) -> str:
             stats = summary_stats.get(col, {})
             if stats.get('type') == 'numeric':
                 context_parts.append(f"- {col}: 范围=[{stats.get('min', 'N/A'):.2f}, {stats.get('max', 'N/A'):.2f}], "
-                                   f"均值={stats.get('mean', 'N/A'):.2f}, "
-                                   f"中位数={stats.get('median', 'N/A'):.2f}")
+                                     f"均值={stats.get('mean', 'N/A'):.2f}, "
+                                     f"中位数={stats.get('median', 'N/A'):.2f}")
 
     if cat_cols:
         context_parts.append("\n### 分类列统计")
@@ -245,8 +230,8 @@ def extract_data_context(raw_data_preview: dict) -> str:
                 top_vals = stats.get('top_values', {})
                 top_str = ", ".join([f"{k}:{v}" for k, v in list(top_vals.items())[:3]])
                 context_parts.append(f"- {col}: {stats.get('unique_count', 0)}个唯一值, "
-                                   f"最高频占比={stats.get('top_percent', 0):.1f}%, "
-                                   f"前3: {top_str}")
+                                     f"最高频占比={stats.get('top_percent', 0):.1f}%, "
+                                     f"前3: {top_str}")
 
     if len(preview) > 0:
         preview_str = preview.head(50).to_string()
@@ -255,79 +240,113 @@ def extract_data_context(raw_data_preview: dict) -> str:
     return "\n".join(context_parts)
 
 
-def build_context_prompt(selected_contexts, analysis_type, json_data, html_content, raw_data_preview, source_name):
-    """根据选中的上下文构建完整提示词"""
-
-    context_parts = []
-
-    analysis_type_map = {
-        "single": "单文件分析",
-        "multi": "多文件分析",
-        "database": "数据库分析"
-    }
-    context_parts.append(f"**分析类型:** {analysis_type_map.get(analysis_type, '未知')}")
-    context_parts.append(f"**数据源:** {source_name}")
-    context_parts.append("")
-
+def build_analysis_prompt(selected_contexts, analysis_type, json_data, html_content, raw_data_preview, source_name):
+    """构建普通分析提示词"""
+    data_context = ""
     if "json_result" in selected_contexts and json_data:
-        context_parts.append(extract_json_context(json_data, analysis_type))
-
+        data_context = extract_json_context(json_data, analysis_type)
     if "html_report" in selected_contexts and html_content:
-        html_summary = extract_html_context(html_content)
-        if html_summary:
-            context_parts.append(f"### HTML 报告摘要\n{html_summary}")
-
+        data_context += "\n" + extract_html_context(html_content)
     if "raw_data" in selected_contexts and raw_data_preview:
-        context_parts.append(f"### 源数据信息\n{extract_data_context(raw_data_preview)}")
+        data_context += "\n" + extract_data_context(raw_data_preview)
 
-    full_context = "\n\n".join(context_parts)
+    return f"""你是专业的数据分析师，正在回答用户关于数据的问题。
 
-    full_prompt = f"""
-你是一位专业的数据分析师。以下是根据用户选择的上下文提供的分析数据。
+## 分析信息
+- 分析类型: {analysis_type}
+- 数据源: {source_name}
 
-{full_context}
+{data_context}
 
----
-
-## 注意事项
-- 请基于上述提供的数据上下文回答问题
-- 源数据包含完整的数据预览（前50行）和统计信息
-- 你可以根据日期范围、数值范围等条件查询具体数据
-- 如果用户询问具体数据（如某年某月的数据），请根据数据预览和统计信息回答
-- 用中文回答，结构清晰
+## 重要说明
+1. 用中文回答，结构清晰，友好专业
+2. 基于提供的数据上下文回答问题
+3. 如果用户询问预测相关问题，请告知用户切换到「推理预测」标签页
 """
-    return full_prompt
+
+
+def build_prediction_prompt(selected_contexts, analysis_type, json_data, html_content, raw_data_preview, source_name):
+    """构建预测专用提示词 - 强制输出JSON"""
+    session_id = SessionService.get_current_session()
+
+    tool = ModelInferenceTool(session_id)
+    available_models = tool.get_available_models()
+
+    if not available_models:
+        return build_analysis_prompt(selected_contexts, analysis_type, json_data, html_content, raw_data_preview,
+                                     source_name)
+
+    models_desc = ""
+    for model in available_models:
+        model_name = model.get('user_model_name', model.get('model_key'))
+        model_key = model.get('model_key')
+        task_type = model.get('task_type', 'unknown')
+        target = model.get('target_column', '未知')
+        features = model.get('features', [])
+        feature_str = ', '.join(features[:5])
+        if len(features) > 5:
+            feature_str += '...'
+        models_desc += f"- **{model_name}**\n"
+        models_desc += f"  模型ID: {model_key}\n"
+        models_desc += f"  类型: {task_type}, 预测目标: {target}\n"
+        models_desc += f"  特征: {feature_str}\n\n"
+
+    return f"""你是预测助手，负责调用模型进行预测。
+
+## 可用模型列表
+
+{models_desc}
+
+## 规则
+1. 当用户需要进行预测时，只输出JSON，不要输出任何其他文字
+2. JSON格式：{{"tool": "predict", "model_key": "模型ID", "input_values": {{"特征名1": 值1}}}}
+3. 特征名必须与模型定义完全一致
+4. 如果用户没有指定模型，选择第一个模型
+
+示例：
+{{"tool": "predict", "model_key": "classification_random_forest_1776665800", "input_values": {{"销售额": 8000}}}}
+
+请直接输出JSON。
+"""
 
 
 def render_chat_interface():
-    """渲染聊天界面（历史消息 + 临时消息 + 输入框）"""
+    """渲染聊天界面"""
+    session_id = SessionService.get_current_session()
+    chat_mode = st.session_state.get("chat_mode", "analysis")
 
-    # 历史消息
     for msg in st.session_state.chat_messages:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
 
-    # 处理待发送的问题（流式输出）
     if st.session_state.get("pending_question"):
         question = st.session_state.pending_question
 
-        # 显示用户消息
         with st.chat_message("user"):
             st.markdown(question)
 
-        # 流式显示 AI 回答
         with st.chat_message("assistant"):
             response_placeholder = st.empty()
             full_response = ""
 
-            system_prompt = build_context_prompt(
-                st.session_state.selected_contexts,
-                st.session_state.current_analysis_type,
-                st.session_state.current_json_data,
-                st.session_state.current_html,
-                st.session_state.raw_data_preview,
-                st.session_state.current_source_name
-            )
+            if chat_mode == "prediction":
+                system_prompt = build_prediction_prompt(
+                    st.session_state.selected_contexts,
+                    st.session_state.current_analysis_type,
+                    st.session_state.current_json_data,
+                    st.session_state.current_html,
+                    st.session_state.raw_data_preview,
+                    st.session_state.current_source_name
+                )
+            else:
+                system_prompt = build_analysis_prompt(
+                    st.session_state.selected_contexts,
+                    st.session_state.current_analysis_type,
+                    st.session_state.current_json_data,
+                    st.session_state.current_html,
+                    st.session_state.raw_data_preview,
+                    st.session_state.current_source_name
+                )
 
             messages = [{"role": "system", "content": system_prompt}]
             for msg in st.session_state.chat_messages:
@@ -339,17 +358,20 @@ def render_chat_interface():
                     full_response += chunk
                     response_placeholder.markdown(full_response + "▌")
 
+            if chat_mode == "prediction":
+                tool_result = parse_and_execute_tool(full_response, session_id)
+                if tool_result:
+                    full_response = tool_result
+                    response_placeholder.markdown(full_response)
+
             response_placeholder.markdown(full_response)
 
-        # 追加到历史
         st.session_state.chat_messages.append({"role": "user", "content": question})
         st.session_state.chat_messages.append({"role": "assistant", "content": full_response})
 
-        # 清除 pending
         del st.session_state.pending_question
         st.rerun()
 
-    # 输入框
     prompt = st.chat_input("输入您的问题...", key="chat_input")
     if prompt and prompt.strip():
         st.session_state.pending_question = prompt.strip()
@@ -357,7 +379,7 @@ def render_chat_interface():
 
 
 def render_recommended_questions():
-    """渲染推荐问题（自由提问标签页专用）"""
+    """渲染推荐问题"""
     st.markdown("#### 💡 推荐问题")
     st.caption("点击下方问题快速提问")
 

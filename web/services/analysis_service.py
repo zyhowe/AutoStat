@@ -7,10 +7,13 @@ import json
 import tempfile
 import os
 import time
+import pickle
 from autostat import AutoStatisticalAnalyzer, MultiTableStatisticalAnalyzer
 from autostat.reporter import Reporter
 from web.utils.helpers import capture_and_run, get_raw_data_preview
 from web.services.file_service import FileService
+from web.services.session_service import SessionService
+from web.services.storage_service import StorageService
 
 
 class AnalysisService:
@@ -25,6 +28,15 @@ class AnalysisService:
         try:
             status_placeholder.info("📁 正在准备数据...")
             progress_bar.progress(20)
+
+            # 创建会话 - 单文件模式
+            session_id = SessionService.create_session(file_name, "single")
+            SessionService.set_current_session(session_id)
+            st.session_state.current_session_id = session_id
+
+            # 保存原始数据
+            StorageService.save_dataframe("raw_data", filtered_df, session_id)
+            StorageService.save_json("variable_types", variable_types, session_id)
 
             with tempfile.NamedTemporaryFile(mode='w', suffix=f'.{ext}', delete=False) as tmp:
                 FileService.save_temp_file(filtered_df, tmp, ext)
@@ -63,11 +75,23 @@ class AnalysisService:
             st.session_state.current_source_name = file_name
 
             reporter = Reporter(analyzer)
-            st.session_state.current_html = reporter.to_html()
-            st.session_state.current_json_data = json.loads(analyzer.to_json())
-            # 修改：使用 analyzer.data（包含日期派生列）替代 filtered_df
+            html_content = reporter.to_html()
+            json_data = json.loads(analyzer.to_json())
+
+            st.session_state.current_html = html_content
+            st.session_state.current_json_data = json_data
             st.session_state.raw_data_preview = get_raw_data_preview(analyzer.data)
             st.session_state.chat_messages = []
+
+            # 保存分析结果到存储
+            StorageService.save_analysis_results(
+                session_id, analyzer, html_content, json_data, output, filtered_df
+            )
+
+            # 保存分析器对象
+            session_path = SessionService.get_session_path(session_id)
+            with open(session_path / "analyzer.pkl", "wb") as f:
+                pickle.dump(analyzer, f)
 
             # 标记分析完成并跳转到预览报告
             st.session_state.analysis_completed = True
@@ -98,6 +122,13 @@ class AnalysisService:
             status_placeholder.info("📁 正在准备数据...")
             progress_bar.progress(20)
 
+            # 创建会话 - 多文件模式
+            first_name = list(filtered_tables.keys())[0] if filtered_tables else "unknown"
+            source_name = f"{first_name}等{len(filtered_tables)}个文件"
+            session_id = SessionService.create_session(source_name, "multi", filtered_tables)
+            SessionService.set_current_session(session_id)
+            st.session_state.current_session_id = session_id
+
             status_placeholder.info("🔍 正在分析数据...")
             progress_bar.progress(50)
 
@@ -124,15 +155,33 @@ class AnalysisService:
             st.session_state.multi_analyzer = analyzer
             st.session_state.multi_output = output
             st.session_state.current_analysis_type = "multi"
-            st.session_state.current_source_name = f"{len(filtered_tables)}个文件"
+            st.session_state.current_source_name = source_name
 
             merged_analyzer = analyzer.get_merged_analyzer()
             reporter = Reporter(merged_analyzer)
-            st.session_state.current_html = reporter.to_html()
-            st.session_state.current_json_data = json.loads(merged_analyzer.to_json())
-            # 修改：使用 merged_analyzer.data（包含日期派生列）替代 merged_analyzer.data
+            html_content = reporter.to_html()
+            json_data = json.loads(merged_analyzer.to_json())
+
+            st.session_state.current_html = html_content
+            st.session_state.current_json_data = json_data
             st.session_state.raw_data_preview = get_raw_data_preview(merged_analyzer.data)
             st.session_state.chat_messages = []
+
+            # 保存分析结果
+            first_table_name = list(filtered_tables.keys())[0]
+            StorageService.save_dataframe("raw_data", filtered_tables[first_table_name], session_id)
+            StorageService.save_dataframe("processed_data", merged_analyzer.data, session_id)
+            StorageService.save_json("variable_types", merged_analyzer.variable_types, session_id)
+            StorageService.save_text("analysis_report", html_content, session_id)
+            StorageService.save_json("analysis_result", json_data, session_id)
+            StorageService.save_text("analysis_log", output, session_id)
+            SessionService.update_data_shape(len(merged_analyzer.data), len(merged_analyzer.data.columns), session_id)
+            SessionService.update_variable_types(merged_analyzer.variable_types, session_id)
+
+            # 保存分析器对象
+            session_path = SessionService.get_session_path(session_id)
+            with open(session_path / "analyzer.pkl", "wb") as f:
+                pickle.dump(merged_analyzer, f)
 
             # 标记分析完成并跳转到预览报告
             st.session_state.analysis_completed = True
@@ -163,6 +212,13 @@ class AnalysisService:
             status_placeholder.info("📁 正在准备数据...")
             progress_bar.progress(20)
 
+            # 创建会话 - 数据库模式
+            first_name = list(filtered_tables.keys())[0] if filtered_tables else "unknown"
+            source_name = f"{first_name}等{len(filtered_tables)}个表"
+            session_id = SessionService.create_session(source_name, "database", filtered_tables)
+            SessionService.set_current_session(session_id)
+            st.session_state.current_session_id = session_id
+
             status_placeholder.info("🔍 正在分析数据...")
             progress_bar.progress(50)
 
@@ -189,18 +245,35 @@ class AnalysisService:
             st.session_state.db_analyzer = analyzer
             st.session_state.db_output = output
             st.session_state.current_analysis_type = "database"
-            st.session_state.current_source_name = f"{config.get('name')}/{config.get('database')}"
+            st.session_state.current_source_name = source_name
 
             merged_analyzer = analyzer.get_merged_analyzer()
             reporter = Reporter(merged_analyzer)
-            st.session_state.current_html = reporter.to_html()
+            html_content = reporter.to_html()
             json_data = json.loads(merged_analyzer.to_json())
             json_data['db_server'] = config.get('server')
             json_data['db_database'] = config.get('database')
+
+            st.session_state.current_html = html_content
             st.session_state.current_json_data = json_data
-            # 修改：使用 merged_analyzer.data（包含日期派生列）
             st.session_state.raw_data_preview = get_raw_data_preview(merged_analyzer.data)
             st.session_state.chat_messages = []
+
+            # 保存分析结果
+            first_table_name = list(filtered_tables.keys())[0]
+            StorageService.save_dataframe("raw_data", filtered_tables[first_table_name], session_id)
+            StorageService.save_dataframe("processed_data", merged_analyzer.data, session_id)
+            StorageService.save_json("variable_types", merged_analyzer.variable_types, session_id)
+            StorageService.save_text("analysis_report", html_content, session_id)
+            StorageService.save_json("analysis_result", json_data, session_id)
+            StorageService.save_text("analysis_log", output, session_id)
+            SessionService.update_data_shape(len(merged_analyzer.data), len(merged_analyzer.data.columns), session_id)
+            SessionService.update_variable_types(merged_analyzer.variable_types, session_id)
+
+            # 保存分析器对象
+            session_path = SessionService.get_session_path(session_id)
+            with open(session_path / "analyzer.pkl", "wb") as f:
+                pickle.dump(merged_analyzer, f)
 
             # 标记分析完成并跳转到预览报告
             st.session_state.analysis_completed = True

@@ -1,4 +1,6 @@
-"""侧边栏组件 - 模式选择、配置管理"""
+# web/components/sidebar.py
+
+"""侧边栏组件 - 模式选择、配置管理、项目历史"""
 
 import streamlit as st
 from web.config.storage import (
@@ -6,12 +8,14 @@ from web.config.storage import (
     load_llm_configs, add_llm_config, delete_llm_config, test_llm_connection
 )
 from autostat.llm_client import LLMClient
+from web.services.session_service import SessionService
+from web.services.storage_service import StorageService
 
 
 def render_sidebar():
     """渲染侧边栏"""
+    from web.services.cache_service import CacheService
 
-    # 侧边栏头部
     st.sidebar.markdown("""
     <div style="text-align: center; margin-bottom: 20px;">
         <div style="font-size: 1.8rem; font-weight: bold; color: #1f77b4;">📊 AutoStat</div>
@@ -22,7 +26,16 @@ def render_sidebar():
 
     st.sidebar.markdown("---")
 
-    # 1. 分析模式选择
+    # 显示当前用户IP
+    current_ip = SessionService.get_current_user_ip()
+    st.sidebar.markdown(f"**👤 当前用户:** `{current_ip}`")
+
+    st.sidebar.markdown("---")
+
+    render_project_history()
+
+    st.sidebar.markdown("---")
+
     analysis_mode = st.sidebar.selectbox(
         "分析模式",
         ["📁 单文件分析", "📚 多文件分析", "🗄️ 数据库分析"],
@@ -31,7 +44,6 @@ def render_sidebar():
 
     st.sidebar.markdown("---")
 
-    # 2. 日期特征级别（仅在单文件分析模式下显示）
     if analysis_mode == "📁 单文件分析":
         date_features_level = st.sidebar.selectbox(
             "📅 日期特征级别",
@@ -41,28 +53,23 @@ def render_sidebar():
             help="基础: 提取年/月/季度；无: 不提取日期特征"
         )
 
-        # 转换为内部使用的值
         if date_features_level == "基础":
             st.session_state.date_features_level = "basic"
         else:
             st.session_state.date_features_level = "none"
     else:
-        # 多文件/数据库模式默认使用基础
         st.session_state.date_features_level = "basic"
 
     st.sidebar.markdown("---")
 
-    # 3. 数据库配置管理
     render_db_config_section()
 
     st.sidebar.markdown("---")
 
-    # 4. 大模型配置管理
     render_llm_config_section()
 
     st.sidebar.markdown("---")
 
-    # 5. 使用说明
     st.sidebar.markdown("### 📖 使用说明")
     st.sidebar.markdown("""
     **单文件分析**：上传 CSV、Excel、JSON、TXT 文件
@@ -72,6 +79,92 @@ def render_sidebar():
     """)
 
     return analysis_mode
+
+
+def render_project_history():
+    """渲染项目历史列表 - 只显示当前IP的项目"""
+    st.sidebar.markdown("### 📜 项目历史")
+
+    projects = SessionService.list_user_projects()
+
+    if not projects:
+        st.sidebar.caption("暂无历史项目")
+        return
+
+    current_session = SessionService.get_current_session()
+
+    for project in projects:
+        session_id = project.get("session_id")
+        source_name = project.get("source_name", "未知")
+        created_at = project.get("created_at", "")
+        if created_at:
+            created_short = created_at[:16].replace("T", " ")
+        else:
+            created_short = "未知时间"
+
+        is_current = (current_session == session_id)
+
+        if is_current:
+            st.sidebar.markdown(f"✅ **{source_name}**")
+            st.sidebar.caption(f"   {created_short}")
+        else:
+            if st.sidebar.button(
+                f"📁 {source_name}",
+                key=f"project_{session_id}",
+                use_container_width=True
+            ):
+                if SessionService.load_project(session_id):
+                    # 加载项目数据到session_state
+                    if load_project_data(session_id):
+                        st.sidebar.success(f"已加载项目: {source_name}")
+                        st.rerun()
+                    else:
+                        st.sidebar.error("加载项目数据失败")
+                else:
+                    st.sidebar.error("加载项目失败")
+
+
+def load_project_data(session_id: str) -> bool:
+    """加载项目数据到 session_state"""
+    from web.utils.helpers import get_raw_data_preview
+
+    try:
+        # 加载分析结果
+        html_content = StorageService.load_text("analysis_report", session_id)
+        json_data = StorageService.load_json("analysis_result", session_id)
+        log_content = StorageService.load_text("analysis_log", session_id)
+        processed_data = StorageService.load_dataframe("processed_data", session_id)
+        metadata = SessionService.load_metadata(session_id)
+
+        if html_content:
+            st.session_state.current_html = html_content
+        if json_data:
+            st.session_state.current_json_data = json_data
+        if log_content:
+            if metadata.get("analysis_type") == "single":
+                st.session_state.single_output = log_content
+            elif metadata.get("analysis_type") == "multi":
+                st.session_state.multi_output = log_content
+            elif metadata.get("analysis_type") == "database":
+                st.session_state.db_output = log_content
+        if processed_data is not None:
+            st.session_state.raw_data_preview = get_raw_data_preview(processed_data)
+
+        st.session_state.current_analysis_type = metadata.get("analysis_type", "single")
+        st.session_state.current_source_name = metadata.get("source_name", "")
+        st.session_state.analysis_completed = True
+
+        # 清空聊天记录
+        st.session_state.chat_messages = []
+
+        # 重置标签页到第一个
+        st.session_state.current_tab = 0
+
+        return True
+
+    except Exception as e:
+        print(f"加载项目数据失败: {e}")
+        return False
 
 
 def render_db_config_section():

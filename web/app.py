@@ -1,3 +1,5 @@
+# web/app.py
+
 """
 Streamlit Web界面 - 主入口
 """
@@ -5,16 +7,16 @@ Streamlit Web界面 - 主入口
 import streamlit as st
 import sys
 import os
-
+import time
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from web.components.sidebar import render_sidebar
 from web.components.tabs import render_tabs, scroll_to_top
 from web.components.data_preparation import render_data_preparation
-from web.components.results import render_preview_tab, render_log_tab, render_ai_tab
+from web.components.results import render_preview_tab, render_ai_tab
 from web.components.model_training import render_model_training
-from web.components.inference import render_inference_interface
 from web.services.cache_service import CacheService
+from web.services.session_service import SessionService
 
 st.set_page_config(
     page_title="AutoStat 智能数据分析",
@@ -63,18 +65,12 @@ elif current_tab == 1:
         st.info("📌 请先在「数据准备」中上传数据并点击「开始分析」")
         st.caption("分析完成后，报告将显示在此处")
 elif current_tab == 2:
-    if st.session_state.analysis_completed:
-        render_log_tab()
-    else:
-        st.info("📌 请先在「数据准备」中上传数据并点击「开始分析」")
-        st.caption("分析完成后，日志将显示在此处")
-elif current_tab == 3:
-    # 模型训练标签页
+    # 小模型训练标签页
     render_model_training()
-elif current_tab == 4:
-    # AI解读标签页
+elif current_tab == 3:
+    # 大模型智能解读标签页
     if st.session_state.analysis_completed and st.session_state.current_json_data:
         render_ai_tab()
     else:
         st.info("📌 请先在「数据准备」中上传数据并点击「开始分析」")
-        st.caption("分析完成后，可使用 AI 进行智能解读")
+        st.caption("分析完成后，可使用大模型进行智能解读")

@@ -1,4 +1,6 @@
-"""标签页组件 - 4个主要标签页按钮"""
+# web/components/tabs.py
+
+"""标签页组件 - 主要标签页按钮"""
 
 import streamlit as st
 
@@ -12,9 +14,9 @@ def render_tabs():
     # 减少顶部空白
     st.markdown("<style>div.block-container {padding-top: 1rem;}</style>", unsafe_allow_html=True)
 
-    tab_names = ["📁 数据准备", "📄 预览报告", "📝 分析日志", "🧠 模型训练", "🤖 AI 解读"]
+    tab_names = ["📁 数据准备", "📄 预览报告", "🤖 小模型训练", "🧠 大模型智能解读"]
 
-    cols = st.columns(5)
+    cols = st.columns(4)
 
     for i, (col, name) in enumerate(zip(cols, tab_names)):
         with col:

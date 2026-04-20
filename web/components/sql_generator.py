@@ -1,3 +1,5 @@
+# web/components/sql_generator.py
+
 """SQL生成组件 - 纯内容，用于标签页（仅数据库模式）"""
 
 import streamlit as st
@@ -24,7 +26,6 @@ def render_sql_generator():
         st.markdown("**字段列表：**")
         for col, info in variable_types.items():
             type_desc = info.get('type_desc', info.get('type', 'unknown'))
-            # 根据类型添加图标
             icon = "📊" if type_desc == "连续变量" else "🏷️" if "分类" in type_desc else "📅" if "日期" in type_desc else "🔑"
             st.caption(f"  {icon} {col}: {type_desc}")
 
@@ -42,8 +43,7 @@ def render_sql_generator():
             if relationships:
                 st.markdown("\n**表间关系：**")
                 for rel in relationships:
-                    st.caption(
-                        f"  - {rel.get('from_table')}.{rel.get('from_col')} → {rel.get('to_table')}.{rel.get('to_col')}")
+                    st.caption(f"  - {rel.get('from_table')}.{rel.get('from_col')} → {rel.get('to_table')}.{rel.get('to_col')}")
 
     # 动态生成示例SQL查询（基于实际字段）
     json_data = st.session_state.current_json_data
@@ -51,10 +51,8 @@ def render_sql_generator():
     multi_info = json_data.get('multi_table_info', {})
     tables = multi_info.get('tables', {})
 
-    # 获取主表名
     main_table = list(tables.keys())[0] if tables else "your_table"
 
-    # 获取字段
     numeric_cols = [col for col, info in variable_types.items() if info.get('type') == 'continuous']
     cat_cols = [col for col, info in variable_types.items()
                 if info.get('type') in ['categorical', 'categorical_numeric', 'ordinal']]
@@ -62,7 +60,6 @@ def render_sql_generator():
 
     st.markdown("**💡 示例SQL查询（点击使用）：**")
 
-    # 生成示例
     sql_examples = []
 
     if date_cols:
@@ -84,20 +81,16 @@ def render_sql_generator():
     if len(numeric_cols) >= 2:
         sql_examples.append(f"计算{numeric_cols[0]}和{numeric_cols[1]}的相关性")
 
-    # 多表关联示例
     relationships = multi_info.get('relationships', [])
     if relationships:
         rel = relationships[0]
         sql_examples.append(f"关联{rel.get('from_table')}和{rel.get('to_table')}，查询完整信息")
 
-    # 显示示例按钮
     for ex in sql_examples[:6]:
         if st.button(f"📝 {ex}", key=f"sql_ex_{hash(ex)}", use_container_width=True):
-            # 构建表结构信息
             table_info = "\n".join([f"  - {col}: {info.get('type_desc', info.get('type', 'unknown'))}"
                                     for col, info in variable_types.items()])
 
-            # 获取表间关系
             rel_info = ""
             if relationships:
                 rel_info = "\n\n**表间关系：**\n"
