@@ -14,17 +14,29 @@ import pandas as pd
 class SessionService:
     """会话管理服务"""
 
+    # 基础存储路径
     BASE_PATH = Path.home() / ".autostat" / "data"
-    INDEX_FILE = Path.home() / ".autostat" / "projects_index.json"
+    PROJECTS_PATH = Path.home() / ".autostat" / "projects"
 
     @classmethod
     def _ensure_base_dir(cls):
+        """确保基础目录存在"""
         cls.BASE_PATH.mkdir(parents=True, exist_ok=True)
-        cls.INDEX_FILE.parent.mkdir(parents=True, exist_ok=True)
+        cls.PROJECTS_PATH.mkdir(parents=True, exist_ok=True)
 
     @classmethod
     def _get_client_ip(cls) -> str:
         """获取客户端IP地址"""
+        try:
+            # Streamlit 1.39.0+ 官方方法
+            if hasattr(st, 'context') and hasattr(st.context, 'ip_address'):
+                ip = st.context.ip_address
+                if ip:
+                    return ip
+        except Exception:
+            pass
+
+        # 兼容旧版本
         try:
             if hasattr(st, 'context') and hasattr(st.context, 'headers'):
                 headers = st.context.headers
@@ -36,10 +48,37 @@ class SessionService:
                     ip = headers['X-Real-IP']
                     if ip:
                         return ip
-            # 本地环境使用 localhost
-            return "localhost"
         except Exception:
-            return "localhost"
+            pass
+
+        return "localhost"
+
+    @classmethod
+    def _get_projects_file(cls, client_ip: str = None) -> Path:
+        """获取指定IP的项目文件路径"""
+        if client_ip is None:
+            client_ip = cls._get_client_ip()
+        # 替换IP中的特殊字符（冒号、点等）为下划线
+        safe_ip = client_ip.replace(':', '_').replace('.', '_')
+        return cls.PROJECTS_PATH / f"{safe_ip}.json"
+
+    @classmethod
+    def _load_projects(cls, client_ip: str = None) -> List[dict]:
+        """加载指定IP的项目列表"""
+        cls._ensure_base_dir()
+        projects_file = cls._get_projects_file(client_ip)
+        if projects_file.exists():
+            with open(projects_file, "r", encoding="utf-8") as f:
+                return json.load(f)
+        return []
+
+    @classmethod
+    def _save_projects(cls, projects: List[dict], client_ip: str = None):
+        """保存指定IP的项目列表"""
+        cls._ensure_base_dir()
+        projects_file = cls._get_projects_file(client_ip)
+        with open(projects_file, "w", encoding="utf-8") as f:
+            json.dump(projects, f, ensure_ascii=False, indent=2)
 
     @classmethod
     def _generate_session_name(cls, source_name: str, analysis_type: str, tables_info: dict = None) -> str:
@@ -66,21 +105,8 @@ class SessionService:
             return f"{safe_name}_{timestamp}"
 
     @classmethod
-    def _load_index(cls) -> Dict:
-        cls._ensure_base_dir()
-        if cls.INDEX_FILE.exists():
-            with open(cls.INDEX_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        return {}
-
-    @classmethod
-    def _save_index(cls, index: Dict):
-        cls._ensure_base_dir()
-        with open(cls.INDEX_FILE, "w", encoding="utf-8") as f:
-            json.dump(index, f, ensure_ascii=False, indent=2)
-
-    @classmethod
     def create_session(cls, source_name: str, analysis_type: str, tables_info: dict = None) -> str:
+        """创建新会话，返回session_id"""
         cls._ensure_base_dir()
 
         session_id = cls._generate_session_name(source_name, analysis_type, tables_info)
@@ -108,12 +134,11 @@ class SessionService:
 
         cls.save_metadata(metadata, session_id)
 
-        index = cls._load_index()
-        if client_ip not in index:
-            index[client_ip] = []
-        existing = [p for p in index[client_ip] if p.get("session_id") == session_id]
+        # 更新项目列表
+        projects = cls._load_projects(client_ip)
+        existing = [p for p in projects if p.get("session_id") == session_id]
         if not existing:
-            index[client_ip].append({
+            projects.append({
                 "session_id": session_id,
                 "source_name": source_name,
                 "analysis_type": analysis_type,
@@ -121,7 +146,7 @@ class SessionService:
                 "last_accessed_at": metadata["last_accessed_at"],
                 "data_shape": {}
             })
-        cls._save_index(index)
+            cls._save_projects(projects, client_ip)
 
         return session_id
 
@@ -164,14 +189,14 @@ class SessionService:
         metadata["last_accessed_at"] = datetime.now().isoformat()
         cls.save_metadata(metadata, session_id)
 
+        # 更新项目列表中的最后访问时间
         client_ip = metadata.get("client_ip", cls._get_client_ip())
-        index = cls._load_index()
-        if client_ip in index:
-            for project in index[client_ip]:
-                if project.get("session_id") == session_id:
-                    project["last_accessed_at"] = metadata["last_accessed_at"]
-                    break
-        cls._save_index(index)
+        projects = cls._load_projects(client_ip)
+        for project in projects:
+            if project.get("session_id") == session_id:
+                project["last_accessed_at"] = metadata["last_accessed_at"]
+                break
+        cls._save_projects(projects, client_ip)
 
     @classmethod
     def update_data_shape(cls, rows: int, columns: int, session_id: str = None):
@@ -179,14 +204,14 @@ class SessionService:
         metadata["data_shape"] = {"rows": rows, "columns": columns}
         cls.save_metadata(metadata, session_id)
 
+        # 更新项目列表中的数据形状
         client_ip = metadata.get("client_ip", cls._get_client_ip())
-        index = cls._load_index()
-        if client_ip in index:
-            for project in index[client_ip]:
-                if project.get("session_id") == session_id:
-                    project["data_shape"] = {"rows": rows, "columns": columns}
-                    break
-        cls._save_index(index)
+        projects = cls._load_projects(client_ip)
+        for project in projects:
+            if project.get("session_id") == session_id:
+                project["data_shape"] = {"rows": rows, "columns": columns}
+                break
+        cls._save_projects(projects, client_ip)
 
     @classmethod
     def update_variable_types(cls, variable_types: dict, session_id: str = None):
@@ -222,8 +247,7 @@ class SessionService:
     def list_user_projects(cls) -> List[dict]:
         """获取当前用户的所有项目（按IP过滤）"""
         client_ip = cls._get_client_ip()
-        index = cls._load_index()
-        projects = index.get(client_ip, [])
+        projects = cls._load_projects(client_ip)
         return sorted(projects, key=lambda x: x.get("last_accessed_at", ""), reverse=True)
 
     @classmethod
@@ -233,7 +257,7 @@ class SessionService:
 
     @classmethod
     def load_project(cls, session_id: str):
-        """加载指定项目 - 只设置session_id，数据加载由调用方负责"""
+        """加载指定项目"""
         metadata = cls.load_metadata(session_id)
         if not metadata:
             return False
