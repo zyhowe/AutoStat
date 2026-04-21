@@ -4,22 +4,12 @@
 
 import streamlit as st
 import pandas as pd
+import json
 import re
 from autostat.prompts import get_recommended_questions
 from web.services.session_service import SessionService
+from web.services.storage_service import StorageService
 from web.components.agent_inference import parse_and_execute_tool, ModelInferenceTool
-
-
-def get_initial_question(analysis_type: str) -> str:
-    """根据分析类型获取初始提问内容"""
-    if analysis_type == "single":
-        return "请根据这份数据分析报告，帮我解读一下数据的主要特征、质量问题和建模建议。"
-    elif analysis_type == "multi":
-        return "请根据这份多表关联分析报告，帮我解读一下表间关系、数据特征和跨表分析建议。"
-    elif analysis_type == "database":
-        return "请根据这份数据库分析报告，帮我解读一下数据模型、性能优化和BI建设建议。"
-    else:
-        return "请根据这份数据分析报告，帮我解读一下主要内容。"
 
 
 def extract_json_context(json_data: dict, analysis_type: str) -> str:
@@ -240,15 +230,62 @@ def extract_data_context(raw_data_preview: dict) -> str:
     return "\n".join(context_parts)
 
 
-def build_analysis_prompt(selected_contexts, analysis_type, json_data, html_content, raw_data_preview, source_name):
-    """构建普通分析提示词"""
+def build_agent_prompt(selected_contexts, analysis_type, source_name, chat_mode):
+    """构建Agent提示词"""
+    session_id = SessionService.get_current_session()
+
+    # 每次都从存储重新加载
+    json_data = None
+    html_content = None
+    raw_data_preview = None
+
+    if session_id:
+        if "json_result" in selected_contexts:
+            json_data = StorageService.load_json("analysis_result", session_id)
+        if "html_report" in selected_contexts:
+            html_content = StorageService.load_text("analysis_report", session_id)
+        if "raw_data" in selected_contexts:
+            processed_data = StorageService.load_dataframe("processed_data", session_id)
+            if processed_data is not None:
+                from web.utils.helpers import get_raw_data_preview
+                raw_data_preview = get_raw_data_preview(processed_data)
+
+    # 数据上下文
     data_context = ""
-    if "json_result" in selected_contexts and json_data:
+    if json_data:
         data_context = extract_json_context(json_data, analysis_type)
-    if "html_report" in selected_contexts and html_content:
+    if html_content:
         data_context += "\n" + extract_html_context(html_content)
-    if "raw_data" in selected_contexts and raw_data_preview:
+    if raw_data_preview:
         data_context += "\n" + extract_data_context(raw_data_preview)
+
+    # 如果是预测模式，添加模型列表
+    models_desc = ""
+    if chat_mode == "prediction" and session_id:
+        tool = ModelInferenceTool(session_id)
+        available_models = tool.get_available_models()
+        if available_models:
+            models_desc = "\n## 可用模型列表\n\n"
+            for model in available_models:
+                model_name = model.get('user_model_name', model.get('model_key'))
+                model_key = model.get('model_key')
+                task_type = model.get('task_type', 'unknown')
+                target = model.get('target_column', '未知')
+                features = model.get('features', [])
+                feature_str = ', '.join(features[:5])
+                if len(features) > 5:
+                    feature_str += '...'
+                models_desc += f"- **{model_name}**\n"
+                models_desc += f"  模型ID: {model_key}\n"
+                models_desc += f"  类型: {task_type}, 预测目标: {target}\n"
+                models_desc += f"  特征: {feature_str}\n\n"
+
+            models_desc += "## 工具调用规则\n"
+            models_desc += "1. 当用户需要进行预测时，只输出JSON，不要有任何其他文字\n"
+            models_desc += "2. JSON格式：{\"tool\": \"predict\", \"model_key\": \"模型ID\", \"input_values\": {\"特征名1\": 值1}}\n"
+            models_desc += "3. 必须使用完整的模型ID\n"
+            models_desc += "4. 特征名必须与模型定义的特征名完全一致\n"
+            models_desc += "5. 如果用户没有指定模型，选择第一个模型\n"
 
     return f"""你是专业的数据分析师，正在回答用户关于数据的问题。
 
@@ -258,55 +295,10 @@ def build_analysis_prompt(selected_contexts, analysis_type, json_data, html_cont
 
 {data_context}
 
-## 重要说明
-1. 用中文回答，结构清晰，友好专业
-2. 基于提供的数据上下文回答问题
-3. 如果用户询问预测相关问题，请告知用户切换到「推理预测」标签页
-"""
-
-
-def build_prediction_prompt(selected_contexts, analysis_type, json_data, html_content, raw_data_preview, source_name):
-    """构建预测专用提示词 - 强制输出JSON"""
-    session_id = SessionService.get_current_session()
-
-    tool = ModelInferenceTool(session_id)
-    available_models = tool.get_available_models()
-
-    if not available_models:
-        return build_analysis_prompt(selected_contexts, analysis_type, json_data, html_content, raw_data_preview,
-                                     source_name)
-
-    models_desc = ""
-    for model in available_models:
-        model_name = model.get('user_model_name', model.get('model_key'))
-        model_key = model.get('model_key')
-        task_type = model.get('task_type', 'unknown')
-        target = model.get('target_column', '未知')
-        features = model.get('features', [])
-        feature_str = ', '.join(features[:5])
-        if len(features) > 5:
-            feature_str += '...'
-        models_desc += f"- **{model_name}**\n"
-        models_desc += f"  模型ID: {model_key}\n"
-        models_desc += f"  类型: {task_type}, 预测目标: {target}\n"
-        models_desc += f"  特征: {feature_str}\n\n"
-
-    return f"""你是预测助手，负责调用模型进行预测。
-
-## 可用模型列表
-
 {models_desc}
 
-## 规则
-1. 当用户需要进行预测时，只输出JSON，不要输出任何其他文字
-2. JSON格式：{{"tool": "predict", "model_key": "模型ID", "input_values": {{"特征名1": 值1}}}}
-3. 特征名必须与模型定义完全一致
-4. 如果用户没有指定模型，选择第一个模型
-
-示例：
-{{"tool": "predict", "model_key": "classification_random_forest_1776665800", "input_values": {{"销售额": 8000}}}}
-
-请直接输出JSON。
+## 重要说明
+1. 用中文回答，结构清晰，友好专业
 """
 
 
@@ -315,6 +307,15 @@ def render_chat_interface():
     session_id = SessionService.get_current_session()
     chat_mode = st.session_state.get("chat_mode", "analysis")
 
+    # 获取数据源信息
+    source_name = "未知"
+    analysis_type = "single"
+    if session_id:
+        metadata = SessionService.load_metadata(session_id)
+        source_name = metadata.get("source_name", "未知")
+        analysis_type = metadata.get("analysis_type", "single")
+
+    # 历史消息
     for msg in st.session_state.chat_messages:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
@@ -329,24 +330,12 @@ def render_chat_interface():
             response_placeholder = st.empty()
             full_response = ""
 
-            if chat_mode == "prediction":
-                system_prompt = build_prediction_prompt(
-                    st.session_state.selected_contexts,
-                    st.session_state.current_analysis_type,
-                    st.session_state.current_json_data,
-                    st.session_state.current_html,
-                    st.session_state.raw_data_preview,
-                    st.session_state.current_source_name
-                )
-            else:
-                system_prompt = build_analysis_prompt(
-                    st.session_state.selected_contexts,
-                    st.session_state.current_analysis_type,
-                    st.session_state.current_json_data,
-                    st.session_state.current_html,
-                    st.session_state.raw_data_preview,
-                    st.session_state.current_source_name
-                )
+            system_prompt = build_agent_prompt(
+                st.session_state.selected_contexts,
+                analysis_type,
+                source_name,
+                chat_mode
+            )
 
             messages = [{"role": "system", "content": system_prompt}]
             for msg in st.session_state.chat_messages:
@@ -358,7 +347,7 @@ def render_chat_interface():
                     full_response += chunk
                     response_placeholder.markdown(full_response + "▌")
 
-            if chat_mode == "prediction":
+            if chat_mode == "prediction" and session_id:
                 tool_result = parse_and_execute_tool(full_response, session_id)
                 if tool_result:
                     full_response = tool_result
@@ -383,21 +372,29 @@ def render_recommended_questions():
     st.markdown("#### 💡 推荐问题")
     st.caption("点击下方问题快速提问")
 
-    if st.session_state.current_json_data is None:
+    session_id = SessionService.get_current_session()
+    if session_id is None:
+        st.info("请先完成数据分析")
+        return
+
+    json_data = StorageService.load_json("analysis_result", session_id)
+    if json_data is None:
         st.info("请先完成数据分析")
         return
 
     has_datetime = False
-    if st.session_state.current_json_data.get('variable_types'):
-        for info in st.session_state.current_json_data.get('variable_types', {}).values():
-            if info.get('type') == 'datetime':
-                has_datetime = True
-                break
+    variable_types = json_data.get('variable_types', {})
+    for info in variable_types.values():
+        if info.get('type') == 'datetime':
+            has_datetime = True
+            break
 
-    recommended_qs = get_recommended_questions(
-        st.session_state.current_analysis_type,
-        has_datetime
-    )
+    analysis_type = "single"
+    metadata = SessionService.load_metadata(session_id)
+    if metadata:
+        analysis_type = metadata.get("analysis_type", "single")
+
+    recommended_qs = get_recommended_questions(analysis_type, has_datetime)
 
     cols = st.columns(min(len(recommended_qs), 3))
     for i, q in enumerate(recommended_qs):

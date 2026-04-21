@@ -1,3 +1,5 @@
+# web/components/data_preparation.py
+
 """数据准备组件 - UI 渲染（上传、字段选择、开始分析）"""
 
 import streamlit as st
@@ -6,80 +8,128 @@ from web.services.file_service import FileService
 from web.services.analysis_service import AnalysisService
 from web.services.cache_service import CacheService
 from web.utils.data_preprocessor import render_field_selector, render_relationship_manager, auto_discover_relationships
+from web.services.session_service import SessionService
+from web.services.storage_service import StorageService
 
 
-def render_data_preparation(analysis_mode: str):
+def render_data_preparation():
     """渲染数据准备标签页"""
 
-    if analysis_mode == "📁 单文件分析":
-        render_single_file_preparation()
-    elif analysis_mode == "📚 多文件分析":
-        render_multi_file_preparation()
-    elif analysis_mode == "🗄️ 数据库分析":
+    current_session_id = SessionService.get_current_session()
+
+    # 如果有当前会话（已加载历史项目），显示提示，不显示新建表单
+    if current_session_id:
+        metadata = SessionService.load_metadata(current_session_id)
+        source_name = metadata.get("source_name", "未知")
+        st.info(f"📌 当前已加载项目：**{source_name}**")
+        st.caption("如需创建新项目，请点击侧边栏的「➕ 开启新分析」按钮")
+
+        # 显示已加载数据的预览
+        processed_data = StorageService.load_dataframe("processed_data", current_session_id)
+        if processed_data is not None:
+            with st.expander("📊 已加载数据预览", expanded=False):
+                st.dataframe(processed_data.head(100))
+                st.caption(f"形状: {len(processed_data)} 行 × {len(processed_data.columns)} 列")
+        return
+
+    # 无当前会话，显示新建表单（两个折叠区块）
+    st.markdown("### 📁 新建分析")
+
+    with st.expander("📁 文件分析", expanded=True):
+        render_file_preparation()
+
+    with st.expander("🗄️ 数据库分析", expanded=False):
         render_database_preparation()
 
 
-# ==================== 单文件分析 ====================
+def render_file_preparation():
+    """文件分析的数据准备（支持单文件和多文件）"""
+    st.markdown("上传 CSV、Excel、JSON、TXT 文件，支持单文件或多文件（多文件会自动发现表间关系）")
 
-def render_single_file_preparation():
-    """单文件分析的数据准备"""
-    st.markdown("### 📁 上传数据文件")
-
-    with st.expander("ℹ️ 使用说明", expanded=False):
-        st.markdown("""
-        **支持的文件格式：** CSV、Excel(.xlsx/.xls)、JSON、TXT
-        **限制建议：** 行数 < 10万，列数 < 200，文件大小 < 100MB
-        """)
-
-    uploaded = st.file_uploader(
-        "选择数据文件", type=['csv', 'xlsx', 'xls', 'json', 'txt'],
-        help="支持 CSV、Excel、JSON、TXT 格式",
-        key="single_uploader"
+    # 文件上传器，支持多文件
+    uploaded_files = st.file_uploader(
+        "选择数据文件（支持多选）",
+        type=['csv', 'xlsx', 'xls', 'json', 'txt'],
+        accept_multiple_files=True,
+        help="支持 CSV、Excel、JSON、TXT 格式，可同时选择多个文件",
+        key="file_uploader"
     )
 
-    # 处理新上传的文件
-    if uploaded:
-        file_size = len(uploaded.getvalue()) / (1024 * 1024)
-        if file_size > 100:
-            st.warning(f"⚠️ 文件大小 {file_size:.1f}MB，超过建议限制")
-        elif file_size > 50:
-            st.info(f"📊 文件大小 {file_size:.1f}MB，加载可能需要一些时间")
+    if not uploaded_files:
+        st.info("请上传数据文件开始分析")
+        return
 
-        ext = uploaded.name.split('.')[-1].lower()
+    # 单文件模式
+    if len(uploaded_files) == 1:
+        render_single_file_ui(uploaded_files[0])
+    else:
+        # 多文件模式
+        render_multi_file_ui(uploaded_files)
 
-        # 检查文件是否变化
-        current_file_key = f"{uploaded.name}_{uploaded.size}"
-        if current_file_key != st.session_state.get("last_single_file_key"):
-            st.session_state.last_single_file_key = current_file_key
-            CacheService.clear_single_cache()
-            st.session_state.analysis_completed = False
 
-        # 加载并缓存数据
-        if st.session_state.single_cached_df is None:
-            try:
-                df = FileService.load_file(uploaded, ext)
-                if df is not None and not df.empty:
-                    df.columns = [str(col).strip().replace('\n', '_').replace('\r', '_') for col in df.columns]
-                    df = df.replace(r'^\s*$', pd.NA, regex=True)
-                    st.session_state.single_cached_df = df
-                    st.session_state.single_cached_name = uploaded.name
-                    st.session_state.single_cached_ext = ext
-                else:
-                    st.error("文件加载失败")
-                    return
-            except Exception as e:
-                st.error(f"读取失败: {str(e)}")
+def render_single_file_ui(uploaded_file):
+    """单文件UI"""
+    file_size = len(uploaded_file.getvalue()) / (1024 * 1024)
+    if file_size > 100:
+        st.warning(f"⚠️ 文件大小 {file_size:.1f}MB，超过建议限制")
+    elif file_size > 50:
+        st.info(f"📊 文件大小 {file_size:.1f}MB，加载可能需要一些时间")
+
+    ext = uploaded_file.name.split('.')[-1].lower()
+
+    current_file_key = f"{uploaded_file.name}_{uploaded_file.size}"
+    if current_file_key != st.session_state.get("last_file_key"):
+        st.session_state.last_file_key = current_file_key
+        CacheService.clear_single_cache()
+        st.session_state.analysis_completed = False
+
+    if st.session_state.single_cached_df is None:
+        try:
+            df = FileService.load_file(uploaded_file, ext)
+            if df is not None and not df.empty:
+                df.columns = [str(col).strip().replace('\n', '_').replace('\r', '_') for col in df.columns]
+                df = df.replace(r'^\s*$', pd.NA, regex=True)
+                st.session_state.single_cached_df = df
+                st.session_state.single_cached_name = uploaded_file.name
+                st.session_state.single_cached_ext = ext
+            else:
+                st.error("文件加载失败")
+                return
+        except Exception as e:
+            st.error(f"读取失败: {str(e)}")
+            return
+
+    render_single_file_content(
+        st.session_state.single_cached_df,
+        st.session_state.single_cached_ext,
+        st.session_state.single_cached_name
+    )
+
+
+def render_multi_file_ui(uploaded_files):
+    """多文件UI"""
+    if len(uploaded_files) > 10:
+        st.warning(f"⚠️ 文件数量 {len(uploaded_files)} 超过建议限制（最多10个）")
+
+    st.success(f"已选择 {len(uploaded_files)} 个文件")
+
+    current_files_key = tuple(sorted([f.name for f in uploaded_files]))
+    if current_files_key != st.session_state.get("last_multi_files_key"):
+        st.session_state.last_multi_files_key = current_files_key
+        CacheService.clear_multi_cache()
+        st.session_state.analysis_completed = False
+
+    if st.session_state.multi_cached_tables is None:
+        with st.spinner("正在加载文件..."):
+            tmp_dir, tables = FileService.load_tables(uploaded_files)
+            if tables:
+                st.session_state.multi_cached_tables = tables
+                st.session_state.multi_tmp_dir = tmp_dir
+            else:
+                st.error("没有成功加载任何表")
                 return
 
-    # 显示已缓存的数据
-    if st.session_state.single_cached_df is not None:
-        render_single_file_content(
-            st.session_state.single_cached_df,
-            st.session_state.single_cached_ext,
-            st.session_state.single_cached_name
-        )
-    else:
-        st.info("请上传数据文件开始分析")
+    render_multi_file_content(st.session_state.multi_cached_tables)
 
 
 def render_single_file_content(df: pd.DataFrame, ext: str, file_name: str):
@@ -89,7 +139,6 @@ def render_single_file_content(df: pd.DataFrame, ext: str, file_name: str):
     st.dataframe(df.head(100))
     st.write(f"形状: {rows:,} 行 × {cols} 列")
 
-    # 数据质量快速提示
     col_info = []
     for col in df.columns:
         missing_pct = df[col].isna().mean() * 100
@@ -104,7 +153,6 @@ def render_single_file_content(df: pd.DataFrame, ext: str, file_name: str):
             if len(col_info) > 5:
                 st.caption(f"... 还有 {len(col_info) - 5} 个字段")
 
-    # 字段选择器
     st.markdown("---")
     selected_columns, variable_types = render_field_selector(
         df, initial_types=None, prefix="single", save_key="saved_variable_types"
@@ -116,62 +164,9 @@ def render_single_file_content(df: pd.DataFrame, ext: str, file_name: str):
 
     filtered_df = df[selected_columns].copy()
 
-    # 开始分析按钮
     st.markdown("---")
     if st.button("▶️ 开始分析", type="primary", use_container_width=True):
         AnalysisService.analyze_single_file(file_name, ext, filtered_df, variable_types)
-
-
-# ==================== 多文件分析 ====================
-
-def render_multi_file_preparation():
-    """多文件分析的数据准备"""
-    st.markdown("### 📚 上传多个数据文件")
-
-    with st.expander("ℹ️ 使用说明", expanded=False):
-        st.markdown("""
-        **适用场景：** 多个相关表需要联合分析（如订单表、用户表、产品表）
-        **文件要求：** 至少上传 2 个文件
-        **限制建议：** 表数量 < 10，每个表行数 < 5万
-        """)
-
-    files = st.file_uploader(
-        "选择多个数据文件", type=['csv', 'xlsx', 'xls', 'json', 'txt'],
-        accept_multiple_files=True, key="multi_uploader",
-        help="按住 Ctrl 或 Cmd 键可选择多个文件"
-    )
-
-    # 处理新上传的文件
-    if files and len(files) >= 2:
-        current_files_key = tuple(sorted([f.name for f in files]))
-        if current_files_key != st.session_state.get("last_multi_files_key"):
-            st.session_state.last_multi_files_key = current_files_key
-            CacheService.clear_multi_cache()
-            st.session_state.analysis_completed = False
-
-        if len(files) > 10:
-            st.warning(f"⚠️ 表数量 {len(files)} 超过建议限制")
-
-        st.success(f"已选择 {len(files)} 个文件")
-
-        if st.session_state.multi_cached_tables is None:
-            with st.spinner("正在加载文件..."):
-                tmp_dir, tables = FileService.load_tables(files)
-                if tables:
-                    st.session_state.multi_cached_tables = tables
-                    st.session_state.multi_tmp_dir = tmp_dir
-                else:
-                    st.error("没有成功加载任何表")
-                    return
-
-    # 显示已缓存的数据
-    if st.session_state.multi_cached_tables is not None:
-        render_multi_file_content(st.session_state.multi_cached_tables)
-    else:
-        if files and len(files) == 1:
-            st.warning("多文件分析需要至少2个文件，请继续添加")
-        else:
-            st.info("请上传至少2个数据文件开始分析")
 
 
 def render_multi_file_content(tables: dict):
@@ -188,7 +183,6 @@ def render_multi_file_content(tables: dict):
 
     table_names = list(tables.keys())
 
-    # 检查表是否变化
     current_table_key = tuple(sorted(table_names))
     if current_table_key != st.session_state.get("last_multi_table_key"):
         st.session_state.last_multi_table_key = current_table_key
@@ -244,7 +238,8 @@ def render_multi_file_content(tables: dict):
         st.info(f"当前有 {len(relationships)} 个表间关系")
         for rel in relationships:
             if rel.get('from_col') and rel.get('to_col'):
-                st.caption(f"  • {rel.get('from_table')}.{rel.get('from_col')} → {rel.get('to_table')}.{rel.get('to_col')}")
+                st.caption(
+                    f"  • {rel.get('from_table')}.{rel.get('from_col')} → {rel.get('to_table')}.{rel.get('to_col')}")
     else:
         st.info("暂无表间关系，可手动添加")
 
@@ -258,18 +253,9 @@ def render_multi_file_content(tables: dict):
         AnalysisService.analyze_multi_file(valid_tables, variable_types_dict, valid_relationships)
 
 
-# ==================== 数据库分析 ====================
-
 def render_database_preparation():
     """数据库分析的数据准备"""
-    st.markdown("### 🗄️ 连接数据库")
-
-    with st.expander("ℹ️ 使用说明", expanded=False):
-        st.markdown("""
-        **适用场景：** 需要分析 SQL Server 数据库中的数据
-        **前置要求：** 安装 pyodbc 驱动
-        **限制建议：** 表数量 < 10，每个表记录数 < 5万
-        """)
+    st.markdown("连接 SQL Server 数据库进行分析")
 
     if st.session_state.selected_db_config is None:
         st.warning("请先在侧边栏配置并选择数据库")
@@ -346,9 +332,9 @@ def load_and_prepare_database(config: dict, table_names: list, limit: int, max_t
         progress_bar.progress(20)
         status_placeholder.info("📊 正在加载表数据...")
 
-        success = FileService.load_db_tables(config, table_names, limit, max_text_length)
+        tables = FileService.load_db_tables(config, table_names, limit, max_text_length)
 
-        if not success:
+        if not tables:
             st.error("没有成功加载任何表")
             return
 
@@ -357,7 +343,7 @@ def load_and_prepare_database(config: dict, table_names: list, limit: int, max_t
 
         CacheService.clear_db_cache()
 
-        st.session_state.db_cached_tables = success
+        st.session_state.db_cached_tables = tables
         st.session_state.db_config = config
 
         st.rerun()
@@ -439,7 +425,8 @@ def render_database_content(tables: dict):
         st.info(f"当前有 {len(relationships)} 个表间关系")
         for rel in relationships:
             if rel.get('from_col') and rel.get('to_col'):
-                st.caption(f"  • {rel.get('from_table')}.{rel.get('from_col')} → {rel.get('to_table')}.{rel.get('to_col')}")
+                st.caption(
+                    f"  • {rel.get('from_table')}.{rel.get('from_col')} → {rel.get('to_table')}.{rel.get('to_col')}")
     else:
         st.info("暂无表间关系，可手动添加")
 
@@ -450,4 +437,5 @@ def render_database_content(tables: dict):
 
     st.markdown("---")
     if st.button("▶️ 开始分析", type="primary", use_container_width=True):
-        AnalysisService.analyze_database(valid_tables, variable_types_dict, valid_relationships, st.session_state.db_config)
+        AnalysisService.analyze_database(valid_tables, variable_types_dict, valid_relationships,
+                                         st.session_state.db_config)

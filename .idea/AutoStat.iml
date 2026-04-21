@@ -6,5 +6,6 @@
     <orderEntry type="sourceFolder" forTests="false" />
     <orderEntry type="module" module-name="myapp" />
     <orderEntry type="module" module-name="dify-official-plugins" />
+    <orderEntry type="module" module-name="demo" />
   </component>
 </module>

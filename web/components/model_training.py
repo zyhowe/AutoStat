@@ -26,17 +26,10 @@ from web.services.session_service import SessionService
 
 
 def render_model_training():
-    """渲染模型训练标签页 - 使用radio替代tabs实现编程式跳转"""
+    """渲染模型训练标签页"""
     st.markdown("### 🤖 小模型训练")
     st.caption("基于分析结果，训练传统机器学习/深度学习模型")
 
-    # 检查是否有分析完成的数据
-    if not st.session_state.analysis_completed or st.session_state.current_json_data is None:
-        st.info("📌 请先在「数据准备」中完成数据分析")
-        st.caption("分析完成后，可基于标准化数据进行模型训练")
-        return
-
-    # 获取当前会话
     session_id = SessionService.get_current_session()
     if session_id is None:
         st.info("📌 请先在「数据准备」中完成数据分析")
@@ -48,17 +41,19 @@ def render_model_training():
         st.info("📌 无有效数据，请检查数据文件")
         return
 
-    json_data = st.session_state.current_json_data
-    variable_types = json_data.get('variable_types', {})
+    json_data = StorageService.load_json("analysis_result", session_id)
+    if json_data is None:
+        st.info("📌 请先在「数据准备」中完成数据分析")
+        return
 
-    # 提取可用的特征列
+    variable_types = json_data.get('variable_types', {})
     available_cols = get_available_features(processed_data, variable_types)
 
     if not available_cols:
         st.warning("⚠️ 没有可用的特征列，请检查数据")
         return
 
-    # 初始化自动填充状态
+    # 初始化状态
     if 'auto_fill_task_type' not in st.session_state:
         st.session_state.auto_fill_task_type = None
     if 'auto_fill_target_col' not in st.session_state:
@@ -71,28 +66,24 @@ def render_model_training():
         st.session_state.auto_fill_model_params = None
     if 'auto_fill_model_name' not in st.session_state:
         st.session_state.auto_fill_model_name = None
-
-    # 标签页控制
+    if 'infer_model_key' not in st.session_state:
+        st.session_state.infer_model_key = None
     if 'model_training_tab' not in st.session_state:
         st.session_state.model_training_tab = 0
 
-    # 使用 radio 作为标签页切换器
+    # 标签页
     tab_options = ["📊 模型推荐", "🆕 模型创建", "🔮 模型推理"]
     selected_tab = st.radio(
-        "",
+        "选择标签页",
         options=tab_options,
         index=st.session_state.model_training_tab,
         horizontal=True,
         label_visibility="collapsed"
     )
-
-    # 添加粗线分隔
     st.divider()
 
-    # 更新当前标签页索引
     current_tab = tab_options.index(selected_tab)
 
-    # 根据选中的标签页渲染内容
     if current_tab == 0:
         render_model_recommendations(json_data, processed_data, available_cols, variable_types)
     elif current_tab == 1:
@@ -102,8 +93,8 @@ def render_model_training():
 
 
 def render_model_recommendations(json_data: Dict, data: pd.DataFrame,
-                                 available_cols: List[str], variable_types: Dict):
-    """模型推荐标签页内容"""
+                                  available_cols: List[str], variable_types: Dict):
+    """模型推荐标签页"""
     st.markdown("基于数据分析结果，自动推荐适合的模型。点击「使用」快速填充到下方表单")
 
     n_samples = len(data)
@@ -164,10 +155,6 @@ def render_model_recommendations(json_data: Dict, data: pd.DataFrame,
                             task_type = "classification"
                         elif "数值预测" in task_type_str or "回归" in task_type_str:
                             task_type = "regression"
-                        elif "时间序列" in task_type_str:
-                            task_type = "time_series"
-                        elif "聚类" in task_type_str:
-                            task_type = "clustering"
                         else:
                             task_type = "classification"
 
@@ -202,17 +189,14 @@ def render_model_recommendations(json_data: Dict, data: pd.DataFrame,
                         for param_name, param_info in model_params.items():
                             default_params[param_name] = param_info.get('default')
 
-                        # 生成模型名称
                         auto_model_name = generate_model_name(task_type, rec.get('target_column', ''), model_key)
 
-                        # 填充到session state
                         st.session_state.auto_fill_task_type = task_type
                         st.session_state.auto_fill_target_col = rec.get('target_column', '')
                         st.session_state.auto_fill_features = valid_features
                         st.session_state.auto_fill_model_key = model_key
                         st.session_state.auto_fill_model_params = default_params
                         st.session_state.auto_fill_model_name = auto_model_name
-                        # 跳转到模型创建标签页
                         st.session_state.model_training_tab = 1
                         st.rerun()
             st.divider()
@@ -221,11 +205,10 @@ def render_model_recommendations(json_data: Dict, data: pd.DataFrame,
 
 
 def render_model_creation(data: pd.DataFrame, available_cols: List[str],
-                          variable_types: Dict, session_id: str):
-    """模型创建标签页内容"""
+                           variable_types: Dict, session_id: str):
+    """模型创建标签页"""
     st.markdown("配置模型参数并开始训练")
 
-    # 创建新模型按钮
     col1, col2 = st.columns([5, 1])
     with col2:
         if st.button("➕ 创建新模型", use_container_width=True):
@@ -245,8 +228,7 @@ def render_model_creation(data: pd.DataFrame, available_cols: List[str],
     if 'train_target_col_selected' not in st.session_state:
         st.session_state.train_target_col_selected = available_cols[0] if available_cols else None
     if 'train_features_selected' not in st.session_state:
-        st.session_state.train_features_selected = [col for col in available_cols if
-                                                    col != st.session_state.train_target_col_selected][:20]
+        st.session_state.train_features_selected = [col for col in available_cols if col != st.session_state.train_target_col_selected][:20]
     if 'train_model_key_selected' not in st.session_state:
         st.session_state.train_model_key_selected = "random_forest"
 
@@ -264,10 +246,10 @@ def render_model_creation(data: pd.DataFrame, available_cols: List[str],
             "任务类型",
             options=["classification", "regression", "clustering", "time_series"],
             format_func=lambda x: {
-                "classification": "📊 分类 (Classification)",
-                "regression": "📈 回归 (Regression)",
-                "clustering": "🔘 聚类 (Clustering)",
-                "time_series": "📅 时间序列 (Time Series)"
+                "classification": "📊 分类",
+                "regression": "📈 回归",
+                "clustering": "🔘 聚类",
+                "time_series": "📅 时间序列"
             }.get(x, x),
             key="train_task_type_selected"
         )
@@ -336,7 +318,6 @@ def render_model_creation(data: pd.DataFrame, available_cols: List[str],
     if selected_model_key:
         model_info = models[selected_model_key]
         st.markdown(f"**{get_model_display_name(selected_model_key)}** - {model_info['description']}")
-        st.caption(f"依赖: {', '.join(model_info.get('requirements', []))}")
 
     st.markdown("---")
 
@@ -456,9 +437,9 @@ def render_model_creation(data: pd.DataFrame, available_cols: List[str],
                 "特征缩放",
                 options=["standard", "minmax", "robust", "none"],
                 format_func=lambda x: {
-                    "standard": "标准化 (StandardScaler)",
-                    "minmax": "归一化 (MinMaxScaler)",
-                    "robust": "鲁棒缩放 (RobustScaler)",
+                    "standard": "标准化",
+                    "minmax": "归一化",
+                    "robust": "鲁棒缩放",
                     "none": "不缩放"
                 }.get(x, x),
                 key="preprocess_scaling"
@@ -468,8 +449,8 @@ def render_model_creation(data: pd.DataFrame, available_cols: List[str],
                 "分类编码",
                 options=["onehot", "label", "none"],
                 format_func=lambda x: {
-                    "onehot": "独热编码 (OneHot)",
-                    "label": "标签编码 (Label)",
+                    "onehot": "独热编码",
+                    "label": "标签编码",
                     "none": "不编码"
                 }.get(x, x),
                 key="preprocess_encoding"
@@ -487,7 +468,6 @@ def render_model_creation(data: pd.DataFrame, available_cols: List[str],
     # 模型名称
     st.markdown("**📝 模型名称**")
 
-    # 获取模型名称默认值
     if st.session_state.auto_fill_model_name:
         default_model_name = st.session_state.auto_fill_model_name
         st.session_state.auto_fill_model_name = None
@@ -497,8 +477,7 @@ def render_model_creation(data: pd.DataFrame, available_cols: List[str],
     user_model_name = st.text_input(
         "模型名称",
         value=default_model_name,
-        key="model_name_input",
-        help="可为模型设置一个易于识别的名称"
+        key="model_name_input"
     )
 
     st.markdown("---")
@@ -535,7 +514,6 @@ def render_model_creation(data: pd.DataFrame, available_cols: List[str],
 
         if success:
             st.success(f"✅ 训练完成！模型已保存: {user_model_name}")
-            # 跳转到模型推理标签页
             st.session_state.model_training_tab = 2
             time.sleep(1)
             st.rerun()
@@ -547,7 +525,7 @@ def render_model_creation(data: pd.DataFrame, available_cols: List[str],
 
 
 def render_model_inference(session_id: str):
-    """模型推理标签页内容"""
+    """模型推理标签页"""
     st.markdown("选择已训练的模型，输入特征值进行预测")
 
     saved_models = list_saved_models(session_id)
@@ -556,9 +534,8 @@ def render_model_inference(session_id: str):
         st.info("暂无已保存的模型，请先在「模型创建」中训练模型")
         return
 
-    # 模型列表区域（可删除）
+    # 模型列表
     st.markdown("#### 📦 已保存的模型")
-
     for item in saved_models:
         with st.container():
             cols = st.columns([2, 1, 1.5, 1.5, 1])
@@ -594,7 +571,6 @@ def render_model_inference(session_id: str):
     st.markdown("---")
     st.markdown("#### 🔮 模型预测")
 
-    # 模型选择下拉框
     model_options = {m.get('model_key'): m.get('user_model_name', m.get('model_key')) for m in saved_models}
     selected_model_key = st.selectbox(
         "选择模型",
@@ -606,7 +582,6 @@ def render_model_inference(session_id: str):
     if not selected_model_key:
         return
 
-    # 加载模型信息
     try:
         model, preprocessor, metadata, metrics = load_model_for_inference(selected_model_key, session_id)
 
@@ -621,7 +596,6 @@ def render_model_inference(session_id: str):
 
         st.info(f"特征列 ({len(features)}个): {', '.join(features[:8])}{'...' if len(features) > 8 else ''}")
 
-        # 显示模型指标
         with st.expander("📊 模型评估指标", expanded=False):
             train_score = metrics.get("train_score", {})
             if train_score:
@@ -631,7 +605,6 @@ def render_model_inference(session_id: str):
                         with cols[i % 3]:
                             st.metric(metric_name, f"{metric_value:.4f}")
 
-        # 特征输入表单
         st.markdown("**📝 输入特征值**")
 
         input_data = {}

@@ -262,38 +262,54 @@ AutoStat 提供 MCP (Model Context Protocol) 服务，可供 AI Agent 调用。
     │   ├── multi_analyzer.py              # 多表分析器
     │   ├── prompts.py                     # 提示词模板
     │   ├── reporter.py                    # 报告生成器
-    │   └── core/                          # 核心模块
+    │   ├── core/                          # 核心模块
+    │   │   ├── __init__.py
+    │   │   ├── analyzer.py                # 主分析器实现
+    │   │   ├── base.py                    # 基础分析（类型识别、质量检查）
+    │   │   ├── plots.py                   # 可视化
+    │   │   ├── recommendation.py          # 模型推荐
+    │   │   ├── relationship.py            # 关系分析
+    │   │   ├── report_data.py             # 报告数据构建
+    │   │   └── timeseries.py              # 时间序列分析
+    │   └── models/                        # 机器学习模型模块
     │       ├── __init__.py
-    │       ├── analyzer.py                # 主分析器实现
-    │       ├── base.py                    # 基础分析（类型识别、质量检查）
-    │       ├── plots.py                   # 可视化
-    │       ├── recommendation.py          # 模型推荐
-    │       ├── relationship.py            # 关系分析
-    │       ├── report_data.py             # 报告数据构建
-    │       └── timeseries.py              # 时间序列分析
+    │       ├── deep_learning.py           # 深度学习模型（CNN、RNN、LSTM、BERT、Transformer）
+    │       ├── metrics.py                 # 评估指标
+    │       ├── predictor.py               # 模型推理
+    │       ├── preprocessing.py           # 数据预处理
+    │       ├── registry.py                # 模型注册表
+    │       ├── storage.py                 # 模型存储
+    │       └── trainer.py                 # 模型训练
     ├── web/                               # Web界面
+    │   ├── __init__.py
     │   ├── app.py                         # Streamlit 主入口
     │   ├── components/                    # UI组件
     │   │   ├── __init__.py
-    │   │   ├── sidebar.py                 # 侧边栏（配置管理）
-    │   │   ├── tabs.py                    # 标签页导航
-    │   │   ├── data_preparation.py        # 数据准备 UI
-    │   │   ├── results.py                 # 结果展示
+    │   │   ├── agent_inference.py         # Agent推理（自然语言预测）
     │   │   ├── chat_interface.py          # AI聊天界面
-    │   │   ├── scenario_recommendation.py # 场景推荐
+    │   │   ├── data_preparation.py        # 数据准备 UI
+    │   │   ├── model_training.py          # 模型训练 UI
     │   │   ├── natural_query.py           # 自然语言查询
-    │   │   └── sql_generator.py           # SQL生成器
+    │   │   ├── results.py                 # 结果展示（预览报告、AI解读）
+    │   │   ├── scenario_recommendation.py # 场景推荐
+    │   │   ├── sidebar.py                 # 侧边栏（配置管理、项目历史）
+    │   │   ├── sql_generator.py           # SQL生成器（数据库模式）
+    │   │   └── tabs.py                    # 标签页导航
+    │   ├── config/                        # 客户端存储
+    │   │   └── storage.py                 # 配置管理（数据库、大模型）
     │   ├── services/                      # 业务逻辑层
     │   │   ├── __init__.py
+    │   │   ├── agent_service.py           # Agent服务（大模型工具调用）
+    │   │   ├── analysis_service.py        # 分析执行
     │   │   ├── cache_service.py           # 缓存管理
     │   │   ├── file_service.py            # 文件操作
-    │   │   └── analysis_service.py        # 分析执行
-    │   ├── config/                        # 客户端存储
-    │   │   └── storage.py                 # 配置管理
+    │   │   ├── model_training_service.py  # 模型训练业务逻辑
+    │   │   ├── session_service.py         # 会话和项目管理
+    │   │   └── storage_service.py         # 统一存储服务
     │   └── utils/                         # 工具函数
     │       ├── __init__.py
-    │       ├── helpers.py                 # 辅助函数
-    │       └── data_preprocessor.py       # 数据预处理
+    │       ├── data_preprocessor.py       # 数据预处理工具
+    │       └── helpers.py                 # 辅助函数
     ├── templates/
     │   └── report.html                    # HTML报告模板
     ├── tests/

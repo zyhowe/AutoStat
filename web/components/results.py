@@ -3,55 +3,52 @@
 """分析结果展示组件 - 预览报告、AI解读标签页"""
 
 import streamlit as st
+import json
 from web.components.chat_interface import render_chat_interface, render_recommended_questions
 from web.components.scenario_recommendation import render_scenario_recommendation
 from web.components.natural_query import render_natural_query
 from web.components.sql_generator import render_sql_generator
 from web.components.agent_inference import render_agent_inference
+from web.services.session_service import SessionService
+from web.services.storage_service import StorageService
 
 
 def render_preview_tab():
     """渲染预览报告标签页"""
-    if st.session_state.current_html and st.session_state.current_json_data:
+    session_id = SessionService.get_current_session()
+    if session_id is None:
+        st.info("暂无报告预览")
+        return
+
+    # 每次都从存储重新加载，不使用 session_state 缓存
+    html_content = StorageService.load_text("analysis_report", session_id)
+    json_data = StorageService.load_json("analysis_result", session_id)
+    log_content = StorageService.load_text("analysis_log", session_id)
+
+    if html_content and json_data:
         col1, col2, col3 = st.columns(3)
         with col1:
             st.download_button(
                 "📥 下载 HTML 报告",
-                st.session_state.current_html,
+                html_content,
                 "autostat_report.html",
                 "text/html",
                 use_container_width=True
             )
         with col2:
-            if st.session_state.current_analysis_type == "single":
-                json_output = st.session_state.single_analyzer.to_json() if st.session_state.single_analyzer else ""
-            elif st.session_state.current_analysis_type == "multi":
-                json_output = st.session_state.multi_analyzer.to_json() if st.session_state.multi_analyzer else ""
-            elif st.session_state.current_analysis_type == "database":
-                json_output = st.session_state.db_analyzer.to_json() if st.session_state.db_analyzer else ""
-            else:
-                json_output = ""
-
+            json_str = json.dumps(json_data, ensure_ascii=False, indent=2) if json_data else ""
             st.download_button(
                 "📥 下载 JSON 结果",
-                json_output,
+                json_str,
                 "autostat_result.json",
                 "application/json",
                 use_container_width=True
             )
         with col3:
-            log_output = None
-            if st.session_state.current_analysis_type == "single":
-                log_output = st.session_state.single_output
-            elif st.session_state.current_analysis_type == "multi":
-                log_output = st.session_state.multi_output
-            elif st.session_state.current_analysis_type == "database":
-                log_output = st.session_state.db_output
-
-            if log_output:
+            if log_content:
                 st.download_button(
                     "📥 下载分析日志",
-                    log_output,
+                    log_content,
                     "autostat_log.txt",
                     "text/plain",
                     use_container_width=True
@@ -67,14 +64,18 @@ def render_preview_tab():
                 )
 
         st.divider()
-        st.html(st.session_state.current_html)
+        st.html(html_content)
     else:
         st.info("暂无报告预览")
 
 
 def render_ai_tab():
     """渲染AI解读标签页"""
-    is_database = st.session_state.current_analysis_type == "database"
+    is_database = False
+    session_id = SessionService.get_current_session()
+    if session_id:
+        metadata = SessionService.load_metadata(session_id)
+        is_database = metadata.get("analysis_type") == "database"
 
     render_context_selector()
 
@@ -91,44 +92,47 @@ def render_ai_tab():
 
     sub_tabs = st.tabs(sub_tab_labels)
 
-    # 用于跟踪当前选中的标签页
-    current_tab_index = 0
-    for i, tab in enumerate(sub_tabs):
-        with tab:
-            if i == 0:
-                if st.session_state.llm_client is None:
-                    st.warning("请先在侧边栏配置大模型")
-                else:
-                    # 设置当前模式为普通分析
-                    st.session_state.chat_mode = "analysis"
-                    render_recommended_questions()
-            elif i == 1:
-                if st.session_state.llm_client is None:
-                    st.warning("请先在侧边栏配置大模型")
-                else:
-                    st.session_state.chat_mode = "scenario"
-                    render_scenario_recommendation()
-            elif i == 2:
-                if st.session_state.llm_client is None:
-                    st.warning("请先在侧边栏配置大模型")
-                else:
-                    st.session_state.chat_mode = "natural_query"
-                    render_natural_query()
-            elif is_database and i == 3:
-                if st.session_state.llm_client is None:
-                    st.warning("请先在侧边栏配置大模型")
-                else:
-                    st.session_state.chat_mode = "sql"
-                    render_sql_generator()
-            elif (is_database and i == 4) or (not is_database and i == 3):
-                if st.session_state.llm_client is None:
-                    st.warning("请先在侧边栏配置大模型")
-                else:
-                    # 设置当前模式为推理预测
-                    st.session_state.chat_mode = "prediction"
-                    render_agent_inference()
+    with sub_tabs[0]:
+        if st.session_state.llm_client is None:
+            st.warning("请先在侧边栏配置大模型")
+        else:
+            st.session_state.chat_mode = "analysis"
+            render_recommended_questions()
 
-            current_tab_index = i
+    with sub_tabs[1]:
+        if st.session_state.llm_client is None:
+            st.warning("请先在侧边栏配置大模型")
+        else:
+            st.session_state.chat_mode = "scenario"
+            render_scenario_recommendation()
+
+    with sub_tabs[2]:
+        if st.session_state.llm_client is None:
+            st.warning("请先在侧边栏配置大模型")
+        else:
+            st.session_state.chat_mode = "natural_query"
+            render_natural_query()
+
+    if is_database:
+        with sub_tabs[3]:
+            if st.session_state.llm_client is None:
+                st.warning("请先在侧边栏配置大模型")
+            else:
+                st.session_state.chat_mode = "sql"
+                render_sql_generator()
+        with sub_tabs[4]:
+            if st.session_state.llm_client is None:
+                st.warning("请先在侧边栏配置大模型")
+            else:
+                st.session_state.chat_mode = "prediction"
+                render_agent_inference()
+    else:
+        with sub_tabs[3]:
+            if st.session_state.llm_client is None:
+                st.warning("请先在侧边栏配置大模型")
+            else:
+                st.session_state.chat_mode = "prediction"
+                render_agent_inference()
 
 
 def render_context_selector():

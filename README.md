@@ -4,16 +4,24 @@
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![PyPI version](https://img.shields.io/pypi/v/autostat-mcp.svg)](https://pypi.org/project/autostat-mcp/)
 
-AutoStat is an intelligent statistical analysis tool that automatically identifies data types, detects data quality issues, selects appropriate statistical methods, and generates professional analysis reports. No statistical background required.
+AutoStat is an intelligent statistical analysis tool that automatically identifies
+data types, detects data quality issues, selects appropriate statistical methods,
+and generates professional analysis reports. No statistical background required.
 
 ## Features
 
-- Automatic Data Type Recognition - Identifies continuous, categorical, datetime, identifier, and ordinal variables
-- Data Quality Inspection - Detects missing values, outliers, duplicates, and inconsistent types
-- Smart Statistical Method Selection - Automatically chooses between t-test, ANOVA, Mann-Whitney, chi-square, Fisher's exact test
-- Multi-table Association Analysis - Automatically discovers relationships between tables and performs joint analysis
-- Time Series Analysis - Stationarity test (ADF), autocorrelation test (Ljung-Box), seasonality detection
-- Relationship Analysis - Correlation matrix, Cramer's V, Eta-squared with visual heatmaps
+- Automatic Data Type Recognition - Identifies continuous, categorical,
+  datetime, identifier, and ordinal variables
+- Data Quality Inspection - Detects missing values, outliers, duplicates,
+  and inconsistent types
+- Smart Statistical Method Selection - Automatically chooses between t-test,
+  ANOVA, Mann-Whitney, chi-square, Fisher's exact test
+- Multi-table Association Analysis - Automatically discovers relationships
+  between tables and performs joint analysis
+- Time Series Analysis - Stationarity test (ADF), autocorrelation test (Ljung-Box),
+  seasonality detection
+- Relationship Analysis - Correlation matrix, Cramer's V, Eta-squared
+  with visual heatmaps
 - Intelligent Sampling - Foreign-key-aware stratified sampling for large datasets
 - Multiple Output Formats - HTML reports, JSON, Markdown, Excel
 - Multiple Data Sources - CSV, Excel, JSON, TXT, SQL Server
@@ -262,38 +270,54 @@ Or using pip installation:
     │   ├── multi_analyzer.py              # Multi-table analysis
     │   ├── prompts.py                     # Prompt templates
     │   ├── reporter.py                    # Report generator
-    │   └── core/                          # Core modules
+    │   ├── core/                          # Core modules
+    │   │   ├── __init__.py
+    │   │   ├── analyzer.py                # Main analyzer implementation
+    │   │   ├── base.py                    # Base analyzer (type inference, quality check)
+    │   │   ├── plots.py                   # Visualization
+    │   │   ├── recommendation.py          # Model recommendations
+    │   │   ├── relationship.py            # Relationship analysis
+    │   │   ├── report_data.py             # Report data builder
+    │   │   └── timeseries.py              # Time series analysis
+    │   └── models/                        # ML models module
     │       ├── __init__.py
-    │       ├── analyzer.py                # Main analyzer implementation
-    │       ├── base.py                    # Base analyzer (type inference, quality check)
-    │       ├── plots.py                   # Visualization
-    │       ├── recommendation.py          # Model recommendations
-    │       ├── relationship.py            # Relationship analysis
-    │       ├── report_data.py             # Report data builder
-    │       └── timeseries.py              # Time series analysis
+    │       ├── deep_learning.py           # Deep learning models (CNN, RNN, LSTM, BERT, Transformer)
+    │       ├── metrics.py                 # Evaluation metrics
+    │       ├── predictor.py               # Model inference
+    │       ├── preprocessing.py           # Data preprocessing
+    │       ├── registry.py                # Model registry
+    │       ├── storage.py                 # Model storage
+    │       └── trainer.py                 # Model training
     ├── web/                               # Web interface
+    │   ├── __init__.py
     │   ├── app.py                         # Streamlit main entry
     │   ├── components/                    # UI components
     │   │   ├── __init__.py
-    │   │   ├── sidebar.py                 # Sidebar with config
-    │   │   ├── tabs.py                    # Tab navigation
-    │   │   ├── data_preparation.py        # Data preparation UI
-    │   │   ├── results.py                 # Results display
+    │   │   ├── agent_inference.py         # Agent inference (natural language prediction)
     │   │   ├── chat_interface.py          # AI chat interface
-    │   │   ├── scenario_recommendation.py # Scenario recommendations
+    │   │   ├── data_preparation.py        # Data preparation UI
+    │   │   ├── model_training.py          # Model training UI
     │   │   ├── natural_query.py           # Natural language query
-    │   │   └── sql_generator.py           # SQL generator
+    │   │   ├── results.py                 # Results display (preview, AI tab)
+    │   │   ├── scenario_recommendation.py # Scenario recommendations
+    │   │   ├── sidebar.py                 # Sidebar with config and project history
+    │   │   ├── sql_generator.py           # SQL generator (database mode)
+    │   │   └── tabs.py                    # Tab navigation
+    │   ├── config/                        # Client-side storage
+    │   │   └── storage.py                 # Config management (DB, LLM)
     │   ├── services/                      # Business logic layer
     │   │   ├── __init__.py
+    │   │   ├── agent_service.py           # Agent service for LLM
+    │   │   ├── analysis_service.py        # Analysis execution
     │   │   ├── cache_service.py           # Cache management
     │   │   ├── file_service.py            # File operations
-    │   │   └── analysis_service.py        # Analysis execution
-    │   ├── config/                        # Client-side storage
-    │   │   └── storage.py                 # Config management
+    │   │   ├── model_training_service.py  # Model training business logic
+    │   │   ├── session_service.py         # Session and project management
+    │   │   └── storage_service.py         # Unified storage service
     │   └── utils/                         # Utilities
     │       ├── __init__.py
-    │       ├── helpers.py                 # Helper functions
-    │       └── data_preprocessor.py       # Data preprocessing
+    │       ├── data_preprocessor.py       # Data preprocessing utilities
+    │       └── helpers.py                 # Helper functions
     ├── templates/
     │   └── report.html                    # HTML report template
     ├── tests/

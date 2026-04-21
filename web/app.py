@@ -7,7 +7,7 @@ Streamlit Web界面 - 主入口
 import streamlit as st
 import sys
 import os
-import time
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from web.components.sidebar import render_sidebar
@@ -40,12 +40,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # 侧边栏
-analysis_mode = render_sidebar()
-
-# 检查分析模式是否变化
-if analysis_mode != st.session_state.get('analysis_mode'):
-    st.session_state.analysis_mode = analysis_mode
-    CacheService.reset_analysis_state()
+render_sidebar()
 
 # 检查是否需要滚动到顶部
 if st.session_state.scroll_to_top:
@@ -57,20 +52,25 @@ current_tab = render_tabs()
 
 # 根据当前标签页渲染内容
 if current_tab == 0:
-    render_data_preparation(analysis_mode)
+    render_data_preparation()
 elif current_tab == 1:
-    if st.session_state.analysis_completed and st.session_state.current_html:
+    session_id = SessionService.get_current_session()
+    if session_id is not None:
         render_preview_tab()
     else:
-        st.info("📌 请先在「数据准备」中上传数据并点击「开始分析」")
+        st.info("📌 请先在「数据准备」中上传数据并点击「开始分析」，或从侧边栏选择历史项目")
         st.caption("分析完成后，报告将显示在此处")
 elif current_tab == 2:
-    # 小模型训练标签页
-    render_model_training()
+    session_id = SessionService.get_current_session()
+    if session_id is not None:
+        render_model_training()
+    else:
+        st.info("📌 请先在「数据准备」中上传数据并点击「开始分析」，或从侧边栏选择历史项目")
+        st.caption("分析完成后，可基于标准化数据进行模型训练")
 elif current_tab == 3:
-    # 大模型智能解读标签页
-    if st.session_state.analysis_completed and st.session_state.current_json_data:
+    session_id = SessionService.get_current_session()
+    if session_id is not None:
         render_ai_tab()
     else:
-        st.info("📌 请先在「数据准备」中上传数据并点击「开始分析」")
+        st.info("📌 请先在「数据准备」中上传数据并点击「开始分析」，或从侧边栏选择历史项目")
         st.caption("分析完成后，可使用大模型进行智能解读")

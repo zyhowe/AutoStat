@@ -51,10 +51,6 @@ class CacheService:
         if 'selected_llm_config' not in st.session_state:
             st.session_state.selected_llm_config = None
 
-        # 分析模式
-        if 'analysis_mode' not in st.session_state:
-            st.session_state.analysis_mode = "📁 单文件分析"
-
         # 日期特征级别
         if 'date_features_level' not in st.session_state:
             st.session_state.date_features_level = "basic"
