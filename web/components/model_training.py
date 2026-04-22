@@ -212,12 +212,33 @@ def render_model_creation(data: pd.DataFrame, available_cols: List[str],
     col1, col2 = st.columns([5, 1])
     with col2:
         if st.button("➕ 创建新模型", use_container_width=True):
+            # 清空自动填充标志
             st.session_state.auto_fill_task_type = None
             st.session_state.auto_fill_target_col = None
             st.session_state.auto_fill_features = None
             st.session_state.auto_fill_model_key = None
             st.session_state.auto_fill_model_params = None
             st.session_state.auto_fill_model_name = None
+
+            # 清空表单控件的值
+            if 'train_task_type_selected' in st.session_state:
+                del st.session_state.train_task_type_selected
+            if 'train_target_col_selected' in st.session_state:
+                del st.session_state.train_target_col_selected
+            if 'train_features_selected' in st.session_state:
+                del st.session_state.train_features_selected
+            if 'train_model_key_selected' in st.session_state:
+                del st.session_state.train_model_key_selected
+
+            # 清空参数值
+            param_keys = [k for k in st.session_state.keys() if k.startswith('param_')]
+            for key in param_keys:
+                del st.session_state[key]
+
+            # 清空模型名称
+            if 'model_name_input' in st.session_state:
+                del st.session_state.model_name_input
+
             st.rerun()
 
     st.markdown("---")

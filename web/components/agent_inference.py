@@ -127,8 +127,8 @@ def render_agent_inference():
 
 def parse_and_execute_tool(response: str, session_id: str) -> str:
     """解析并执行工具调用，返回结果或None"""
-    print("=== parse_and_execute_tool 被调用 ===")
-    print(f"响应内容: {response[:500]}")
+    # print("=== parse_and_execute_tool 被调用 ===")
+    # print(f"响应内容: {response[:500]}")
 
     # 修改后的正则：允许嵌套一层大括号
     # 匹配 {"tool": "predict", "model_key": "...", "input_values": {...}}
@@ -140,23 +140,23 @@ def parse_and_execute_tool(response: str, session_id: str) -> str:
     ]
 
     for idx, pattern in enumerate(patterns):
-        print(f"尝试模式 {idx}: {pattern[:100]}...")
+        # print(f"尝试模式 {idx}: {pattern[:100]}...")
         match = re.search(pattern, response, re.DOTALL)
         if match:
-            print(f"模式 {idx} 匹配成功")
+            # print(f"模式 {idx} 匹配成功")
             json_str = match.group(1) if '```' in pattern and match.group(1) else match.group(0)
-            print(f"提取的JSON: {json_str}")
+            # print(f"提取的JSON: {json_str}")
             try:
                 tool_call = json.loads(json_str)
-                print(f"解析成功: {tool_call}")
+                # print(f"解析成功: {tool_call}")
                 if tool_call.get('tool') == 'predict':
-                    print("tool是predict，开始执行")
+                    # print("tool是predict，开始执行")
                     tool = ModelInferenceTool(session_id)
                     result = tool.predict(
                         tool_call.get('model_key', ''),
                         tool_call.get('input_values', {})
                     )
-                    print(f"预测结果: {result}")
+                    # print(f"预测结果: {result}")
                     if result.get('success'):
                         pred = result.get('prediction')
                         conf = result.get('confidence')
@@ -170,17 +170,17 @@ def parse_and_execute_tool(response: str, session_id: str) -> str:
                                 output += f"- 置信度: {conf[0]:.2%}\n"
                             else:
                                 output += f"- 置信度: {conf:.2%}\n"
-                        print(f"返回输出: {output}")
+                        # print(f"返回输出: {output}")
                         return output
                     else:
                         error_msg = f"预测失败: {result.get('error')}"
-                        print(error_msg)
+                        # print(error_msg)
                         return error_msg
             except json.JSONDecodeError as e:
                 print(f"JSON解析失败: {e}")
                 continue
-        else:
-            print(f"模式 {idx} 匹配失败")
+        # else:
+            # print(f"模式 {idx} 匹配失败")
 
-    print("所有模式都未匹配，返回None")
+    # print("所有模式都未匹配，返回None")
     return None

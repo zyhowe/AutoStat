@@ -36,28 +36,24 @@ def _show_delete_dialog(session_id, source_name, is_current):
 
 def _show_settings_dialog():
     """显示设置对话框"""
+    if 'show_settings_dialog' not in st.session_state:
+        st.session_state.show_settings_dialog = False
 
     @st.dialog("⚙️ 设置", width="large")
     def settings_dialog():
-        # 数据库配置
-        st.markdown("### 🗄️ 数据库配置")
-        render_db_config()
-
+        _render_db_config_dialog()
         st.markdown("---")
-
-        # 大模型配置
-        st.markdown("### 🤖 大模型配置")
-        render_llm_config()
-
+        _render_llm_config_dialog()
         st.markdown("---")
         if st.button("关闭", use_container_width=True):
+            st.session_state.show_settings_dialog = False
             st.rerun()
 
     settings_dialog()
 
 
-def render_db_config():
-    """渲染数据库配置"""
+def _render_db_config_dialog():
+    """渲染对话框中的数据库配置"""
     db_configs = load_db_configs()
 
     if db_configs:
@@ -73,12 +69,20 @@ def render_db_config():
         st.info(f"当前配置: {selected_config.get('name')}")
         st.caption(f"服务器: {selected_config.get('server')} | 数据库: {selected_config.get('database')}")
 
-        if st.button("删除选中配置", key="db_delete_dialog"):
-            if delete_db_config(selected_config.get('name')):
-                st.success(f"配置 {selected_config.get('name')} 已删除")
-                st.rerun()
-            else:
-                st.error("删除失败")
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("测试连接", key="test_db_dialog", use_container_width=True):
+                _test_db_connection(selected_config)
+        with col2:
+            if st.button("删除选中配置", key="db_delete_dialog", use_container_width=True):
+                if delete_db_config(selected_config.get('name')):
+                    st.success(f"配置 {selected_config.get('name')} 已删除")
+                    if st.session_state.selected_db_config and st.session_state.selected_db_config.get(
+                            'name') == selected_config.get('name'):
+                        st.session_state.selected_db_config = None
+                    st.rerun()
+                else:
+                    st.error("删除失败")
     else:
         st.info("暂无数据库配置，请添加")
 
@@ -93,7 +97,13 @@ def render_db_config():
             db_password = st.text_input("密码", type="password", placeholder="可选")
             db_trusted = st.checkbox("Windows身份认证")
 
-            if st.form_submit_button("添加配置"):
+            col1, col2 = st.columns(2)
+            with col1:
+                submitted = st.form_submit_button("添加配置", use_container_width=True)
+            with col2:
+                test_clicked = st.form_submit_button("测试连接", use_container_width=True)
+
+            if submitted:
                 if db_name and db_server and db_database:
                     new_config = {
                         "name": db_name,
@@ -105,15 +115,66 @@ def render_db_config():
                     }
                     if add_db_config(new_config):
                         st.success(f"配置 {db_name} 添加成功")
+                        st.session_state.show_settings_dialog = False
                         st.rerun()
                     else:
                         st.error(f"配置名称 {db_name} 已存在")
                 else:
                     st.error("请填写配置名称、服务器和数据库名称")
 
+            if test_clicked:
+                if db_server and db_database:
+                    test_config = {
+                        "server": db_server,
+                        "database": db_database,
+                        "username": db_username if db_username else None,
+                        "password": db_password if db_password else None,
+                        "trusted_connection": db_trusted
+                    }
+                    _test_db_connection(test_config)
+                else:
+                    st.error("请填写服务器和数据库名称")
 
-def render_llm_config():
-    """渲染大模型配置"""
+
+def _test_db_connection(config):
+    """测试数据库连接"""
+    import pyodbc
+
+    server = config.get('server')
+    database = config.get('database')
+    username = config.get('username')
+    password = config.get('password')
+    trusted_connection = config.get('trusted_connection', False)
+
+    possible_drivers = [
+        'ODBC Driver 17 for SQL Server',
+        'ODBC Driver 13 for SQL Server',
+        'SQL Server Native Client 11.0',
+        'SQL Server'
+    ]
+
+    available_drivers = pyodbc.drivers()
+
+    for driver in possible_drivers:
+        if driver in available_drivers:
+            if trusted_connection or not username:
+                conn_str = f'DRIVER={{{driver}}};SERVER={server};DATABASE={database};Trusted_Connection=yes;'
+            else:
+                conn_str = f'DRIVER={{{driver}}};SERVER={server};DATABASE={database};UID={username};PWD={password};'
+
+            try:
+                conn = pyodbc.connect(conn_str, timeout=5)
+                conn.close()
+                st.success(f"✅ 连接成功！使用驱动: {driver}")
+                return
+            except Exception:
+                continue
+
+    st.error(f"❌ 连接失败: 无法连接到服务器 {server}")
+
+
+def _render_llm_config_dialog():
+    """渲染对话框中的大模型配置"""
     llm_configs = load_llm_configs()
 
     if llm_configs:
@@ -132,30 +193,23 @@ def render_llm_config():
 
         col1, col2 = st.columns(2)
         with col1:
-            if st.button("测试连接", key="test_llm_dialog", use_container_width=True):
-                with st.spinner("测试中..."):
-                    success, msg = test_llm_connection(selected_config)
-                    if success:
-                        st.success(msg)
-                    else:
-                        st.error(msg)
+            if st.button("测试连接", key="test_llm_existing_dialog", use_container_width=True):
+                success, msg = test_llm_connection(selected_config)
+                if success:
+                    st.success(f"✅ {msg}")
+                else:
+                    st.error(f"❌ {msg}")
         with col2:
-            if st.button("使用此配置", key="use_llm_dialog", use_container_width=True):
-                st.session_state.selected_llm_config = selected_config
-                st.session_state.llm_client = LLMClient(selected_config)
-                st.success(f"已切换到模型: {selected_config.get('name')}")
-                st.rerun()
-
-        if st.button("删除选中配置", key="llm_delete_dialog", use_container_width=True):
-            if delete_llm_config(selected_config.get('name')):
-                st.success(f"配置 {selected_config.get('name')} 已删除")
-                if st.session_state.selected_llm_config and st.session_state.selected_llm_config.get(
-                        'name') == selected_config.get('name'):
-                    st.session_state.selected_llm_config = None
-                    st.session_state.llm_client = None
-                st.rerun()
-            else:
-                st.error("删除失败")
+            if st.button("删除选中配置", key="llm_delete_dialog", use_container_width=True):
+                if delete_llm_config(selected_config.get('name')):
+                    st.success(f"配置 {selected_config.get('name')} 已删除")
+                    if st.session_state.selected_llm_config and st.session_state.selected_llm_config.get(
+                            'name') == selected_config.get('name'):
+                        st.session_state.selected_llm_config = None
+                        st.session_state.llm_client = None
+                    st.rerun()
+                else:
+                    st.error("删除失败")
     else:
         st.info("暂无大模型配置，请添加")
 
@@ -168,7 +222,13 @@ def render_llm_config():
             llm_api_key = st.text_input("API密钥", type="password", placeholder="sk-xxx")
             llm_model = st.text_input("模型名称", placeholder="deepseek-chat, qwen-7b")
 
-            if st.form_submit_button("添加配置"):
+            col1, col2 = st.columns(2)
+            with col1:
+                submitted = st.form_submit_button("添加配置", use_container_width=True)
+            with col2:
+                test_clicked = st.form_submit_button("测试连接", use_container_width=True)
+
+            if submitted:
                 if llm_name and llm_api_base and llm_model:
                     new_config = {
                         "name": llm_name,
@@ -179,11 +239,27 @@ def render_llm_config():
                     }
                     if add_llm_config(new_config):
                         st.success(f"配置 {llm_name} 添加成功")
+                        st.session_state.show_settings_dialog = False
                         st.rerun()
                     else:
                         st.error(f"配置名称 {llm_name} 已存在")
                 else:
                     st.error("请填写配置名称、API地址和模型名称")
+
+            if test_clicked:
+                if llm_api_base and llm_model:
+                    test_config = {
+                        "api_base": llm_api_base.rstrip('/'),
+                        "api_key": llm_api_key,
+                        "model": llm_model
+                    }
+                    success, msg = test_llm_connection(test_config)
+                    if success:
+                        st.success(f"✅ {msg}")
+                    else:
+                        st.error(f"❌ {msg}")
+                else:
+                    st.error("请填写API地址和模型名称")
 
     # 显示当前使用的配置
     if st.session_state.get('selected_llm_config'):
@@ -191,11 +267,151 @@ def render_llm_config():
         st.success(f"✅ 当前使用: {st.session_state.selected_llm_config.get('name')}")
 
 
+def render_db_selector():
+    """渲染数据库配置选择器"""
+    db_configs = load_db_configs()
+
+    if not db_configs:
+        st.sidebar.warning("暂无数据库配置，请点击⚙️设置添加")
+        return
+
+    config_names = [c.get('name', '未命名') for c in db_configs]
+
+    current_name = None
+    if st.session_state.get('selected_db_config'):
+        current_name = st.session_state.selected_db_config.get('name')
+
+    current_index = 0
+    if current_name and current_name in config_names:
+        current_index = config_names.index(current_name)
+
+    selected_name = st.sidebar.selectbox(
+        "🗄️ 数据库",
+        options=config_names,
+        index=current_index,
+        key="db_selector"
+    )
+
+    for config in db_configs:
+        if config.get('name') == selected_name:
+            st.session_state.selected_db_config = config
+            break
+
+
+def render_llm_selector():
+    """渲染大模型配置选择器"""
+    llm_configs = load_llm_configs()
+
+    if not llm_configs:
+        st.sidebar.warning("暂无大模型配置，请点击⚙️设置添加")
+        return
+
+    config_names = [c.get('name', '未命名') for c in llm_configs]
+
+    current_name = None
+    if st.session_state.get('selected_llm_config'):
+        current_name = st.session_state.selected_llm_config.get('name')
+
+    current_index = 0
+    if current_name and current_name in config_names:
+        current_index = config_names.index(current_name)
+
+    selected_name = st.sidebar.selectbox(
+        "🤖 大模型",
+        options=config_names,
+        index=current_index,
+        key="llm_selector"
+    )
+
+    for config in llm_configs:
+        if config.get('name') == selected_name:
+            if st.session_state.get('selected_llm_config') != config:
+                st.session_state.selected_llm_config = config
+                st.session_state.llm_client = LLMClient(config)
+            break
+
+
+# web/components/sidebar.py - render_project_history 函数
+
+def render_project_history():
+    """渲染项目最近列表"""
+    # 添加自定义CSS，只对项目按钮生效
+    st.sidebar.markdown("""
+        <style>
+        /* 只对侧边栏内的按钮生效 */
+        section[data-testid="stSidebar"] .stButton button {
+            justify-content: flex-start !important;
+        }
+        section[data-testid="stSidebar"] .stButton button div {
+            display: flex !important;
+            justify-content: flex-start !important;
+            width: 100% !important;
+        }
+        section[data-testid="stSidebar"] .stButton button div p {
+            margin: 0 !important;
+            text-align: left !important;
+        }
+        section[data-testid="stSidebar"] .stButton button[kind="primary"],
+        section[data-testid="stSidebar"] .stButton button[kind="tertiary"]{
+            justify-content: center !important;
+        }
+        section[data-testid="stSidebar"] .stButton button[kind="primary"] div,
+        section[data-testid="stSidebar"] .stButton button[kind="tertiary"] div{
+            display: flex !important;
+            justify-content: center !important;
+            width: 100% !important;
+        }
+        section[data-testid="stSidebar"] .stButton button[kind="primary"] div p,
+        section[data-testid="stSidebar"] .stButton button[kind="tertiary"] div p{
+            margin: 0 !important;
+            text-align: center !important;
+        }
+         
+        </style>
+        """, unsafe_allow_html=True)
+
+    st.sidebar.markdown("### 📜 最近项目")
+
+    projects = SessionService.list_user_projects()
+
+    if not projects:
+        st.sidebar.caption("暂无最近项目")
+        return
+
+    current_session = SessionService.get_current_session()
+
+    for project in projects:
+        session_id = project.get("session_id")
+        source_name = project.get("source_name", "未知")
+        display_name = source_name[:15] + "..." if len(source_name) > 15 else source_name
+        created_at = project.get("created_at", "")
+        created_short = created_at[:16].replace("T", " ") if created_at else "未知时间"
+
+        is_current = (current_session == session_id)
+
+        col1, col2 = st.sidebar.columns([4, 1])
+
+        with col1:
+            if is_current:
+                button_text = f"✅ {display_name}"
+            else:
+                button_text = f"📁 {display_name}"
+            if st.button(button_text, key=f"project_{session_id}", use_container_width=True):
+                SessionService.set_current_session(session_id)
+                st.rerun()
+
+        with col2:
+            if st.button("🗑️", key=f"del_project_{session_id}", help="删除项目"):
+                _show_delete_dialog(session_id, source_name, is_current)
+
+        st.sidebar.caption(f"   {created_short}")
+
+
 def render_sidebar():
     """渲染侧边栏"""
     # 标题
     st.sidebar.markdown(
-        '<div style="text-align: left; font-size: 1.4rem; font-weight: bold; color: #1f77b4;padding-left:0pm;padding-bottom:10pm">📊 AutoStat智能分析助手</div>',
+        '<div style="text-align: left; font-size: 1.4rem; font-weight: bold; color: #1f77b4;padding-left:0pm;padding-bottom:20pm">📊AutoStat智能分析助手</div>',
         unsafe_allow_html=True
     )
 
@@ -222,48 +438,18 @@ def render_sidebar():
 
     st.sidebar.markdown("---")
 
+    # 数据库配置下拉框
+    render_db_selector()
+
+    # 大模型配置下拉框
+    render_llm_selector()
+
+    st.sidebar.markdown("---")
+
     # 单文件分析固定使用 basic 级别
     st.session_state.date_features_level = "basic"
 
     # 设置按钮放在底部
-    if st.sidebar.button("⚙️ 设置", use_container_width=True):
+    if st.sidebar.button("⚙️ 设置", use_container_width=True,type="tertiary"):
+        st.session_state.show_settings_dialog = True
         _show_settings_dialog()
-
-
-def render_project_history():
-    """渲染项目最近列表"""
-    st.sidebar.markdown("### 📜 最近项目")
-
-    projects = SessionService.list_user_projects()
-
-    if not projects:
-        st.sidebar.caption("暂无最近项目")
-        return
-
-    current_session = SessionService.get_current_session()
-
-    for project in projects:
-        session_id = project.get("session_id")
-        source_name = project.get("source_name", "未知")
-        created_at = project.get("created_at", "")
-        created_short = created_at[:16].replace("T", " ") if created_at else "未知时间"
-
-        is_current = (current_session == session_id)
-
-        col1, col2 = st.sidebar.columns([4, 1])
-
-        with col1:
-            button_text = f"✅ {source_name} (当前)" if is_current else f"📁 {source_name}"
-            if st.button(
-                    button_text,
-                    key=f"project_{session_id}",
-                    use_container_width=True
-            ):
-                SessionService.set_current_session(session_id)
-                st.rerun()
-
-        with col2:
-            if st.button("🗑️", key=f"del_project_{session_id}", help="删除项目"):
-                _show_delete_dialog(session_id, source_name, is_current)
-
-        st.sidebar.caption(f"   {created_short}")
