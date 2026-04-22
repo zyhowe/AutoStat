@@ -12,7 +12,16 @@ from web.components.sql_generator import render_sql_generator
 from web.components.model_training import render_model_training
 from web.components.agent_inference import render_agent_inference
 
+# 新增组件（移除 OnboardingWizard, render_onboarding_tip）
+from web.components.demo_data import render_demo_section
+from web.components.empty_state import render_empty_state
+from web.components.value_preview import render_value_preview
+from web.components.progress_stage import ProgressStage, render_analysis_progress
+from web.components.term_tooltip import render_term_with_tooltip, apply_term_tooltips_to_html
+from web.components.tips import TipsManager
+
 __all__ = [
+    # 原有导出
     'render_sidebar',
     'render_tabs',
     'scroll_to_top',
@@ -25,5 +34,15 @@ __all__ = [
     'render_natural_query',
     'render_sql_generator',
     'render_model_training',
-    'render_agent_inference'
+    'render_agent_inference',
+
+    # 新增导出
+    'render_demo_section',
+    'render_empty_state',
+    'render_value_preview',
+    'ProgressStage',
+    'render_analysis_progress',
+    'render_term_with_tooltip',
+    'apply_term_tooltips_to_html',
+    'TipsManager'
 ]

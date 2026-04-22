@@ -153,7 +153,17 @@ class Reporter:
 </html>"""
 
     def _build_html(self, title):
-        """构建HTML内容（包含图表）"""
+        """构建HTML内容（包含图表和解读）"""
+        # 尝试导入功能开关和洞察服务
+        try:
+            from web.services.feature_flags import FeatureFlags
+            from web.services.insight_service import InsightService
+            HAS_INSIGHT = True
+        except ImportError:
+            HAS_INSIGHT = False
+            FeatureFlags = None
+            InsightService = None
+
         data = self.analyzer.data
         quality = self.analyzer.quality_report
         source_table = getattr(self.analyzer, 'source_table_name', '未知')
@@ -212,6 +222,54 @@ class Reporter:
 
         except Exception as e:
             print(f"⚠️ 生成图表时出错: {e}")
+
+        # ========== 新增：生成图表解读 ==========
+        chart_insights = {}
+
+        if HAS_INSIGHT and FeatureFlags and FeatureFlags.is_enabled("natural_language_insight"):
+            try:
+                # 1. 连续变量图表解读
+                for col, typ in self.analyzer.variable_types.items():
+                    if typ == 'continuous':
+                        plot_key = f'{col}_continuous'
+                        if plot_key in plots:
+                            series = data[col].dropna()
+                            if len(series) > 0:
+                                insight_data = {
+                                    'name': col,
+                                    'mean': float(series.mean()),
+                                    'median': float(series.median()),
+                                    'skew': float(series.skew()),
+                                    'min': float(series.min()),
+                                    'max': float(series.max())
+                                }
+                                insight = InsightService.generate_natural_language_insight('continuous', insight_data)
+                                chart_insights[plot_key] = insight
+
+                # 2. 分类变量图表解读
+                for col, typ in self.analyzer.variable_types.items():
+                    if typ in ['categorical', 'categorical_numeric', 'ordinal']:
+                        plot_key = f'{col}_categorical'
+                        if plot_key in plots:
+                            vc = data[col].value_counts()
+                            if len(vc) > 0:
+                                insight_data = {
+                                    'name': col,
+                                    'value_counts': {str(k): int(v) for k, v in vc.head(10).items()}
+                                }
+                                insight = InsightService.generate_natural_language_insight('categorical', insight_data)
+                                chart_insights[plot_key] = insight
+
+                # 3. 相关性热力图解读
+                if 'numeric_correlation' in plots:
+                    numeric_vars = [col for col, typ in self.analyzer.variable_types.items() if typ == 'continuous']
+                    high_corrs = self._get_high_correlations(numeric_vars, threshold=0.5)
+                    if high_corrs:
+                        insight = InsightService.generate_natural_language_insight('correlation', high_corrs[0])
+                        chart_insights['numeric_correlation'] = insight
+
+            except Exception as e:
+                print(f"⚠️ 生成图表解读时出错: {e}")
 
         # 日期范围
         date_range = None
@@ -396,10 +454,17 @@ class Reporter:
                 key_insights=key_insights[:3],
                 next_actions=next_actions[:3],
                 plots=plots,
+                chart_insights=chart_insights,  # 新增：图表解读
                 time_series_diagnostics=time_series_diagnostics
             )
         except Exception as e:
             return self._get_error_html(title, f"模板渲染失败: {str(e)}")
+
+    def _get_high_correlations(self, numeric_vars, threshold=0.7):
+        """获取强相关对 - 调用 BaseAnalyzer 静态方法"""
+        if not numeric_vars:
+            return []
+        return BaseAnalyzer.get_high_correlations(self.analyzer.data, numeric_vars, threshold)
 
     def _get_model_recommendations(self):
         """获取基于实际字段的模型推荐（调用 recommendation_analyzer）"""
@@ -412,4 +477,3 @@ class Reporter:
                 numeric_vars, categorical_vars, datetime_vars
             )
         return []
-

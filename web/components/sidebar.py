@@ -1,6 +1,6 @@
 # web/components/sidebar.py
 
-"""侧边栏组件 - 配置管理、项目最近"""
+"""侧边栏组件 - 配置管理、项目最近、技巧推送"""
 
 import streamlit as st
 from web.services.session_service import SessionService
@@ -9,6 +9,7 @@ from web.config.storage import (
     load_llm_configs, add_llm_config, delete_llm_config, test_llm_connection
 )
 from autostat.llm_client import LLMClient
+from web.services.feature_flags import FeatureFlags
 
 
 def _show_delete_dialog(session_id, source_name, is_current):
@@ -331,14 +332,29 @@ def render_llm_selector():
             break
 
 
-# web/components/sidebar.py - render_project_history 函数
+def render_auto_analysis_selector():
+    """渲染自动分析选择器"""
+    current = FeatureFlags.is_auto_analysis_enabled()
+    options = ["开启", "关闭"]
+    current_index = 0 if current else 1
+
+    selected = st.sidebar.selectbox(
+        "⚡ 自动分析",
+        options=options,
+        index=current_index,
+        key="auto_analysis_selector",
+        help="开启后上传文件/加载数据库表后自动开始分析"
+    )
+
+    new_value = (selected == "开启")
+    if new_value != current:
+        FeatureFlags.set_auto_analysis(new_value)
+        st.rerun()
 
 def render_project_history():
     """渲染项目最近列表"""
-    # 添加自定义CSS，只对项目按钮生效
     st.sidebar.markdown("""
         <style>
-        /* 只对侧边栏内的按钮生效 */
         section[data-testid="stSidebar"] .stButton button {
             justify-content: flex-start !important;
         }
@@ -366,7 +382,6 @@ def render_project_history():
             margin: 0 !important;
             text-align: center !important;
         }
-         
         </style>
         """, unsafe_allow_html=True)
 
@@ -444,12 +459,48 @@ def render_sidebar():
     # 大模型配置下拉框
     render_llm_selector()
 
+    # 自动分析选择器
+    render_auto_analysis_selector()
+
     st.sidebar.markdown("---")
 
     # 单文件分析固定使用 basic 级别
     st.session_state.date_features_level = "basic"
 
-    # 设置按钮放在底部
-    if st.sidebar.button("⚙️ 设置", use_container_width=True,type="tertiary"):
+    # 技巧推送
+    with st.sidebar.expander("💡 使用技巧", expanded=False):
+        st.markdown("""
+        **快速开始**
+        - 点击「销售数据示例」立即体验
+        - 上传CSV/Excel文件自动分析
+
+        **高级功能**
+        - 上传多个文件自动发现表间关系
+        - 配置大模型获得AI智能解读
+        - 训练预测模型进行数据预测
+
+        **导出报告**
+        - 支持HTML/JSON/Excel格式
+        - 一键导出全部格式为ZIP包
+        """)
+
+        # 动态提示：未配置大模型
+        if st.session_state.get("selected_llm_config") is None:
+            st.info("💡 提示：配置大模型后可以获得AI智能解读")
+            if st.button("去配置大模型", key="tip_go_llm", use_container_width=True):
+                st.session_state.show_settings_dialog = True
+                st.rerun()
+
+        # 动态提示：分析完成可训练模型
+        if st.session_state.get("analysis_completed"):
+            st.success("💡 分析完成！试试「小模型训练」标签页")
+            if st.button("前往模型训练", key="tip_go_train", use_container_width=True):
+                st.session_state.current_tab = 2
+                st.rerun()
+
+    st.sidebar.markdown("---")
+
+    # 设置按钮放最后
+    if st.sidebar.button("⚙️ 设置", use_container_width=True, type="tertiary"):
         st.session_state.show_settings_dialog = True
         _show_settings_dialog()

@@ -17,6 +17,7 @@ from web.components.results import render_preview_tab, render_ai_tab
 from web.components.model_training import render_model_training
 from web.services.cache_service import CacheService
 from web.services.session_service import SessionService
+from web.services.feature_flags import FeatureFlags  # 保留功能开关
 
 st.set_page_config(
     page_title="AutoStat 智能数据分析",
@@ -46,6 +47,9 @@ render_sidebar()
 if st.session_state.scroll_to_top:
     scroll_to_top()
     st.session_state.scroll_to_top = False
+
+# 渲染功能开关弹窗（只渲染，不自动打开）
+#FeatureFlags.render_settings_dialog()
 
 # 渲染标签页
 current_tab = render_tabs()

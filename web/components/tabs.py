@@ -55,3 +55,30 @@ def scroll_to_top():
         }
     </script>
     """, unsafe_allow_html=True)
+
+
+def render_tab_badge(tab_index: int, text: str, badge_text: str = None):
+    """渲染带徽章的标签页按钮"""
+    is_active = (st.session_state.current_tab == tab_index)
+
+    if badge_text:
+        display_text = f"{text} <span style='background: #ff4757; color: white; border-radius: 10px; padding: 0 6px; margin-left: 6px; font-size: 10px;'>{badge_text}</span>"
+    else:
+        display_text = text
+
+    if is_active:
+        st.markdown(f"""
+        <div style="
+            background-color: #1f77b4;
+            color: white;
+            border-radius: 8px;
+            padding: 8px 0;
+            text-align: center;
+            font-weight: 500;
+            cursor: default;
+        ">{display_text}</div>
+        """, unsafe_allow_html=True)
+    else:
+        if st.button(display_text, key=f"tab_{tab_index}", use_container_width=True):
+            st.session_state.current_tab = tab_index
+            st.rerun()

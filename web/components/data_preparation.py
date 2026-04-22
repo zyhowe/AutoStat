@@ -10,11 +10,35 @@ from web.services.cache_service import CacheService
 from web.utils.data_preprocessor import render_field_selector, render_relationship_manager, auto_discover_relationships
 from web.services.session_service import SessionService
 from web.services.storage_service import StorageService
+from web.services.insight_service import InsightService
+from web.components.value_preview import render_value_preview
+from web.components.demo_data import render_demo_section
+from web.components.empty_state import render_empty_state
+from web.services.recommendation_service import RecommendationService
+from web.services.feature_flags import FeatureFlags
 
 
 def render_data_preparation():
     """渲染数据准备标签页"""
 
+    # 检查是否有演示数据请求
+    if st.session_state.get("demo_request"):
+        from web.components.demo_data import load_demo_dataset, DEMO_DATASETS
+        dataset_key = st.session_state.demo_request
+        dataset = DEMO_DATASETS.get(dataset_key, {})
+
+        with st.spinner(f"正在加载 {dataset.get('name', '演示')} 数据..."):
+            df = load_demo_dataset(dataset_key)
+            if df is not None:
+                st.session_state.single_cached_df = df
+                st.session_state.single_cached_name = f"{dataset.get('name', 'demo')}.csv"
+                st.session_state.single_cached_ext = "csv"
+                st.session_state.auto_trigger_analysis = True
+                st.session_state.demo_loaded = True
+                del st.session_state.demo_request
+                st.rerun()
+
+    # 检查是否有当前会话
     current_session_id = SessionService.get_current_session()
 
     # 如果有当前会话（已加载历史项目），显示提示，不显示新建表单
@@ -35,9 +59,11 @@ def render_data_preparation():
     # 无当前会话，显示新建表单（两个折叠区块）
     st.markdown("### 📁 新建分析")
 
+    # 文件分析区块
     with st.expander("📁 文件分析", expanded=True):
         render_file_preparation()
 
+    # 数据库分析区块
     with st.expander("🗄️ 数据库分析", expanded=False):
         render_database_preparation()
 
@@ -56,7 +82,10 @@ def render_file_preparation():
     )
 
     if not uploaded_files:
-        st.info("请上传数据文件开始分析")
+        # 空状态时显示演示数据
+        if FeatureFlags.is_enabled("demo_data"):
+            st.markdown("---")
+            render_demo_section()
         return
 
     # 单文件模式
@@ -106,6 +135,65 @@ def render_single_file_ui(uploaded_file):
     )
 
 
+def render_single_file_content(df: pd.DataFrame, ext: str, file_name: str):
+    """渲染单文件内容（数据预览、价值预览、字段选择、开始分析）"""
+    rows, cols = df.shape
+    st.subheader("📄 原始数据预览")
+    st.dataframe(df.head(100))
+    st.write(f"形状: {rows:,} 行 × {cols} 列")
+
+    # 价值预览（新增）
+    if FeatureFlags.is_enabled("value_preview"):
+        preview = InsightService.generate_value_preview(df)
+        render_value_preview(df, preview)
+    else:
+        # 简化版质量提醒
+        col_info = []
+        for col in df.columns:
+            missing_pct = df[col].isna().mean() * 100
+            if missing_pct > 50:
+                col_info.append(f"⚠️ {col}: 缺失率 {missing_pct:.1f}%")
+            elif missing_pct > 20:
+                col_info.append(f"📌 {col}: 缺失率 {missing_pct:.1f}%")
+        if col_info:
+            with st.expander("📊 数据质量提醒", expanded=False):
+                for info in col_info[:5]:
+                    st.caption(info)
+                if len(col_info) > 5:
+                    st.caption(f"... 还有 {len(col_info) - 5} 个字段")
+
+    st.markdown("---")
+
+    # 智能参数推荐（新增）
+    if FeatureFlags.is_enabled("smart_params"):
+        recommended_params = RecommendationService.get_recommended_params(df=df)
+        if recommended_params["sample_rate"] < 1.0:
+            st.info(f"💡 检测到文件较大，建议采样率 {recommended_params['sample_rate']:.0%}")
+        if recommended_params["date_features_level"] == "full":
+            st.info("💡 检测到日期和数值字段，已启用完整日期特征")
+
+    # 字段选择器
+    selected_columns, variable_types = render_field_selector(
+        df, initial_types=None, prefix="single", save_key="saved_variable_types"
+    )
+
+    if not selected_columns:
+        st.warning("⚠️ 请至少保留一个字段")
+        return
+
+    filtered_df = df[selected_columns].copy()
+
+    st.markdown("---")
+
+    # 判断是否自动分析
+    if FeatureFlags.is_auto_analysis_enabled():
+        with st.spinner("正在自动分析..."):
+            AnalysisService.analyze_single_file(file_name, ext, filtered_df, variable_types)
+    else:
+        if st.button("▶️ 开始分析", type="primary", use_container_width=True):
+            AnalysisService.analyze_single_file(file_name, ext, filtered_df, variable_types)
+
+
 def render_multi_file_ui(uploaded_files):
     """多文件UI"""
     if len(uploaded_files) > 10:
@@ -130,43 +218,6 @@ def render_multi_file_ui(uploaded_files):
                 return
 
     render_multi_file_content(st.session_state.multi_cached_tables)
-
-
-def render_single_file_content(df: pd.DataFrame, ext: str, file_name: str):
-    """渲染单文件内容（数据预览、字段选择、开始分析）"""
-    rows, cols = df.shape
-    st.subheader("📄 原始数据预览")
-    st.dataframe(df.head(100))
-    st.write(f"形状: {rows:,} 行 × {cols} 列")
-
-    col_info = []
-    for col in df.columns:
-        missing_pct = df[col].isna().mean() * 100
-        if missing_pct > 50:
-            col_info.append(f"⚠️ {col}: 缺失率 {missing_pct:.1f}%")
-        elif missing_pct > 20:
-            col_info.append(f"📌 {col}: 缺失率 {missing_pct:.1f}%")
-    if col_info:
-        with st.expander("📊 数据质量提醒", expanded=False):
-            for info in col_info[:5]:
-                st.caption(info)
-            if len(col_info) > 5:
-                st.caption(f"... 还有 {len(col_info) - 5} 个字段")
-
-    st.markdown("---")
-    selected_columns, variable_types = render_field_selector(
-        df, initial_types=None, prefix="single", save_key="saved_variable_types"
-    )
-
-    if not selected_columns:
-        st.warning("⚠️ 请至少保留一个字段")
-        return
-
-    filtered_df = df[selected_columns].copy()
-
-    st.markdown("---")
-    if st.button("▶️ 开始分析", type="primary", use_container_width=True):
-        AnalysisService.analyze_single_file(file_name, ext, filtered_df, variable_types)
 
 
 def render_multi_file_content(tables: dict):
@@ -346,7 +397,35 @@ def load_and_prepare_database(config: dict, table_names: list, limit: int, max_t
         st.session_state.db_cached_tables = tables
         st.session_state.db_config = config
 
-        st.rerun()
+        # ========== 新增：自动分析 ==========
+        from web.services.feature_flags import FeatureFlags
+        from web.services.analysis_service import AnalysisService
+        from web.utils.data_preprocessor import get_default_variable_type
+
+        # 判断是否自动分析
+        if FeatureFlags.is_auto_analysis_enabled():
+            from web.utils.data_preprocessor import get_default_variable_type, auto_discover_relationships
+
+            variable_types_dict = {}
+            filtered_tables = {}
+
+            for table_name, df in tables.items():
+                variable_types = {}
+                for col in df.columns:
+                    var_type = get_default_variable_type(col, df)
+                    if var_type != "exclude":
+                        variable_types[col] = var_type
+
+                selected_cols = [col for col in df.columns if variable_types.get(col) != "exclude"]
+                filtered_tables[table_name] = df[selected_cols].copy()
+                variable_types_dict[table_name] = variable_types
+
+            relationships = auto_discover_relationships(filtered_tables)
+            valid_relationships = [rel for rel in relationships if rel.get('from_col') and rel.get('to_col')]
+
+            AnalysisService.analyze_database(filtered_tables, variable_types_dict, valid_relationships, config)
+        else:
+            st.rerun()
 
     except Exception as e:
         progress_bar.empty()

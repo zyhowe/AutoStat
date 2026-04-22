@@ -27,7 +27,13 @@ from web.services.agent_service import (
     process_agent_response
 )
 
+# 新增服务（只导出实际存在的类）
+from web.services.insight_service import InsightService
+from web.services.recommendation_service import RecommendationService
+from web.services.feature_flags import FeatureFlags
+
 __all__ = [
+    # 原有
     'CacheService',
     'FileService',
     'AnalysisService',
@@ -48,5 +54,9 @@ __all__ = [
     'get_agent_tools_description',
     'build_data_context',
     'build_agent_system_prompt',
-    'process_agent_response'
+    'process_agent_response',
+    # 新增
+    'InsightService',
+    'RecommendationService',
+    'FeatureFlags'
 ]

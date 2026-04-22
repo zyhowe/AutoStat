@@ -23,7 +23,7 @@ from web.services.model_training_service import (
 )
 from web.services.storage_service import StorageService
 from web.services.session_service import SessionService
-
+from web.services.recommendation_service import RecommendationService
 
 def render_model_training():
     """渲染模型训练标签页"""
@@ -204,11 +204,42 @@ def render_model_recommendations(json_data: Dict, data: pd.DataFrame,
         st.info("暂无模型推荐")
 
 
+# web/components/model_training.py
+
 def render_model_creation(data: pd.DataFrame, available_cols: List[str],
-                           variable_types: Dict, session_id: str):
+                          variable_types: Dict, session_id: str):
     """模型创建标签页"""
+    from web.services.recommendation_service import RecommendationService
+    from web.services.feature_flags import FeatureFlags
+
     st.markdown("配置模型参数并开始训练")
 
+    # ========== 智能目标推荐 ==========
+    if FeatureFlags.is_enabled("smart_target"):
+        recommended_target, recommended_task = RecommendationService.get_recommended_target(data)
+        if recommended_target and recommended_target in data.columns:
+            with st.container():
+                st.info(
+                    f"💡 **智能推荐**：根据数据特征，建议使用 **{recommended_target}** 作为目标列，进行 **{recommended_task}** 任务")
+                col_rec1, col_rec2 = st.columns(2)
+                with col_rec1:
+                    if st.button("✅ 使用推荐配置", key="use_recommended_target", use_container_width=True):
+                        st.session_state.auto_fill_target_col = recommended_target
+                        st.session_state.auto_fill_task_type = recommended_task
+                        # 同时推荐特征
+                        recommended_features = RecommendationService.get_recommended_features(
+                            data, recommended_target, max_features=20
+                        )
+                        st.session_state.auto_fill_features = recommended_features
+                        st.rerun()
+                with col_rec2:
+                    if st.button("✖️ 手动配置", key="manual_config", use_container_width=True):
+                        st.session_state.auto_fill_target_col = None
+                        st.session_state.auto_fill_task_type = None
+                        st.rerun()
+            st.markdown("---")
+
+    # ========== 创建新模型按钮 ==========
     col1, col2 = st.columns([5, 1])
     with col2:
         if st.button("➕ 创建新模型", use_container_width=True):
@@ -221,39 +252,50 @@ def render_model_creation(data: pd.DataFrame, available_cols: List[str],
             st.session_state.auto_fill_model_name = None
 
             # 清空表单控件的值
-            if 'train_task_type_selected' in st.session_state:
-                del st.session_state.train_task_type_selected
-            if 'train_target_col_selected' in st.session_state:
-                del st.session_state.train_target_col_selected
-            if 'train_features_selected' in st.session_state:
-                del st.session_state.train_features_selected
-            if 'train_model_key_selected' in st.session_state:
-                del st.session_state.train_model_key_selected
+            keys_to_delete = ['train_task_type_selected', 'train_target_col_selected',
+                              'train_features_selected', 'train_model_key_selected', 'model_name_input']
+            for key in keys_to_delete:
+                if key in st.session_state:
+                    del st.session_state[key]
 
             # 清空参数值
             param_keys = [k for k in st.session_state.keys() if k.startswith('param_')]
             for key in param_keys:
                 del st.session_state[key]
 
-            # 清空模型名称
-            if 'model_name_input' in st.session_state:
-                del st.session_state.model_name_input
-
             st.rerun()
 
     st.markdown("---")
 
-    # 初始化默认值
+    # ========== 初始化默认值 ==========
     if 'train_task_type_selected' not in st.session_state:
-        st.session_state.train_task_type_selected = "classification"
+        # 如果有智能推荐，使用推荐的任务类型
+        if FeatureFlags.is_enabled("smart_target") and st.session_state.get("auto_fill_task_type"):
+            st.session_state.train_task_type_selected = st.session_state.auto_fill_task_type
+        else:
+            st.session_state.train_task_type_selected = "classification"
+
     if 'train_target_col_selected' not in st.session_state:
-        st.session_state.train_target_col_selected = available_cols[0] if available_cols else None
+        if FeatureFlags.is_enabled("smart_target") and st.session_state.get("auto_fill_target_col"):
+            st.session_state.train_target_col_selected = st.session_state.auto_fill_target_col
+        else:
+            st.session_state.train_target_col_selected = available_cols[0] if available_cols else None
+
     if 'train_features_selected' not in st.session_state:
-        st.session_state.train_features_selected = [col for col in available_cols if col != st.session_state.train_target_col_selected][:20]
+        if FeatureFlags.is_enabled("smart_target") and st.session_state.get("auto_fill_features"):
+            st.session_state.train_features_selected = st.session_state.auto_fill_features
+        else:
+            # 默认选择所有数值列
+            numeric_cols = data.select_dtypes(include=['int64', 'float64']).columns.tolist()
+            target = st.session_state.train_target_col_selected
+            if target and target in numeric_cols:
+                numeric_cols.remove(target)
+            st.session_state.train_features_selected = numeric_cols[:20]
+
     if 'train_model_key_selected' not in st.session_state:
         st.session_state.train_model_key_selected = "random_forest"
 
-    # 任务配置
+    # ========== 任务配置 ==========
     st.markdown("**📋 任务配置**")
 
     col1, col2 = st.columns(2)
@@ -292,7 +334,7 @@ def render_model_creation(data: pd.DataFrame, available_cols: List[str],
 
     st.markdown("---")
 
-    # 特征选择
+    # ========== 特征选择 ==========
     st.markdown("**🔧 特征选择**")
 
     all_columns = list(data.columns)
@@ -304,6 +346,7 @@ def render_model_creation(data: pd.DataFrame, available_cols: List[str],
     selected_features = st.multiselect(
         "选择特征列",
         options=all_columns,
+        default=st.session_state.train_features_selected,
         key="train_features_selected"
     )
 
@@ -312,9 +355,19 @@ def render_model_creation(data: pd.DataFrame, available_cols: List[str],
         return
 
     st.caption(f"已选择 {len(selected_features)} 个特征")
+
+    # 智能特征推荐提示
+    if FeatureFlags.is_enabled("smart_target") and target_col:
+        recommended_features = RecommendationService.get_recommended_features(data, target_col, max_features=10)
+        if recommended_features and set(recommended_features) - set(selected_features):
+            st.info(f"💡 推荐特征：{', '.join(recommended_features[:5])}")
+            if st.button("使用推荐特征"):
+                st.session_state.train_features_selected = recommended_features
+                st.rerun()
+
     st.markdown("---")
 
-    # 模型选择
+    # ========== 模型选择 ==========
     st.markdown("**🤖 模型选择**")
 
     models = get_models_by_task_type(task_type)
@@ -342,7 +395,7 @@ def render_model_creation(data: pd.DataFrame, available_cols: List[str],
 
     st.markdown("---")
 
-    # 高级配置
+    # ========== 高级配置 ==========
     with st.expander("⚙️ 高级配置", expanded=False):
         if selected_model_key:
             st.markdown("**模型参数配置**")
@@ -486,7 +539,7 @@ def render_model_creation(data: pd.DataFrame, available_cols: List[str],
         with col2:
             random_seed = st.number_input("随机种子", min_value=0, max_value=9999, value=42, key="random_seed")
 
-    # 模型名称
+    # ========== 模型名称 ==========
     st.markdown("**📝 模型名称**")
 
     if st.session_state.auto_fill_model_name:
@@ -503,7 +556,9 @@ def render_model_creation(data: pd.DataFrame, available_cols: List[str],
 
     st.markdown("---")
 
+    # ========== 开始训练按钮 ==========
     if st.button("▶️ 开始训练", type="primary", use_container_width=True):
+        # 收集用户参数
         user_params = {}
         if selected_model_key:
             model_params = get_model_params(task_type, selected_model_key)
@@ -536,7 +591,6 @@ def render_model_creation(data: pd.DataFrame, available_cols: List[str],
         if success:
             st.success(f"✅ 训练完成！模型已保存: {user_model_name}")
             st.session_state.model_training_tab = 2
-            time.sleep(1)
             st.rerun()
         else:
             st.error(f"训练失败: {result.get('error', '未知错误')}")

@@ -12,6 +12,14 @@ from web.components.agent_inference import render_agent_inference
 from web.services.session_service import SessionService
 from web.services.storage_service import StorageService
 
+# 在文件开头添加
+from web.services.insight_service import InsightService
+from web.components.term_tooltip import apply_term_tooltips_to_html
+from web.services.feature_flags import FeatureFlags
+import zipfile
+import io
+from datetime import datetime
+
 
 def render_preview_tab():
     """渲染预览报告标签页"""
@@ -20,53 +28,157 @@ def render_preview_tab():
         st.info("暂无报告预览")
         return
 
-    # 每次都从存储重新加载，不使用 session_state 缓存
+    # 每次都从存储重新加载
     html_content = StorageService.load_text("analysis_report", session_id)
     json_data = StorageService.load_json("analysis_result", session_id)
     log_content = StorageService.load_text("analysis_log", session_id)
 
     if html_content and json_data:
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.download_button(
-                "📥 下载 HTML 报告",
-                html_content,
-                "autostat_report.html",
-                "text/html",
-                use_container_width=True
-            )
-        with col2:
-            json_str = json.dumps(json_data, ensure_ascii=False, indent=2) if json_data else ""
-            st.download_button(
-                "📥 下载 JSON 结果",
-                json_str,
-                "autostat_result.json",
-                "application/json",
-                use_container_width=True
-            )
-        with col3:
-            if log_content:
+        # 一键导出按钮组
+        if FeatureFlags.is_enabled("one_click_export"):
+            render_export_buttons(html_content, json_data, log_content)
+            st.divider()
+        else:
+            # 原有下载按钮
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.download_button(
+                    "📥 下载 HTML 报告",
+                    html_content,
+                    "autostat_report.html",
+                    "text/html",
+                    use_container_width=True
+                )
+            with col2:
+                json_str = json.dumps(json_data, ensure_ascii=False, indent=2) if json_data else ""
+                st.download_button(
+                    "📥 下载 JSON 结果",
+                    json_str,
+                    "autostat_result.json",
+                    "application/json",
+                    use_container_width=True
+                )
+            with col3:
                 st.download_button(
                     "📥 下载分析日志",
-                    log_content,
+                    log_content or "暂无分析日志",
                     "autostat_log.txt",
                     "text/plain",
                     use_container_width=True
                 )
-            else:
-                st.download_button(
-                    "📥 下载分析日志",
-                    "暂无分析日志",
-                    "autostat_log.txt",
-                    "text/plain",
-                    disabled=True,
-                    use_container_width=True
-                )
+            st.divider()
 
-        st.divider()
+        # 结论优先（在报告前显示核心结论）
+        if FeatureFlags.is_enabled("conclusion_first") and json_data:
+            conclusions = InsightService.extract_top_conclusions(json_data, n=5)
+            render_conclusions_section(conclusions)
+            st.markdown("---")
+            st.markdown("### 📊 详细报告")
+
+        # 应用术语解释浮层
+        if FeatureFlags.is_enabled("term_tooltip"):
+            html_content = apply_term_tooltips_to_html(html_content)
+
         st.html(html_content)
     else:
         st.info("暂无报告预览")
+
+
+def render_export_buttons(html_content: str, json_data: dict, log_content: str):
+    """渲染一键导出按钮组"""
+    st.markdown("#### 📥 导出报告")
+
+    col1, col2, col3, col4 = st.columns(4)
+
+    with col1:
+        st.download_button(
+            "📄 HTML",
+            html_content,
+            "autostat_report.html",
+            "text/html",
+            use_container_width=True
+        )
+
+    with col2:
+        json_str = json.dumps(json_data, ensure_ascii=False, indent=2) if json_data else ""
+        st.download_button(
+            "📋 JSON",
+            json_str,
+            "autostat_result.json",
+            "application/json",
+            use_container_width=True
+        )
+
+    with col3:
+        st.download_button(
+            "📝 日志",
+            log_content or "无日志",
+            "autostat_log.txt",
+            "text/plain",
+            use_container_width=True
+        )
+
+    with col4:
+        if st.button("📦 一键导出全部", use_container_width=True):
+            _export_all_formats(html_content, json_str, log_content)
+
+
+def _export_all_formats(html_content: str, json_str: str, log_content: str):
+    """导出所有格式为ZIP包"""
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    zip_buffer = io.BytesIO()
+
+    with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+        zip_file.writestr(f"autostat_report_{timestamp}.html", html_content)
+        zip_file.writestr(f"autostat_result_{timestamp}.json", json_str)
+        zip_file.writestr(f"autostat_log_{timestamp}.txt", log_content or "无日志")
+
+    zip_buffer.seek(0)
+
+    st.download_button(
+        "📦 下载ZIP包",
+        zip_buffer,
+        f"autostat_export_{timestamp}.zip",
+        "application/zip",
+        use_container_width=True
+    )
+
+
+def render_conclusions_section(conclusions: list):
+    """渲染核心结论区域"""
+    st.markdown("""
+    <style>
+    .conclusions-section {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        border-radius: 16px;
+        padding: 24px;
+        margin-bottom: 24px;
+        color: white;
+    }
+    .conclusion-card {
+        background: rgba(255,255,255,0.15);
+        border-radius: 12px;
+        padding: 16px;
+        margin-bottom: 12px;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+    st.markdown('<div class="conclusions-section">', unsafe_allow_html=True)
+    st.markdown("## 🎯 核心结论（30秒速览）")
+
+    for conclusion in conclusions:
+        st.markdown(f"""
+        <div class="conclusion-card">
+            <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 8px;">
+                <span style="font-size: 24px;">{conclusion.get('icon', '📌')}</span>
+                <span style="font-weight: bold; font-size: 16px;">{conclusion.get('title', '')}</span>
+            </div>
+            <p style="margin: 8px 0; font-size: 13px; opacity: 0.9;">{conclusion.get('description', '')}</p>
+        </div>
+        """, unsafe_allow_html=True)
+
+    st.markdown('</div>', unsafe_allow_html=True)
 
 
 def render_ai_tab():
@@ -188,3 +300,4 @@ def render_context_selector():
         }
         for ctx in st.session_state.selected_contexts:
             st.markdown(f"- {ctx_names.get(ctx, ctx)}")
+
