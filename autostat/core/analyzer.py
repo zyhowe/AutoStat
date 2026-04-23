@@ -179,6 +179,11 @@ class AutoStatisticalAnalyzer:
             self.data, self.variable_types, self.quality_report,
             self.time_series_diagnostics
         )
+        self.recommendation_analyzer.set_date_info(
+            self.date_derived_columns,
+            self.date_column_mapping,
+            self.date_original_columns
+        )
 
         if not quiet:
             print("\n" + "=" * 70)
@@ -401,6 +406,8 @@ class AutoStatisticalAnalyzer:
     def auto_time_series_analysis(self, max_numeric=10, group_by='auto'):
         self.timeseries_analyzer.auto_time_series_analysis(max_numeric, group_by)
         self.time_series_diagnostics = self.timeseries_analyzer.time_series_diagnostics
+        # 同步更新 recommendation_analyzer
+        self.recommendation_analyzer.time_series_diagnostics = self.time_series_diagnostics
 
     def auto_analyze_relationships(self):
         self.relationship_analyzer.auto_analyze_relationships()

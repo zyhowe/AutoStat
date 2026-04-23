@@ -81,7 +81,7 @@ def generate_model_name(task_type: str, target_col: str, model_key: str) -> str:
 
 
 def get_available_features(data: pd.DataFrame, variable_types: Dict) -> List[str]:
-    """获取可用的特征列"""
+    """获取可用的特征列（不限制数量）"""
     numeric_cols = [col for col, info in variable_types.items() if info.get('type') == 'continuous']
     categorical_cols = [col for col, info in variable_types.items()
                         if info.get('type') in ['categorical', 'categorical_numeric', 'ordinal']]
@@ -94,7 +94,7 @@ def get_available_features(data: pd.DataFrame, variable_types: Dict) -> List[str
 
 
 def get_model_recommendations_from_json(json_data: Dict) -> List[Dict]:
-    """从分析结果中获取模型推荐"""
+    """从分析结果中获取模型推荐（全部返回，不限制）"""
     return json_data.get('model_recommendations', [])
 
 

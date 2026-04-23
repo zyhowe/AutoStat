@@ -1,10 +1,12 @@
+# web/services/recommendation_service.py
+
 """
-推荐服务 - 智能参数推荐
+推荐服务 - 智能参数推荐（不限制特征数量）
 """
 
 import pandas as pd
 import os
-from typing import Dict, Any, Tuple, Optional
+from typing import Dict, Any, Tuple, Optional, List
 
 
 class RecommendationService:
@@ -59,7 +61,7 @@ class RecommendationService:
             date_features_level = "none"
 
         # 推荐自动清洗
-        auto_clean = file_size_mb < 50  # 小文件自动清洗
+        auto_clean = file_size_mb < 50
 
         # 推荐输出级别
         if n_rows > 10000:
@@ -103,11 +105,11 @@ class RecommendationService:
         return best_target, task_type
 
     @staticmethod
-    def get_recommended_features(df: pd.DataFrame, target_col: str = None, max_features: int = 20) -> list:
+    def get_recommended_features(df: pd.DataFrame, target_col: str = None) -> List[str]:
         """
-        推荐特征列
+        推荐特征列（不限制数量）
 
-        返回: 特征列名列表
+        返回: 特征列名列表（全部，不截断）
         """
         # 排除目标列
         exclude_cols = [target_col] if target_col else []
@@ -140,17 +142,16 @@ class RecommendationService:
                     if not pd.isna(corr):
                         numeric_corrs.append((col, abs(corr)))
             numeric_corrs.sort(key=lambda x: x[1], reverse=True)
-            numeric_cols = [c for c, _ in numeric_corrs[:15]]
+            numeric_cols = [c for c, _ in numeric_corrs]  # 不限制数量
 
         # 合并，优先数值列
         features = numeric_cols + cat_cols
 
-        return features[:max_features]
+        return features
 
     @staticmethod
     def should_auto_analyze(file_size_mb: float, n_rows: int) -> bool:
         """
         判断是否应该自动开始分析
         """
-        # 小文件自动分析，大文件需要用户确认
         return file_size_mb < 50 and n_rows < 100000

@@ -94,7 +94,7 @@ def render_model_training():
 
 def render_model_recommendations(json_data: Dict, data: pd.DataFrame,
                                   available_cols: List[str], variable_types: Dict):
-    """模型推荐标签页"""
+    """模型推荐标签页 - 不限制推荐数量，特征全部列出"""
     st.markdown("基于数据分析结果，自动推荐适合的模型。点击「使用」快速填充到下方表单")
 
     n_samples = len(data)
@@ -113,7 +113,8 @@ def render_model_recommendations(json_data: Dict, data: pd.DataFrame,
     model_recommendations = get_model_recommendations_from_json(json_data)
 
     if model_recommendations:
-        for i, rec in enumerate(model_recommendations[:5]):
+        # 不限制数量，全部显示
+        for i, rec in enumerate(model_recommendations):
             priority = rec.get('priority', '中')
             priority_icon = "🔴" if priority == "高" else "🟠" if priority == "中" else "🟢"
 
@@ -134,9 +135,8 @@ def render_model_recommendations(json_data: Dict, data: pd.DataFrame,
                     if feature_cols:
                         valid_features = [f for f in feature_cols if f in available_cols]
                         if valid_features:
-                            feature_str = ', '.join(valid_features[:5])
-                            if len(valid_features) > 5:
-                                feature_str += f'... 等{len(valid_features)}个'
+                            # 全部列出，不截断
+                            feature_str = ', '.join(valid_features)
                             st.caption(f"推荐特征: {feature_str}")
                         else:
                             st.caption("推荐特征: 自动选择所有可用特征")
@@ -182,7 +182,8 @@ def render_model_recommendations(json_data: Dict, data: pd.DataFrame,
                         valid_features = [f for f in recommended_features if f in available_cols]
                         if not valid_features:
                             target = rec.get('target_column', '')
-                            valid_features = [col for col in available_cols if col != target][:20]
+                            # 不限制特征数量
+                            valid_features = [col for col in available_cols if col != target]
 
                         model_params = get_model_params(task_type, model_key)
                         default_params = {}
@@ -204,7 +205,7 @@ def render_model_recommendations(json_data: Dict, data: pd.DataFrame,
         st.info("暂无模型推荐")
 
 
-# web/components/model_training.py
+# web/components/model_training.py (续)
 
 def render_model_creation(data: pd.DataFrame, available_cols: List[str],
                           variable_types: Dict, session_id: str):
@@ -226,9 +227,9 @@ def render_model_creation(data: pd.DataFrame, available_cols: List[str],
                     if st.button("✅ 使用推荐配置", key="use_recommended_target", use_container_width=True):
                         st.session_state.auto_fill_target_col = recommended_target
                         st.session_state.auto_fill_task_type = recommended_task
-                        # 同时推荐特征
+                        # 同时推荐特征（不限制数量）
                         recommended_features = RecommendationService.get_recommended_features(
-                            data, recommended_target, max_features=20
+                            data, recommended_target
                         )
                         st.session_state.auto_fill_features = recommended_features
                         st.rerun()
@@ -285,12 +286,12 @@ def render_model_creation(data: pd.DataFrame, available_cols: List[str],
         if FeatureFlags.is_enabled("smart_target") and st.session_state.get("auto_fill_features"):
             st.session_state.train_features_selected = st.session_state.auto_fill_features
         else:
-            # 默认选择所有数值列
+            # 默认选择所有数值列（不限制数量）
             numeric_cols = data.select_dtypes(include=['int64', 'float64']).columns.tolist()
             target = st.session_state.train_target_col_selected
             if target and target in numeric_cols:
                 numeric_cols.remove(target)
-            st.session_state.train_features_selected = numeric_cols[:20]
+            st.session_state.train_features_selected = numeric_cols  # 不限制
 
     if 'train_model_key_selected' not in st.session_state:
         st.session_state.train_model_key_selected = "random_forest"
@@ -356,11 +357,11 @@ def render_model_creation(data: pd.DataFrame, available_cols: List[str],
 
     st.caption(f"已选择 {len(selected_features)} 个特征")
 
-    # 智能特征推荐提示
+    # 智能特征推荐提示（不限制数量）
     if FeatureFlags.is_enabled("smart_target") and target_col:
-        recommended_features = RecommendationService.get_recommended_features(data, target_col, max_features=10)
+        recommended_features = RecommendationService.get_recommended_features(data, target_col)
         if recommended_features and set(recommended_features) - set(selected_features):
-            st.info(f"💡 推荐特征：{', '.join(recommended_features[:5])}")
+            st.info(f"💡 推荐特征：{', '.join(recommended_features)}")
             if st.button("使用推荐特征"):
                 st.session_state.train_features_selected = recommended_features
                 st.rerun()
@@ -669,7 +670,7 @@ def render_model_inference(session_id: str):
             st.warning("模型没有特征列，无法进行推理")
             return
 
-        st.info(f"特征列 ({len(features)}个): {', '.join(features[:8])}{'...' if len(features) > 8 else ''}")
+        st.info(f"特征列 ({len(features)}个): {', '.join(features)}")
 
         with st.expander("📊 模型评估指标", expanded=False):
             train_score = metrics.get("train_score", {})
@@ -684,7 +685,7 @@ def render_model_inference(session_id: str):
 
         input_data = {}
         cols = st.columns(2)
-        for i, feature in enumerate(features[:16]):
+        for i, feature in enumerate(features):
             with cols[i % 2]:
                 if feature in categorical_features:
                     input_data[feature] = st.text_input(
@@ -700,9 +701,6 @@ def render_model_inference(session_id: str):
                         format="%.4f",
                         key=f"infer_{feature}_{selected_model_key[:10]}"
                     )
-
-        if len(features) > 16:
-            st.caption(f"... 还有 {len(features) - 16} 个特征未显示")
 
         if st.button("🔍 执行推理", type="primary", use_container_width=True):
             valid_data = {}
