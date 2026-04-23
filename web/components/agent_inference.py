@@ -67,6 +67,8 @@ class ModelInferenceTool:
             return {"success": False, "error": str(e)}
 
 
+# web/components/agent_inference.py (在 render_agent_inference 函数末尾添加)
+
 def render_agent_inference():
     """渲染推理预测界面 - 显示模型列表和示例按钮"""
     st.markdown("#### 🔮 推理预测")
@@ -82,47 +84,66 @@ def render_agent_inference():
 
     if not available_models:
         st.info("暂无已训练的模型，请先在「小模型训练」中训练模型")
-        return
+    else:
+        st.markdown("**📋 可用模型及示例：**")
+        for model in available_models:
+            model_name = model.get('user_model_name', model.get('model_key'))
+            model_key = model.get('model_key')
+            task_type = model.get('task_type', 'unknown')
+            target = model.get('target_column', '未知')
+            features = model.get('features', [])
 
-    st.markdown("**📋 可用模型及示例：**")
+            with st.expander(f"📊 {model_name}", expanded=False):
+                st.caption(f"类型: {task_type}, 预测目标: {target}")
+                st.caption(f"特征: {', '.join(features[:8])}{'...' if len(features) > 8 else ''}")
 
-    for model in available_models:
-        model_name = model.get('user_model_name', model.get('model_key'))
-        model_key = model.get('model_key')
-        task_type = model.get('task_type', 'unknown')
-        target = model.get('target_column', '未知')
-        features = model.get('features', [])
+                if features:
+                    sample_values = {}
+                    for f in features[:3]:
+                        if '年龄' in f or 'age' in f.lower():
+                            sample_values[f] = 35
+                        elif '收入' in f or 'income' in f.lower():
+                            sample_values[f] = 50000
+                        elif '销售额' in f or 'sales' in f.lower():
+                            sample_values[f] = 8000
+                        elif '收缩压' in f or 'systolic' in f.lower():
+                            sample_values[f] = 120
+                        elif '舒张压' in f or 'diastolic' in f.lower():
+                            sample_values[f] = 80
+                        elif '心率' in f or 'heart' in f.lower():
+                            sample_values[f] = 75
+                        else:
+                            sample_values[f] = 100
 
-        with st.expander(f"📊 {model_name}", expanded=False):
-            st.caption(f"类型: {task_type}, 预测目标: {target}")
-            st.caption(f"特征: {', '.join(features[:8])}{'...' if len(features) > 8 else ''}")
+                    sample_text = f"用「{model_name}」预测"
+                    for f, v in sample_values.items():
+                        sample_text += f"、{f}{v}"
+                    sample_text += f"的{target}"
 
-            if features:
-                sample_values = {}
-                for f in features[:3]:
-                    if '年龄' in f or 'age' in f.lower():
-                        sample_values[f] = 35
-                    elif '收入' in f or 'income' in f.lower():
-                        sample_values[f] = 50000
-                    elif '销售额' in f or 'sales' in f.lower():
-                        sample_values[f] = 8000
-                    elif '收缩压' in f or 'systolic' in f.lower():
-                        sample_values[f] = 120
-                    elif '舒张压' in f or 'diastolic' in f.lower():
-                        sample_values[f] = 80
-                    elif '心率' in f or 'heart' in f.lower():
-                        sample_values[f] = 75
-                    else:
-                        sample_values[f] = 100
+                    if st.button(f"🔍 {sample_text}", key=f"example_{model_key}", use_container_width=True):
+                        st.session_state.pending_question = sample_text
+                        st.rerun()
 
-                sample_text = f"用「{model_name}」预测"
-                for f, v in sample_values.items():
-                    sample_text += f"、{f}{v}"
-                sample_text += f"的{target}"
+    # ========== 新增：内置分析示例（无需训练） ==========
+    st.markdown("---")
+    st.markdown("**📌 内置分析示例（无需训练）：**")
 
-                if st.button(f"🔍 {sample_text}", key=f"example_{model_key}", use_container_width=True):
-                    st.session_state.pending_question = sample_text
-                    st.rerun()
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        if st.button("🔘 对数据进行聚类分析", use_container_width=True):
+            st.session_state.pending_action = "cluster"
+            st.rerun()
+
+    with col2:
+        if st.button("🔗 挖掘分类变量间的关联规则", use_container_width=True):
+            st.session_state.pending_action = "association"
+            st.rerun()
+
+    with col3:
+        if st.button("🚨 检测异常值并分析", use_container_width=True):
+            st.session_state.pending_action = "outlier"
+            st.rerun()
 
 
 def parse_and_execute_tool(response: str, session_id: str) -> str:

@@ -20,6 +20,7 @@ class FeatureFlags:
         # 用户体验优化
         "demo_data": True,
         "auto_analysis": False,  # 默认关闭
+        "auto_training": False,
         "value_preview": True,
         "empty_state_guide": True,
         "smart_summary": True,
@@ -141,3 +142,14 @@ class FeatureFlags:
     def set_auto_analysis(cls, enabled: bool):
         """设置自动分析开关"""
         cls.set_flag("auto_analysis", enabled)
+
+    # 添加便捷方法
+    @classmethod
+    def is_auto_training_enabled(cls) -> bool:
+        """检查自动训练是否开启"""
+        return cls.is_enabled("auto_training")
+
+    @classmethod
+    def set_auto_training(cls, enabled: bool):
+        """设置自动训练开关"""
+        cls.set_flag("auto_training", enabled)

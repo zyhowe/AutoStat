@@ -462,13 +462,13 @@ MODEL_REGISTRY = {
     "time_series": {
         "arima": {
             "name": "ARIMA",
-            "class": "ARIMA",
-            "module": "statsmodels.tsa.arima.model",
+            "class": "ARIMAWrapper",
+            "module": "autostat.models.arima_wrapper",
             "description": "自回归积分移动平均，经典时序模型",
             "params": {
-                "p": {"type": "int", "default": 1, "range": [0, 5], "description": "自回归阶数"},
-                "d": {"type": "int", "default": 1, "range": [0, 2], "description": "差分阶数"},
-                "q": {"type": "int", "default": 1, "range": [0, 5], "description": "移动平均阶数"}
+                "p": {"type": "int", "default": 1, "range": [0, 5], "description": "自回归阶数 (AR)"},
+                "d": {"type": "int", "default": 1, "range": [0, 2], "description": "差分阶数 (I)"},
+                "q": {"type": "int", "default": 1, "range": [0, 5], "description": "移动平均阶数 (MA)"}
             },
             "requirements": ["statsmodels"]
         },

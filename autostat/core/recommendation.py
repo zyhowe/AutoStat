@@ -41,47 +41,33 @@ class RecommendationAnalyzer:
 
     def _is_same_source(self, col1: str, col2: str) -> bool:
         """判断两个列是否同源（来自同一个原始日期列）"""
-        # 获取原始列
         original1 = self.date_column_mapping.get(col1, col1)
         original2 = self.date_column_mapping.get(col2, col2)
 
-        # 如果相同，则同源
         if original1 == original2:
             return True
-
-        # 如果一个的原始列等于另一个本身
         if original1 == col2 or original2 == col1:
             return True
-
         return False
 
     def _should_exclude_target(self, col: str) -> bool:
         """判断是否应该排除该列作为预测目标（派生列不推荐作为目标）"""
-        # 派生列不推荐作为预测目标
         if self._is_derived_column(col):
             return True
         return False
 
     def _should_exclude_pair(self, col1: str, col2: str) -> bool:
         """判断是否应该排除这一对"""
-        # 1. 如果两个都是派生列且同源，排除
         if self._is_derived_column(col1) and self._is_derived_column(col2):
             if self._is_same_source(col1, col2):
                 return True
-
-        # 2. 如果一个是派生列，一个是其原列，排除
         if self._is_derived_column(col1) and self._is_original_datetime(col2):
             if self.date_column_mapping.get(col1) == col2:
                 return True
         if self._is_derived_column(col2) and self._is_original_datetime(col1):
             if self.date_column_mapping.get(col2) == col1:
                 return True
-
         return False
-
-    def _get_all_derived_targets(self) -> Set[str]:
-        """获取所有派生列（这些不应该作为预测目标）"""
-        return self.date_derived_columns.copy()
 
     def recommend_scenarios(self):
         """场景推荐 - 输出所有符合条件的分析任务"""
@@ -102,14 +88,12 @@ class RecommendationAnalyzer:
         print(f"  • 分类变量: {len(categorical_vars)} 个")
         print(f"  • 日期变量: {len(datetime_vars)} 个")
 
-        # 获取所有推荐（不限个数）
         recommendations = self._get_all_recommendations(numeric_vars, categorical_vars, datetime_vars)
 
         if not recommendations:
             print("\n⚠️ 未发现适合的分析任务")
             return
 
-        # 排序
         recommendations = self._sort_recommendations(recommendations)
 
         print("\n\n【🎯 详细分析建议】")
@@ -122,7 +106,6 @@ class RecommendationAnalyzer:
             if rec.get('target'):
                 print(f"  🎯 目标：{rec['target']}")
             if rec.get('features'):
-                # 全部列出，不截断
                 feature_str = ', '.join(rec['features'])
                 print(f"  📊 特征：{feature_str}")
             if rec.get('traditional'):
@@ -143,29 +126,23 @@ class RecommendationAnalyzer:
         """获取所有符合条件的推荐（不限个数）"""
         recommendations = []
 
-        # 1. 时序预测（优先级最高）
         ts_recs = self._get_time_series_recommendations(numeric_vars, datetime_vars)
         recommendations.extend(ts_recs)
 
-        # 2. 回归预测（单特征 + 多特征组合）
         regression_recs = self._get_regression_recommendations(numeric_vars)
         recommendations.extend(regression_recs)
 
-        # 3. 分类预测（数值→分类 + 分类→分类，单特征 + 多特征组合）
         classification_recs = self._get_classification_recommendations(numeric_vars, categorical_vars)
         recommendations.extend(classification_recs)
 
-        # 4. 聚类分析
         clustering_recs = self._get_clustering_recommendations(numeric_vars)
         if clustering_recs:
             recommendations.append(clustering_recs)
 
-        # 5. 关联规则挖掘
         association_recs = self._get_association_recommendations(categorical_vars)
         if association_recs:
             recommendations.append(association_recs)
 
-        # 6. 异常检测
         anomaly_recs = self._get_anomaly_detection_recommendations()
         if anomaly_recs:
             recommendations.append(anomaly_recs)
@@ -176,13 +153,11 @@ class RecommendationAnalyzer:
         """按优先级排序推荐列表"""
         def get_priority(rec):
             task_type = rec.get('task_type', '')
-            # 优先级权重
             if '时间序列预测' in task_type:
                 return 1
             elif '回归预测' in task_type and '多特征' in rec.get('title', ''):
                 return 2
             elif '回归预测' in task_type:
-                # 获取相关系数
                 reason = rec.get('reason', '')
                 import re
                 match = re.search(r'r=([0-9.]+)', reason)
@@ -196,7 +171,6 @@ class RecommendationAnalyzer:
             elif '分类预测' in task_type and '多特征' in rec.get('title', ''):
                 return 4
             elif '分类预测' in task_type:
-                # 获取效应量
                 reason = rec.get('reason', '')
                 import re
                 match = re.search(r'V=([0-9.]+)', reason)
@@ -232,7 +206,6 @@ class RecommendationAnalyzer:
             if not diag.get('has_autocorrelation'):
                 continue
 
-            # 解析变量名（可能包含分组信息，如 "血糖_女"）
             if '_' in var_name:
                 parts = var_name.rsplit('_', 1)
                 base_var = parts[0]
@@ -246,17 +219,17 @@ class RecommendationAnalyzer:
                 description = f"检测到「{base_var}」有显著自相关"
 
             recommendations.append({
-                "task_type": "📅 时间序列预测",
+                "task_type": "时间序列预测",
                 "title": title,
                 "description": description,
                 "target": base_var,
                 "group": group,
                 "features": [base_var],
                 "traditional": "ARIMA / SARIMA / ETS / 指数平滑",
-                "ml": "Prophet / LightGBM with time features / XGBoost with lags",
+                "ml": "ARIMA / SARIMA / ETS / 指数平滑",
                 "dl": "LSTM / GRU / Transformer / TCN / N-BEATS",
                 "llm": "TimeGPT / TimesFM / LLM-Time",
-                "reason": f"自相关检验 p={diag.get('lb_p', 0):.4f}，历史数据可预测未来",
+                "reason": f"自相关检验 p={diag.get('lb_p', 0):.4f}，该变量具有显著自相关性，可用自身历史值预测未来趋势",
                 "caution": "⚠️ 需要确保时间顺序正确；⚠️ 注意数据平稳性，可能需要差分"
             })
 
@@ -270,16 +243,14 @@ class RecommendationAnalyzer:
         if len(numeric_vars) < 2:
             return recommendations
 
-        # 计算相关系数矩阵
         valid_numeric = [col for col in numeric_vars if col in self.data.columns]
         if len(valid_numeric) < 2:
             return recommendations
 
         corr_matrix = self.data[valid_numeric].corr()
 
-        # 存储所有显著相关的配对
-        significant_pairs = []  # (var1, var2, corr_value, p_value)
-        target_to_features = {}  # {target: [(feature, corr), ...]}
+        significant_pairs = []
+        target_to_features = {}
 
         for i in range(len(corr_matrix.columns)):
             for j in range(i + 1, len(corr_matrix.columns)):
@@ -292,11 +263,9 @@ class RecommendationAnalyzer:
 
                 abs_corr = abs(corr_value)
 
-                # 阈值 0.3
                 if abs_corr < 0.3:
                     continue
 
-                # 计算 p 值
                 valid_data = self.data[[var1, var2]].dropna()
                 if len(valid_data) < 3:
                     continue
@@ -313,7 +282,6 @@ class RecommendationAnalyzer:
                 if p_value >= 0.05:
                     continue
 
-                # 确定目标（方差较大的作为目标）
                 var1_std = self.data[var1].std()
                 var2_std = self.data[var2].std()
                 if var1_std > var2_std:
@@ -331,18 +299,16 @@ class RecommendationAnalyzer:
                     'p_value': p_value
                 })
 
-                # 构建 target -> features 映射（用于多特征组合）
                 if target not in target_to_features:
                     target_to_features[target] = []
                 target_to_features[target].append((feature, abs_corr))
 
-        # 生成单特征推荐
         for pair in significant_pairs:
             strength = "强" if pair['abs_corr'] > 0.7 else "中" if pair['abs_corr'] > 0.5 else "弱"
             direction = "正" if pair['corr'] > 0 else "负"
 
             recommendations.append({
-                "task_type": "📈 回归预测",
+                "task_type": "回归预测",
                 "title": f"{pair['target']} ← {pair['feature']}",
                 "description": f"「{pair['target']}」与「{pair['feature']}」呈{strength}{direction}相关（r={pair['corr']:.3f}）",
                 "target": pair['target'],
@@ -355,45 +321,39 @@ class RecommendationAnalyzer:
                 "caution": "⚠️ 相关性不代表因果，建议结合业务理解"
             })
 
-        # 生成多特征组合推荐（只针对非派生列目标）
         multi_feature_recs = self._build_multi_feature_regression(target_to_features, numeric_vars)
         recommendations.extend(multi_feature_recs)
 
         return recommendations
 
     def _build_multi_feature_regression(self, target_to_features: Dict[str, List], numeric_vars: List) -> List[Dict]:
-        """构建回归多特征组合推荐（只针对非派生列目标）"""
+        """构建回归多特征组合推荐"""
         recommendations = []
 
         for target, features in target_to_features.items():
-            # 排除派生列作为目标
             if self._should_exclude_target(target):
                 continue
 
-            # 按相关系数排序
             features_sorted = sorted(features, key=lambda x: x[1], reverse=True)
 
-            # 收集所有特征（不限制数量），排除派生列
             all_features = []
             for f, _ in features_sorted:
                 if not self._is_derived_column(f):
                     all_features.append(f)
 
-            # 去重去冗余
             all_features = self._deduplicate_features(all_features, target, task_type='regression')
 
             if len(all_features) < 2:
                 continue
 
-            # 生成原因描述（全部列出）
             reason_parts = []
             for f, corr in features_sorted:
                 if not self._is_derived_column(f):
                     reason_parts.append(f"{f}(r={corr:.3f})")
-            reason_str = "、".join(reason_parts)
+            reason_str = '、'.join(reason_parts)
 
             recommendations.append({
-                "task_type": "📈 回归预测",
+                "task_type": "回归预测",
                 "title": f"预测 {target}（多特征组合）",
                 "description": f"基于 {len(all_features)} 个特征预测「{target}」",
                 "target": target,
@@ -410,21 +370,18 @@ class RecommendationAnalyzer:
 
     # ==================== 3. 分类预测 ====================
     def _get_classification_recommendations(self, numeric_vars, categorical_vars) -> List[Dict]:
-        """获取分类预测推荐（数值→分类 + 分类→分类，单特征 + 多特征组合）"""
+        """获取分类预测推荐"""
         recommendations = []
 
         if not categorical_vars:
             return recommendations
 
-        # 3.1 数值 → 分类（只推荐非派生列作为目标）
         eta_recs, eta_target_to_features = self._get_numeric_to_categorical_recs(numeric_vars, categorical_vars)
         recommendations.extend(eta_recs)
 
-        # 3.2 分类 → 分类（只推荐非派生列作为目标）
         cramer_recs, cramer_target_to_features = self._get_categorical_to_categorical_recs(categorical_vars)
         recommendations.extend(cramer_recs)
 
-        # 3.3 多特征组合推荐（数值→分类）
         if eta_target_to_features:
             multi_recs = self._build_multi_feature_classification(
                 eta_target_to_features,
@@ -434,7 +391,6 @@ class RecommendationAnalyzer:
             )
             recommendations.extend(multi_recs)
 
-        # 3.4 多特征组合推荐（分类→分类）
         if cramer_target_to_features:
             multi_recs = self._build_multi_feature_classification(
                 cramer_target_to_features,
@@ -447,9 +403,9 @@ class RecommendationAnalyzer:
         return recommendations
 
     def _get_numeric_to_categorical_recs(self, numeric_vars, categorical_vars) -> Tuple[List[Dict], Dict[str, List]]:
-        """数值 → 分类：基于 Eta-squared >= 0.1，返回推荐列表和 target->features 映射"""
+        """数值 → 分类：基于 Eta-squared >= 0.1"""
         recommendations = []
-        target_to_features = {}  # {categorical_target: [(numeric_feature, eta_sq), ...]}
+        target_to_features = {}
 
         if not numeric_vars or not categorical_vars:
             return recommendations, target_to_features
@@ -462,15 +418,12 @@ class RecommendationAnalyzer:
                 if cat_var not in self.data.columns:
                     continue
 
-                # 排除派生列作为目标
                 if self._should_exclude_target(cat_var):
                     continue
 
-                # 过滤同源派生列配对
                 if self._should_exclude_pair(num_var, cat_var):
                     continue
 
-                # 计算 Eta-squared
                 groups = [self.data[self.data[cat_var] == name][num_var].dropna()
                           for name in self.data[cat_var].unique()
                           if len(self.data[self.data[cat_var] == name]) > 1]
@@ -484,14 +437,14 @@ class RecommendationAnalyzer:
                 ss_total = sum((all_values - all_values.mean()) ** 2)
                 eta_sq = ss_between / ss_total if ss_total > 0 else 0
 
-                if eta_sq < 0.1:  # 阈值 0.1
+                if eta_sq < 0.1:
                     continue
 
                 n_classes = self.data[cat_var].nunique()
                 strength = "强" if eta_sq > 0.2 else "中"
 
                 recommendations.append({
-                    "task_type": "📊 分类预测",
+                    "task_type": "分类预测",
                     "title": f"预测 {cat_var}（基于 {num_var}）",
                     "description": f"「{cat_var}」的组间差异可解释「{num_var}」{eta_sq * 100:.1f}% 的变异",
                     "target": cat_var,
@@ -504,7 +457,6 @@ class RecommendationAnalyzer:
                     "caution": "⚠️ 可尝试加入更多特征提升效果"
                 })
 
-                # 记录用于多特征组合
                 if cat_var not in target_to_features:
                     target_to_features[cat_var] = []
                 target_to_features[cat_var].append((num_var, eta_sq))
@@ -512,11 +464,11 @@ class RecommendationAnalyzer:
         return recommendations, target_to_features
 
     def _get_categorical_to_categorical_recs(self, categorical_vars) -> Tuple[List[Dict], Dict[str, List]]:
-        """分类 → 分类：基于 Cramer's V >= 0.3 且 p<0.05，返回推荐列表和 target->features 映射"""
+        """分类 → 分类：基于 Cramer's V >= 0.3 且 p<0.05"""
         from scipy.stats import chi2_contingency
 
         recommendations = []
-        target_to_features = {}  # {target: [(feature, cramer_v), ...]}
+        target_to_features = {}
 
         if len(categorical_vars) < 2:
             return recommendations, target_to_features
@@ -532,15 +484,12 @@ class RecommendationAnalyzer:
                 if pair_key in processed_pairs:
                     continue
 
-                # 排除派生列作为目标
                 target_candidate1 = None if self._should_exclude_target(var1) else var1
                 target_candidate2 = None if self._should_exclude_target(var2) else var2
 
-                # 如果两个都是派生列，跳过
                 if target_candidate1 is None and target_candidate2 is None:
                     continue
 
-                # 过滤同源派生列配对
                 if self._should_exclude_pair(var1, var2):
                     continue
 
@@ -561,7 +510,7 @@ class RecommendationAnalyzer:
                     min_dim = min(crosstab.shape) - 1
                     cramer_v = np.sqrt(chi2 / (n * min_dim)) if min_dim > 0 else 0
 
-                    if cramer_v < 0.3:  # 阈值 0.3
+                    if cramer_v < 0.3:
                         continue
 
                     processed_pairs.add(pair_key)
@@ -570,9 +519,7 @@ class RecommendationAnalyzer:
                     n_classes1 = self.data[var1].nunique()
                     n_classes2 = self.data[var2].nunique()
 
-                    # 优先选择非派生列作为目标
                     if target_candidate1 is not None and target_candidate2 is not None:
-                        # 两者都是非派生列，选择类别数较少的
                         if n_classes1 <= n_classes2:
                             target = var1
                             feature = var2
@@ -587,7 +534,7 @@ class RecommendationAnalyzer:
                         feature = var1
 
                     recommendations.append({
-                        "task_type": "📊 分类预测",
+                        "task_type": "分类预测",
                         "title": f"预测 {target}（基于 {feature}）",
                         "description": f"「{target}」与「{feature}」呈{strength}关联（Cramer's V={cramer_v:.3f}）",
                         "target": target,
@@ -600,7 +547,6 @@ class RecommendationAnalyzer:
                         "caution": "⚠️ 可尝试加入更多特征提升效果"
                     })
 
-                    # 记录用于多特征组合（只记录非派生列作为目标）
                     if not self._should_exclude_target(target):
                         if target not in target_to_features:
                             target_to_features[target] = []
@@ -615,24 +561,20 @@ class RecommendationAnalyzer:
                                               numeric_vars: List,
                                               categorical_vars: List,
                                               task_type: str = 'numeric_to_categorical') -> List[Dict]:
-        """构建分类多特征组合推荐（只针对非派生列目标）"""
+        """构建分类多特征组合推荐"""
         recommendations = []
 
         for target, features in target_to_features.items():
-            # 排除派生列作为目标
             if self._should_exclude_target(target):
                 continue
 
-            # 按效应量排序
             features_sorted = sorted(features, key=lambda x: x[1], reverse=True)
 
-            # 收集所有特征（不限制数量），排除派生列
             all_features = []
             for f, _ in features_sorted:
                 if not self._is_derived_column(f):
                     all_features.append(f)
 
-            # 去重去冗余
             all_features = self._deduplicate_features(all_features, target, task_type='classification')
 
             if len(all_features) < 2:
@@ -640,16 +582,15 @@ class RecommendationAnalyzer:
 
             n_classes = self.data[target].nunique() if target in self.data.columns else 2
 
-            # 生成原因描述（全部列出）
             reason_parts = []
             metric_name = "η²" if task_type == 'numeric_to_categorical' else "V"
             for f, val in features_sorted:
                 if not self._is_derived_column(f):
                     reason_parts.append(f"{f}({metric_name}={val:.3f})")
-            reason_str = "、".join(reason_parts)
+            reason_str = '、'.join(reason_parts)
 
             recommendations.append({
-                "task_type": "📊 分类预测",
+                "task_type": "分类预测",
                 "title": f"预测 {target}（多特征组合）",
                 "description": f"基于 {len(all_features)} 个特征预测「{target}」",
                 "target": target,
@@ -665,19 +606,16 @@ class RecommendationAnalyzer:
         return recommendations
 
     def _deduplicate_features(self, features: List[str], target: str, task_type: str = 'regression') -> List[str]:
-        """去重去冗余：同源派生列去重，高相关特征去冗余"""
+        """去重去冗余"""
         if len(features) <= 1:
             return features
 
-        # 1. 同源派生列去重
-        # 优先级：原列 > 月份 > 季度 > 年 > 周 > 日
         priority = {'': 0, 'month': 1, 'quarter': 2, 'year': 3, 'week': 4, 'day': 5, 'weekday': 6, 'is_weekend': 7}
 
-        source_groups = {}  # {original_col: [(feature, priority)]}
+        source_groups = {}
 
         for f in features:
             original = self.date_column_mapping.get(f, f)
-            # 计算优先级
             p = 99
             for suffix, pri in priority.items():
                 if suffix and f.endswith(f'_{suffix}'):
@@ -692,16 +630,13 @@ class RecommendationAnalyzer:
 
         deduped = []
         for original, group in source_groups.items():
-            # 按优先级排序，取优先级最高的
             group.sort(key=lambda x: x[1])
             deduped.append(group[0][0])
 
         if len(deduped) <= 1:
             return deduped
 
-        # 2. 高相关特征去冗余（特征间相关系数 > 0.7，只保留与目标相关性更高的）
         if task_type == 'regression' and target in self.data.columns:
-            # 计算每个特征与目标的相关性
             target_corr = {}
             for f in deduped:
                 if f in self.data.columns and self.data[f].dtype in ['int64', 'float64']:
@@ -713,21 +648,18 @@ class RecommendationAnalyzer:
                 else:
                     target_corr[f] = 0
 
-            # 检查特征间相关性
             to_remove = set()
             for i in range(len(deduped)):
                 for j in range(i + 1, len(deduped)):
                     f1, f2 = deduped[i], deduped[j]
                     if f1 in to_remove or f2 in to_remove:
                         continue
-                    # 计算特征间相关性
                     if f1 in self.data.columns and f2 in self.data.columns:
                         if self.data[f1].dtype in ['int64', 'float64'] and self.data[f2].dtype in ['int64', 'float64']:
                             valid_data = self.data[[f1, f2]].dropna()
                             if len(valid_data) > 0:
                                 corr = abs(valid_data.corr().iloc[0, 1])
                                 if corr > 0.7:
-                                    # 保留与目标相关性更高的
                                     if target_corr.get(f1, 0) < target_corr.get(f2, 0):
                                         to_remove.add(f1)
                                     else:
@@ -775,7 +707,6 @@ class RecommendationAnalyzer:
         if n_samples < 100:
             return None
 
-        # 检查数值变量是否有足够变异
         valid_vars = []
         for col in numeric_vars:
             if col in self.data.columns and self.data[col].std() > 0:
@@ -785,12 +716,12 @@ class RecommendationAnalyzer:
             return None
 
         return {
-            "task_type": "🔘 聚类分析",
+            "task_type": "聚类分析",
             "title": f"基于{len(valid_vars)}个数值指标进行分群",
             "description": f"数据包含 {len(valid_vars)} 个数值指标，样本量 {n_samples}，适合进行聚类分析",
             "features": valid_vars,
             "traditional": "K-Means / 层次聚类",
-            "ml": "DBSCAN / Gaussian Mixture / BIRCH",
+            "ml": "K-Means / 层次聚类 / DBSCAN",
             "dl": "Deep Clustering / DEC",
             "llm": "LLM+Embedding + 聚类",
             "reason": f"{len(valid_vars)}个数值特征，{n_samples}个样本，可识别用户/患者分群",
@@ -803,7 +734,6 @@ class RecommendationAnalyzer:
         if len(categorical_vars) < 3:
             return None
 
-        # 过滤掉类别数过多的变量
         valid_vars = []
         for col in categorical_vars:
             if col in self.data.columns:
@@ -815,12 +745,12 @@ class RecommendationAnalyzer:
             return None
 
         return {
-            "task_type": "🔗 关联规则挖掘",
+            "task_type": "关联规则挖掘",
             "title": f"发现{len(valid_vars)}个分类变量间的关联模式",
             "description": f"数据包含 {len(valid_vars)} 个分类变量，可挖掘频繁项集和关联规则",
             "features": valid_vars,
             "traditional": "Apriori / FP-Growth",
-            "ml": "ECLAT / 关联规则 + 聚类",
+            "ml": "Apriori / FP-Growth / ECLAT",
             "dl": "-",
             "llm": "LLM辅助规则解读",
             "reason": f"{len(valid_vars)}个分类变量，可发现「如果A则B」的关联模式",
@@ -842,7 +772,7 @@ class RecommendationAnalyzer:
             outlier_info.append(f"{col}({info.get('percent', 0):.1f}%)")
 
         return {
-            "task_type": "🚨 异常检测",
+            "task_type": "异常检测",
             "title": f"检测{len(outlier_cols)}个字段的异常值",
             "description": f"发现异常值字段：{', '.join(outlier_info)}",
             "features": outlier_cols[:10],
@@ -859,12 +789,12 @@ class RecommendationAnalyzer:
         all_recs = self._get_all_recommendations(numeric_vars, categorical_vars, datetime_vars)
         all_recs = self._sort_recommendations(all_recs)
 
-        # 转换为 reporter.py 期望的格式
         formatted = []
         for rec in all_recs:
             formatted.append({
                 "priority": self._get_priority(rec.get("task_type", ""), rec),
-                "task_type": rec.get("title", rec.get("task_type", "")),
+                "task_type": rec.get("task_type", ""),
+                "title": rec.get("title", ""),
                 "target_column": rec.get("target", ""),
                 "feature_columns": rec.get("features", []),
                 "traditional": rec.get("traditional", ""),

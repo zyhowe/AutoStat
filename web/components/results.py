@@ -145,7 +145,7 @@ def _export_all_formats(html_content: str, json_str: str, log_content: str):
 
 
 def render_conclusions_section(conclusions: list):
-    """渲染核心结论区域"""
+    """渲染核心结论区域（不限制数量）"""
     st.markdown("""
     <style>
     .conclusions-section {
@@ -167,6 +167,7 @@ def render_conclusions_section(conclusions: list):
     st.markdown('<div class="conclusions-section">', unsafe_allow_html=True)
     st.markdown("## 🎯 核心结论（30秒速览）")
 
+    # 不限制数量，全部显示
     for conclusion in conclusions:
         st.markdown(f"""
         <div class="conclusion-card">

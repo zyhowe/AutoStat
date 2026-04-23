@@ -60,8 +60,11 @@ class ModelTrainer:
         class_name = self.model_info["class"]
 
         try:
-            # 尝试从 autostat.models.deep_learning 导入
-            if module_name == "autostat.models.deep_learning":
+            # ARIMA 包装器
+            if module_name == "autostat.models.arima_wrapper":
+                from autostat.models.arima_wrapper import ARIMAWrapper
+                self.model_class = ARIMAWrapper
+            elif module_name == "autostat.models.deep_learning":
                 from autostat.models.deep_learning import (
                     CNNClassifier, RNNClassifier, LSTMClassifier, BertClassifier,
                     LSTMTimeSeries, GRUTimeSeries, TransformerTimeSeries
@@ -83,6 +86,7 @@ class ModelTrainer:
         import inspect
         sig = inspect.signature(self.model_class.__init__)
         valid_params = {}
+
         for key, value in self.params.items():
             if key in sig.parameters:
                 valid_params[key] = value
@@ -95,7 +99,7 @@ class ModelTrainer:
             return X, None
         return X, y
 
-    def train(self, X_train: np.ndarray, y_train: Optional[np.ndarray] = None,
+    def train(self, X_train, y_train: Optional[np.ndarray] = None,
               X_val: Optional[np.ndarray] = None, y_val: Optional[np.ndarray] = None,
               cv_folds: int = 5, early_stopping: bool = False,
               callbacks: List[Callable] = None) -> Dict[str, Any]:
@@ -116,42 +120,114 @@ class ModelTrainer:
         """
         start_time = time.time()
 
-        # 创建模型
-        self._create_model()
-
         # 准备数据
         X_train, y_train = self._prepare_data(X_train, y_train)
         if X_val is not None:
             X_val, y_val = self._prepare_data(X_val, y_val)
 
-        # 训练
-        if self.task_type == "clustering":
-            # 聚类任务：无监督
-            self.model.fit(X_train)
-            train_score = self._evaluate_clustering(X_train, self.model.labels_)
-        else:
-            # 监督学习
-            if hasattr(self.model, 'fit'):
-                if X_val is not None and y_val is not None and early_stopping:
-                    # 支持验证集和早停
-                    self._fit_with_validation(X_train, y_train, X_val, y_val)
-                else:
-                    self.model.fit(X_train, y_train)
+        # ========== 时间序列任务特殊处理 ==========
+        if self.task_type == "time_series" and self.model_key == "arima":
+            # ARIMA 不需要提前创建模型，直接在 fit 中创建
+            if self.model_class is None:
+                self._load_model_class()
 
-            # 计算训练分数
-            train_score = self._evaluate_supervised(X_train, y_train)
+            # 创建模型实例
+            self.model = self.model_class(**self.params)
+
+            # 训练
+            self.model.fit(X_train)
+            train_score = {
+                "aic": getattr(self.model, 'aic', None),
+                "bic": getattr(self.model, 'bic', None),
+                "message": "ARIMA 训练完成"
+            }
+
+            # 验证集评估
+            val_score = None
+            if X_val is not None:
+                from autostat.models.metrics import MetricsCalculator
+                y_pred = self.model.predict(X_val)
+                val_score = MetricsCalculator.calculate_time_series_metrics(
+                    y_val if y_val is not None else X_val,
+                    y_pred
+                )
+
+            training_time = time.time() - start_time
+
+            result = {
+                "model_key": self.model_key,
+                "model_name": self.model_info["name"],
+                "task_type": self.task_type,
+                "params": self.params,
+                "train_score": train_score,
+                "val_score": val_score,
+                "cv_scores": None,
+                "training_time": training_time,
+                "history": self.history
+            }
+            return result
+
+        # ========== 聚类任务 ==========
+        if self.task_type == "clustering":
+            # 创建模型
+            self._create_model()
+
+            # 训练
+            self.model.fit(X_train)
+
+            # 评估训练结果
+            if hasattr(self.model, 'labels_'):
+                train_score = self._evaluate_clustering(X_train, self.model.labels_)
+            else:
+                train_score = {"message": "聚类训练完成"}
+
+            # 验证集评估
+            val_score = None
+            if X_val is not None and hasattr(self.model, 'predict'):
+                try:
+                    y_pred = self.model.predict(X_val)
+                    val_score = self._evaluate_clustering(X_val, y_pred)
+                except Exception as e:
+                    logger.warning(f"聚类验证失败: {e}")
+
+            training_time = time.time() - start_time
+
+            result = {
+                "model_key": self.model_key,
+                "model_name": self.model_info["name"],
+                "task_type": self.task_type,
+                "params": self.params,
+                "train_score": train_score,
+                "val_score": val_score,
+                "cv_scores": None,
+                "training_time": training_time,
+                "history": self.history
+            }
+            return result
+
+        # ========== 监督学习（分类/回归） ==========
+        # 创建模型
+        self._create_model()
+
+        # 训练
+        if hasattr(self.model, 'fit'):
+            if X_val is not None and y_val is not None and early_stopping:
+                # 支持验证集和早停
+                self._fit_with_validation(X_train, y_train, X_val, y_val)
+            else:
+                self.model.fit(X_train, y_train)
+
+        # 计算训练分数
+        train_score = self._evaluate_supervised(X_train, y_train)
 
         # 验证集评估
         val_score = None
         if X_val is not None:
-            if self.task_type == "clustering":
-                val_score = self._evaluate_clustering(X_val, self.model.predict(X_val))
-            else:
-                val_score = self._evaluate_supervised(X_val, y_val)
+            val_score = self._evaluate_supervised(X_val, y_val)
 
-        # 交叉验证（监督学习）
+        # 交叉验证
         cv_scores = None
-        if self.task_type not in ["clustering", "time_series"] and cv_folds > 1:
+        if cv_folds > 1:
             cv_scores = self._cross_validate(X_train, y_train, cv_folds)
 
         training_time = time.time() - start_time
@@ -239,6 +315,13 @@ class ModelTrainer:
         if self.task_type == "clustering":
             y_pred = self.model.predict(X_test)
             metrics = self._evaluate_clustering(X_test, y_pred)
+        elif self.task_type == "time_series":
+            y_pred = self.model.predict(X_test)
+            if y_test is not None:
+                metrics = MetricsCalculator.calculate_time_series_metrics(y_test, y_pred)
+            else:
+                metrics = {"message": "无真实标签，仅返回预测结果"}
+                metrics["predictions"] = y_pred.tolist()
         else:
             y_pred = self.model.predict(X_test)
             if y_test is not None:

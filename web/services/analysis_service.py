@@ -14,6 +14,7 @@ from web.utils.helpers import capture_and_run, get_raw_data_preview
 from web.services.file_service import FileService
 from web.services.session_service import SessionService
 from web.services.storage_service import StorageService
+from web.services.feature_flags import FeatureFlags
 
 
 class AnalysisService:
@@ -100,6 +101,13 @@ class AnalysisService:
 
             progress_bar.progress(100)
             status_placeholder.success("✅ 分析完成！")
+
+            # 自动训练（如果开启）
+            if FeatureFlags.is_auto_training_enabled() and FeatureFlags.is_auto_analysis_enabled():
+                status_placeholder.info("🤖 正在自动训练推荐模型...")
+                from web.services.auto_train_service import auto_train_from_recommendation
+                auto_train_from_recommendation(session_id)
+                status_placeholder.empty()
 
             time.sleep(0.5)
             status_placeholder.empty()
@@ -190,6 +198,13 @@ class AnalysisService:
 
             progress_bar.progress(100)
             status_placeholder.success("✅ 分析完成！")
+
+            # 自动训练（如果开启）
+            if FeatureFlags.is_auto_training_enabled() and FeatureFlags.is_auto_analysis_enabled():
+                status_placeholder.info("🤖 正在自动训练推荐模型...")
+                from web.services.auto_train_service import auto_train_from_recommendation
+                auto_train_from_recommendation(session_id)
+                status_placeholder.empty()
 
             time.sleep(0.5)
             status_placeholder.empty()
@@ -282,6 +297,13 @@ class AnalysisService:
 
             progress_bar.progress(100)
             status_placeholder.success("✅ 分析完成！")
+
+            # 自动训练（如果开启）
+            if FeatureFlags.is_auto_training_enabled() and FeatureFlags.is_auto_analysis_enabled():
+                status_placeholder.info("🤖 正在自动训练推荐模型...")
+                from web.services.auto_train_service import auto_train_from_recommendation
+                auto_train_from_recommendation(session_id)
+                status_placeholder.empty()
 
             time.sleep(0.5)
             status_placeholder.empty()

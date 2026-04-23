@@ -14,31 +14,17 @@ class InsightService:
     def generate_value_preview(df: pd.DataFrame) -> Dict[str, Any]:
         """
         生成价值预览
-
-        参数:
-        - df: 数据框
-
-        返回:
-        {
-            "predictable": {...},
-            "timeseries": {...},
-            "needs_cleaning": {...},  # 注意：这里是 needs_cleaning
-            "clustering": {...},
-            "recommended_analysis": str
-        }
         """
         result = {
             "predictable": {"has": False},
             "timeseries": {"has": False},
-            "needs_cleaning": {"has": False},  # 修正拼写
+            "needs_cleaning": {"has": False},
             "clustering": {"has": False},
             "recommended_analysis": ""
         }
 
-        # 1. 可预测性分析
         numeric_cols = df.select_dtypes(include=['int64', 'float64']).columns.tolist()
         if len(numeric_cols) >= 2:
-            # 找出最佳预测目标（方差最大的数值列）
             variances = df[numeric_cols].var()
             best_target = variances.idxmax() if not variances.empty else numeric_cols[0]
 
@@ -49,7 +35,6 @@ class InsightService:
                 "description": f"可用{len(numeric_cols) - 1}个特征预测{best_target}"
             }
 
-        # 2. 时间序列分析
         date_cols = df.select_dtypes(include=['datetime64']).columns.tolist()
         if date_cols and numeric_cols:
             result["timeseries"] = {
@@ -59,7 +44,6 @@ class InsightService:
                 "description": f"检测到时间序列数据，可预测{', '.join(numeric_cols[:2])}的未来走势"
             }
 
-        # 3. 数据质量分析
         total_cells = len(df) * len(df.columns)
         missing_cells = df.isna().sum().sum()
         missing_rate = missing_cells / total_cells if total_cells > 0 else 0
@@ -74,7 +58,6 @@ class InsightService:
                 "description": f"缺失率{missing_rate:.1%}，{len(high_missing_cols)}个字段缺失率>20%"
             }
 
-        # 4. 聚类分析
         if len(numeric_cols) >= 3 and len(df) >= 100:
             result["clustering"] = {
                 "has": True,
@@ -82,7 +65,6 @@ class InsightService:
                 "description": f"可用{len(numeric_cols)}个数值特征进行用户分群"
             }
 
-        # 5. 推荐分析
         recommendations = []
         if result["predictable"]["has"]:
             recommendations.append(f"{result['predictable']['target']}预测")
@@ -97,14 +79,11 @@ class InsightService:
 
     @staticmethod
     def generate_smart_summary(df: pd.DataFrame, preview: Dict[str, Any]) -> str:
-        """
-        生成智能摘要（一句话总结）
-        """
+        """生成智能摘要"""
         rows, cols = df.shape
 
         parts = [f"您的数据包含 {rows:,} 行 × {cols} 列"]
 
-        # 添加维度信息
         dimensions = []
         numeric_cols = df.select_dtypes(include=['int64', 'float64']).columns
         cat_cols = df.select_dtypes(include=['object', 'category']).columns
@@ -120,14 +99,12 @@ class InsightService:
         if dimensions:
             parts.append(f"，涉及 {', '.join(dimensions)}")
 
-        # 添加价值信息
         if preview.get("predictable", {}).get("has"):
             parts.append(f"。可预测 {preview['predictable']['target']}")
 
         if preview.get("timeseries", {}).get("has"):
             parts.append("，可做趋势分析")
 
-        # 修复：使用 needs_cleaning 而不是 needs_cleaning
         needs_cleaning = preview.get("needs_cleaning", {})
         if needs_cleaning.get("has"):
             high_missing_count = len(needs_cleaning.get("high_missing_cols", []))
@@ -136,91 +113,129 @@ class InsightService:
         return "".join(parts)
 
     @staticmethod
-    def extract_top_conclusions(analysis_result: Dict[str, Any], n: int = 5) -> List[Dict[str, Any]]:
+    def extract_top_conclusions(analysis_result: Dict[str, Any], n: int = None) -> List[Dict[str, Any]]:
         """
-        从分析结果中提取核心结论
+        从分析结果中提取核心结论（全部列出，不截断）
         """
         conclusions = []
 
-        # 1. 强相关性结论
+        # 用于收集同类结论
+        ts_vars = []           # 时间序列变量
+        high_corr_pairs = []   # 强相关对
+        classification_targets = []  # 可预测目标
+        high_missing_cols = []  # 高缺失字段
+        outlier_cols = []       # 异常值字段
+
+        # 1. 收集时间序列变量（全部列出）
+        ts_diagnostics = analysis_result.get('time_series_diagnostics', {})
+        for col, diag in ts_diagnostics.items():
+            if diag.get('has_autocorrelation'):
+                if '_' in col:
+                    parts = col.rsplit('_', 1)
+                    base_var = parts[0]
+                    group = parts[1]
+                    ts_vars.append(f"{base_var}({group}组)")
+                else:
+                    ts_vars.append(col)
+
+        if ts_vars:
+            # 全部列出，不截断
+            var_str = '、'.join(ts_vars)
+            conclusions.append({
+                "icon": "📈",
+                "title": f"{len(ts_vars)}个序列具有时间规律",
+                "description": f"{var_str} 检测到显著自相关性，可用自身历史值预测未来走势"
+            })
+
+        # 2. 收集强相关对（相关系数 ≥ 0.5）
         high_corrs = analysis_result.get('correlations', {}).get('high_correlations', [])
-        for corr in high_corrs[:2]:
+        for corr in high_corrs:
+            if abs(corr.get('value', 0)) >= 0.5:
+                direction = "正" if corr.get('value', 0) > 0 else "负"
+                high_corr_pairs.append(f"{corr['var1']}↔{corr['var2']}({direction}r={corr['value']:.2f})")
+
+        if high_corr_pairs:
+            # 全部列出，不截断
+            pair_str = '、'.join(high_corr_pairs)
             conclusions.append({
                 "icon": "🔗",
-                "title": f"{corr['var1']} 与 {corr['var2']} 高度相关",
-                "description": f"相关系数 {corr['value']:.3f}，属于{'正' if corr['value'] > 0 else '负'}相关",
-                "action": f"可考虑用{corr['var1']}预测{corr['var2']}，或进行特征选择",
-                "priority": "high"
+                "title": f"发现{len(high_corr_pairs)}对强相关关系",
+                "description": pair_str
             })
 
-        # 2. 时间序列结论
-        ts_diagnostics = analysis_result.get('time_series_diagnostics', {})
-        for col, diag in list(ts_diagnostics.items())[:1]:
-            if diag.get('has_autocorrelation'):
-                conclusions.append({
-                    "icon": "📈",
-                    "title": f"{col} 具有时间序列规律",
-                    "description": "检测到显著的自相关性，历史数据可预测未来",
-                    "action": "建议使用ARIMA或LSTM进行时序预测",
-                    "priority": "high"
-                })
-
-        # 3. 数据质量结论
-        quality = analysis_result.get('quality_report', {})
-        missing = quality.get('missing', [])
-        high_missing = [m for m in missing if m.get('percent', 0) > 20]
-        if high_missing:
+        # 3. 聚类机会
+        numeric_vars = [col for col, info in analysis_result.get('variable_types', {}).items()
+                        if info.get('type') == 'continuous']
+        n_samples = analysis_result.get('data_shape', {}).get('rows', 0)
+        if len(numeric_vars) >= 3 and n_samples >= 100:
             conclusions.append({
-                "icon": "⚠️",
-                "title": f"{len(high_missing)}个字段缺失率较高",
-                "description": f"最高缺失率: {high_missing[0]['column']} ({high_missing[0]['percent']:.1f}%)",
-                "action": "建议删除缺失率>80%的字段，其余用中位数/众数填充",
-                "priority": "medium"
+                "icon": "🔘",
+                "title": f"适合进行聚类分析",
+                "description": f"{len(numeric_vars)}个数值指标，{n_samples}个样本，可识别用户/患者分群"
             })
 
-        # 4. 建模机会
-        recommendations = analysis_result.get('model_recommendations', [])
-        for rec in recommendations[:1]:
-            conclusions.append({
-                "icon": "🤖",
-                "title": f"适合进行{rec.get('task_type', '预测分析')}",
-                "description": rec.get('reason', '基于数据特征，可建立预测模型'),
-                "action": f"推荐使用: {rec.get('ml', '随机森林')}",
-                "priority": "high"
-            })
+        # 4. 收集可预测目标（分类/回归）
+        model_recs = analysis_result.get('model_recommendations', [])
+        for rec in model_recs:
+            target = rec.get('target_column', '')
+            # 排除派生列
+            if target and not target.endswith('_year') and not target.endswith('_month') and not target.endswith('_quarter'):
+                if target not in classification_targets:
+                    classification_targets.append(target)
 
-        # 5. 异常值结论
-        outliers = quality.get('outliers', {})
-        if outliers:
-            outlier_cols = list(outliers.keys())[:2]
-            outlier_info = outliers.get(outlier_cols[0], {}) if outlier_cols else {}
-            conclusions.append({
-                "icon": "🚨",
-                "title": f"发现{len(outliers)}个字段存在异常值",
-                "description": f"涉及字段: {', '.join(outlier_cols)}，最高比例: {outlier_info.get('percent', 0):.1f}%",
-                "action": "建议检查异常值是否为数据错误，必要时进行截尾处理",
-                "priority": "medium"
-            })
-
-        # 6. 偏态结论
-        skewed = analysis_result.get('distribution_insights', {}).get('skewed_variables', [])
-        if skewed:
-            skewed_names = [s['name'] for s in skewed[:2]]
+        if classification_targets:
+            # 全部列出，不截断
+            target_str = '、'.join(classification_targets)
             conclusions.append({
                 "icon": "📊",
-                "title": f"发现{len(skewed)}个偏态变量",
-                "description": f"偏态变量: {', '.join(skewed_names)}",
-                "action": "建议使用中位数描述或进行对数变换",
-                "priority": "low"
+                "title": f"可预测 {target_str}",
+                "description": "基于关联特征可建立预测模型"
             })
 
-        return conclusions[:n]
+        # 5. 收集数据质量问题
+        quality = analysis_result.get('quality_report', {})
+        missing = quality.get('missing', [])
+        for m in missing:
+            if m.get('percent', 0) > 20:
+                high_missing_cols.append(f"{m['column']}({m['percent']:.0f}%)")
+
+        if high_missing_cols:
+            # 全部列出，不截断
+            missing_str = '、'.join(high_missing_cols)
+            conclusions.append({
+                "icon": "⚠️",
+                "title": f"{len(high_missing_cols)}个字段缺失率较高",
+                "description": missing_str
+            })
+
+        outliers = quality.get('outliers', {})
+        for col, info in outliers.items():
+            outlier_cols.append(f"{col}({info.get('percent', 0):.1f}%)")
+
+        if outlier_cols:
+            # 全部列出，不截断
+            outlier_str = '、'.join(outlier_cols)
+            conclusions.append({
+                "icon": "🚨",
+                "title": f"发现{len(outlier_cols)}个字段存在异常值",
+                "description": outlier_str
+            })
+
+        # 6. 关联规则机会
+        categorical_vars = [col for col, info in analysis_result.get('variable_types', {}).items()
+                            if info.get('type') in ['categorical', 'categorical_numeric', 'ordinal']]
+        if len(categorical_vars) >= 3:
+            conclusions.append({
+                "icon": "🔗",
+                "title": f"可挖掘关联规则",
+                "description": f"{len(categorical_vars)}个分类变量，可发现「如果A则B」的关联模式"
+            })
+
+        return conclusions
 
     @staticmethod
     def generate_natural_language_insight(chart_type: str, data: Dict[str, Any]) -> str:
-        """
-        生成自然语言解读
-        """
+        """生成自然语言解读"""
         templates = {
             "continuous": InsightService._insight_continuous,
             "categorical": InsightService._insight_categorical,
@@ -318,42 +333,34 @@ class InsightService:
 
     @staticmethod
     def generate_rule_based_insights(analysis_result: Dict[str, Any]) -> List[str]:
-        """
-        基于规则生成洞察（无需大模型）
-        """
+        """基于规则生成洞察（无需大模型）"""
         insights = []
 
-        # 数据规模洞察
         rows = analysis_result.get('data_shape', {}).get('rows', 0)
         if rows > 100000:
             insights.append("📊 数据量较大，建议使用采样分析以获得更快响应")
         elif rows < 100:
             insights.append("📊 数据量较小，分析结果可能存在统计偏差")
 
-        # 缺失值洞察
         missing = analysis_result.get('quality_report', {}).get('missing', [])
         high_missing = [m for m in missing if m.get('percent', 0) > 20]
         if high_missing:
-            fields = ', '.join([m['column'] for m in high_missing[:3]])
+            fields = ', '.join([m['column'] for m in high_missing])
             insights.append(f"⚠️ 发现{len(high_missing)}个字段缺失率超过20%（{fields}），建议填充或删除")
 
-        # 相关性洞察
         high_corrs = analysis_result.get('correlations', {}).get('high_correlations', [])
         if high_corrs:
             top_corr = high_corrs[0]
             insights.append(f"🔗 发现强相关：{top_corr['var1']} 与 {top_corr['var2']} 相关系数 {top_corr['value']}，可考虑特征选择")
 
-        # 偏态洞察
         skewed = analysis_result.get('distribution_insights', {}).get('skewed_variables', [])
         if skewed:
             insights.append(f"📈 发现{len(skewed)}个偏态变量，建议使用中位数描述或进行对数变换")
 
-        # 不平衡分类洞察
         imbalanced = analysis_result.get('distribution_insights', {}).get('imbalanced_categoricals', [])
         if imbalanced:
             insights.append(f"⚖️ 发现{len(imbalanced)}个不平衡分类变量，分析时需注意类别分布")
 
-        # 时间序列洞察
         ts_forecastable = analysis_result.get('time_series_forecastable', False)
         if ts_forecastable:
             insights.append(f"📅 检测到可预测的时间序列数据，建议进行趋势分析和预测")

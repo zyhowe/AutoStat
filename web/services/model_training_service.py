@@ -156,9 +156,10 @@ def execute_training(
         if not available_features:
             return False, {"error": "没有有效的特征列"}
 
-        # 获取特征和目标数据
+        # 获取特征数据
         X = data[available_features].copy()
 
+        # 获取目标数据（分类/回归需要）
         if task_type in ["classification", "regression"] and target_col:
             if target_col not in data.columns:
                 return False, {"error": f"目标列 '{target_col}' 不存在于数据中"}
@@ -166,84 +167,172 @@ def execute_training(
         else:
             y = None
 
-        # 关键修复：删除X和y中的缺失值，确保样本数一致
-        # 先记录原始索引
-        original_indices = X.index
-
-        # 删除X中的缺失值
-        X_clean = X.dropna()
-        clean_indices = X_clean.index
-
-        # 同步删除y中的对应行
-        if y is not None:
-            y_clean = y.loc[clean_indices] if clean_indices.isin(y.index).all() else y[clean_indices]
-        else:
-            y_clean = None
-
-        st.info(f"数据清洗: 原始样本 {len(X)} -> 清洗后 {len(X_clean)}")
-
-        if len(X_clean) == 0:
-            return False, {"error": "清洗后没有有效样本"}
-
-        # 预处理配置
-        categorical_features = [col for col in available_features if
-                                col in data.select_dtypes(include=['object']).columns]
-        numerical_features = [col for col in available_features if col not in categorical_features]
-
-        preprocess_config = {
-            "missing_strategy": missing_strategy,
-            "scaling": scaling if scaling != "none" else None,
-            "encoding": encoding if encoding != "none" else None,
-            "categorical_features": categorical_features,
-            "numerical_features": numerical_features,
-            "target_column": target_col
-        }
-
-        preprocessor = DataPreprocessor(preprocess_config)
-
         np.random.seed(random_seed)
 
         test_ratio = 1 - train_ratio - val_ratio
 
-        if test_ratio > 0:
-            X_train, X_temp, y_train, y_temp = train_test_split(
-                X_clean, y_clean, test_size=(val_ratio + test_ratio), random_state=random_seed
-            )
-            if val_ratio > 0:
-                val_size = val_ratio / (val_ratio + test_ratio)
-                X_val, X_test, y_val, y_test = train_test_split(
-                    X_temp, y_temp, test_size=val_size, random_state=random_seed
-                )
+        # ========== 根据任务类型处理数据切分 ==========
+        if task_type == "time_series":
+            # 时间序列任务：按时间顺序划分，不随机打乱
+            # 删除缺失值
+            X_clean = X.dropna()
+
+            n = len(X_clean)
+            train_size = int(n * train_ratio)
+            val_size = int(n * val_ratio) if val_ratio > 0 else 0
+
+            # 对于 ARIMA，X 应该是目标列的值（一维）
+            # 如果有多列，取第一列
+            if len(available_features) > 1:
+                target_series = X_clean.iloc[:, 0]
             else:
-                X_val, X_test = None, X_temp
-                y_val, y_test = None, y_temp
+                target_series = X_clean.iloc[:, 0] if len(X_clean.columns) > 0 else X_clean
+
+            X_train = target_series.iloc[:train_size]
+            X_val = target_series.iloc[train_size:train_size + val_size] if val_size > 0 else None
+            X_test = target_series.iloc[train_size + val_size:] if test_ratio > 0 else None
+            y_train = y_val = y_test = None
+
+            # 不需要预处理器
+            preprocessor = None
+
+            st.info(f"时间序列数据: 总样本 {n}, 训练集 {len(X_train)}")
+
+        elif task_type == "clustering":
+            # 聚类任务：无监督，不需要y，随机切分
+            X_clean = X.dropna()
+
+            if test_ratio > 0:
+                X_train, X_temp = train_test_split(
+                    X_clean, test_size=(val_ratio + test_ratio), random_state=random_seed
+                )
+                if val_ratio > 0 and test_ratio > 0:
+                    val_size = val_ratio / (val_ratio + test_ratio) if (val_ratio + test_ratio) > 0 else 0
+                    X_val, X_test = train_test_split(X_temp, test_size=val_size, random_state=random_seed)
+                elif val_ratio > 0:
+                    X_val, X_test = X_temp, None
+                else:
+                    X_val, X_test = None, X_temp
+            else:
+                if val_ratio > 0:
+                    X_train, X_val = train_test_split(
+                        X_clean, test_size=val_ratio, random_state=random_seed
+                    )
+                    X_test = None
+                else:
+                    X_train, X_val, X_test = X_clean, None, None
+
+            y_train = y_val = y_test = None
+
+            # 聚类需要预处理器（标准化）
+            categorical_features = [col for col in available_features if
+                                    col in data.select_dtypes(include=['object']).columns]
+            numerical_features = [col for col in available_features if col not in categorical_features]
+
+            preprocess_config = {
+                "missing_strategy": missing_strategy,
+                "scaling": scaling if scaling != "none" else None,
+                "encoding": encoding if encoding != "none" else None,
+                "categorical_features": categorical_features,
+                "numerical_features": numerical_features,
+                "target_column": None
+            }
+
+            preprocessor = DataPreprocessor(preprocess_config)
+
         else:
-            X_train, X_val, y_train, y_val = train_test_split(
-                X_clean, y_clean, test_size=val_ratio, random_state=random_seed
-            )
-            X_test, y_test = None, None
+            # 分类和回归任务：监督学习，正常切分
+            X_clean = X.dropna()
+            clean_indices = X_clean.index
 
-        # 预处理训练数据
-        X_train_processed = preprocessor.fit_transform(X_train, y_train)
+            if y is not None:
+                y_clean = y.loc[clean_indices] if clean_indices.isin(y.index).all() else y[clean_indices]
+            else:
+                y_clean = None
 
-        if X_val is not None:
-            X_val_processed = preprocessor.transform(X_val)
-        else:
-            X_val_processed = None
+            st.info(f"数据清洗: 原始样本 {len(X)} -> 清洗后 {len(X_clean)}")
 
+            if len(X_clean) == 0:
+                return False, {"error": "清洗后没有有效样本"}
+
+            if test_ratio > 0:
+                X_train, X_temp, y_train, y_temp = train_test_split(
+                    X_clean, y_clean, test_size=(val_ratio + test_ratio), random_state=random_seed
+                )
+                if val_ratio > 0:
+                    val_size = val_ratio / (val_ratio + test_ratio) if (val_ratio + test_ratio) > 0 else 0
+                    X_val, X_test, y_val, y_test = train_test_split(
+                        X_temp, y_temp, test_size=val_size, random_state=random_seed
+                    )
+                else:
+                    X_val, X_test = None, X_temp
+                    y_val, y_test = None, y_temp
+            else:
+                if val_ratio > 0:
+                    X_train, X_val, y_train, y_val = train_test_split(
+                        X_clean, y_clean, test_size=val_ratio, random_state=random_seed
+                    )
+                    X_test, y_test = None, None
+                else:
+                    X_train, X_val, y_train, y_val = X_clean, None, y_clean, None
+                    X_test, y_test = None, None
+
+            # 预处理配置
+            categorical_features = [col for col in available_features if
+                                    col in data.select_dtypes(include=['object']).columns]
+            numerical_features = [col for col in available_features if col not in categorical_features]
+
+            preprocess_config = {
+                "missing_strategy": missing_strategy,
+                "scaling": scaling if scaling != "none" else None,
+                "encoding": encoding if encoding != "none" else None,
+                "categorical_features": categorical_features,
+                "numerical_features": numerical_features,
+                "target_column": target_col
+            }
+
+            preprocessor = DataPreprocessor(preprocess_config)
+
+        # ========== 训练模型 ==========
         trainer = ModelTrainer(task_type, model_key, user_params)
 
-        train_result = trainer.train(
-            X_train_processed, y_train,
-            X_val_processed, y_val,
-            cv_folds=cv_folds if cv_folds > 0 else None,
-            early_stopping=False
-        )
+        if task_type == "time_series" and model_key == "arima":
+            # ARIMA 训练（不需要预处理）
+            train_result = trainer.train(
+                X_train, y_train, X_val, y_val,
+                cv_folds=cv_folds if cv_folds > 0 else None,
+                early_stopping=False
+            )
+            # ARIMA 不需要预处理器
+            preprocessor = None
+        else:
+            # 其他任务：预处理数据
+            if X_train is not None:
+                X_train_processed = preprocessor.fit_transform(X_train, y_train) if preprocessor else X_train
+            else:
+                X_train_processed = None
 
+            if X_val is not None:
+                X_val_processed = preprocessor.transform(X_val) if preprocessor else X_val
+            else:
+                X_val_processed = None
+
+            train_result = trainer.train(
+                X_train_processed, y_train,
+                X_val_processed, y_val,
+                cv_folds=cv_folds if cv_folds > 0 else None,
+                early_stopping=False
+            )
+
+        # 测试集评估
         test_metrics = None
-        if X_test is not None and y_test is not None:
-            X_test_processed = preprocessor.transform(X_test)
-            test_metrics = trainer.evaluate(X_test_processed, y_test)
+        if X_test is not None:
+            if task_type == "time_series":
+                # 时间序列测试
+                test_metrics = trainer.evaluate(X_test, y_test)
+            elif task_type in ["classification", "regression"] and preprocessor:
+                X_test_processed = preprocessor.transform(X_test)
+                test_metrics = trainer.evaluate(X_test_processed, y_test)
 
         timestamp = int(time.time())
         model_key_full = f"{task_type}_{model_key}_{timestamp}"
@@ -262,7 +351,7 @@ def execute_training(
             "params": user_params,
             "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
             "training_time": train_result.get("training_time", 0),
-            "preprocess_config": preprocess_config
+            "preprocess_config": preprocess_config if preprocessor else {}
         }
 
         StorageService.save_model(

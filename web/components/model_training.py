@@ -92,9 +92,11 @@ def render_model_training():
         render_model_inference(session_id)
 
 
+# web/components/model_training.py (仅修改 render_model_recommendations 函数)
+
 def render_model_recommendations(json_data: Dict, data: pd.DataFrame,
-                                  available_cols: List[str], variable_types: Dict):
-    """模型推荐标签页 - 不限制推荐数量，特征全部列出"""
+                                 available_cols: List[str], variable_types: Dict):
+    """模型推荐标签页 - 过滤非训练任务，添加任务类型标识"""
     st.markdown("基于数据分析结果，自动推荐适合的模型。点击「使用」快速填充到下方表单")
 
     n_samples = len(data)
@@ -110,99 +112,135 @@ def render_model_recommendations(json_data: Dict, data: pd.DataFrame,
 
     st.markdown("---")
 
-    model_recommendations = get_model_recommendations_from_json(json_data)
+    all_recommendations = get_model_recommendations_from_json(json_data)
 
-    if model_recommendations:
-        # 不限制数量，全部显示
-        for i, rec in enumerate(model_recommendations):
-            priority = rec.get('priority', '中')
-            priority_icon = "🔴" if priority == "高" else "🟠" if priority == "中" else "🟢"
+    # 过滤：只保留可训练的任务（排除关联规则挖掘和异常检测）
+    SKIP_TASK_TYPES = ["关联规则挖掘", "异常检测"]
+    model_recommendations = []
+    for rec in all_recommendations:
+        task_type_str = rec.get('task_type', '')
+        should_skip = False
+        for skip_type in SKIP_TASK_TYPES:
+            if skip_type in task_type_str:
+                should_skip = True
+                break
+        if not should_skip:
+            model_recommendations.append(rec)
 
-            with st.container():
-                cols = st.columns([1.5, 1.5, 2, 1.5, 1])
-                with cols[0]:
-                    st.markdown(f"**{priority_icon} {rec.get('task_type', '')}**")
-                    st.caption(f"目标: {rec.get('target_column', '')}")
-                with cols[1]:
-                    ml_text = rec.get('ml', '')
-                    if ml_text:
-                        ml_short = ml_text.split(' / ')[0] if ' / ' in ml_text else ml_text
-                        st.caption(f"推荐模型: {ml_short}")
-                    else:
-                        st.caption("推荐模型: 随机森林")
-                with cols[2]:
-                    feature_cols = rec.get('feature_columns', [])
-                    if feature_cols:
-                        valid_features = [f for f in feature_cols if f in available_cols]
-                        if valid_features:
-                            # 全部列出，不截断
-                            feature_str = ', '.join(valid_features)
-                            st.caption(f"推荐特征: {feature_str}")
-                        else:
-                            st.caption("推荐特征: 自动选择所有可用特征")
+    if not model_recommendations:
+        st.info("暂无可训练的模型推荐")
+        return
+
+    # 任务类型到显示格式的映射
+    def get_task_display(task_type_str: str) -> str:
+        if "时间序列预测" in task_type_str:
+            return "📅 时序"
+        elif "聚类分析" in task_type_str:
+            return "🔘 聚类"
+        elif "回归预测" in task_type_str:
+            return "📈 回归"
+        elif "分类预测" in task_type_str:
+            return "📊 分类"
+        else:
+            return "📊 预测"
+
+    for i, rec in enumerate(model_recommendations):
+        priority = rec.get('priority', '中')
+        priority_icon = "🔴" if priority == "高" else "🟠" if priority == "中" else "🟢"
+
+        # 使用 task_type 而不是 title
+        task_display = get_task_display(rec.get('task_type', ''))
+
+        # 获取模型名称
+        ml_text = rec.get('ml', '随机森林')
+        first_model = ml_text.split(' / ')[0] if ' / ' in ml_text else ml_text
+
+        with st.container():
+            cols = st.columns([1.5, 1.5, 2, 1.5, 1])
+            with cols[0]:
+                st.markdown(f"**{priority_icon} {task_display} - {first_model}**")
+                st.caption(f"目标: {rec.get('target_column', '')}")
+            with cols[1]:
+                st.caption(f"推荐模型: {first_model}")
+            with cols[2]:
+                feature_cols = rec.get('feature_columns', [])
+                if feature_cols:
+                    valid_features = [f for f in feature_cols if f in available_cols]
+                    if valid_features:
+                        # 全部列出
+                        feature_str = ', '.join(valid_features)
+                        st.caption(f"推荐特征: {feature_str}")
                     else:
                         st.caption("推荐特征: 自动选择所有可用特征")
-                with cols[3]:
-                    reason = rec.get('reason', '')
-                    if len(reason) > 40:
-                        st.caption(f"原因: {reason[:40]}...")
+                else:
+                    st.caption("推荐特征: 自动选择所有可用特征")
+            with cols[3]:
+                reason = rec.get('reason', '')
+                if len(reason) > 40:
+                    st.caption(f"原因: {reason[:40]}...")
+                else:
+                    st.caption(f"原因: {reason}")
+            with cols[4]:
+                if st.button("📋 使用", key=f"use_rec_{i}"):
+                    # 解析任务类型（使用 task_type）
+                    task_type_str = rec.get('task_type', '')
+                    if "回归预测" in task_type_str:
+                        task_type = "regression"
+                    elif "分类预测" in task_type_str:
+                        task_type = "classification"
+                    elif "时间序列预测" in task_type_str:
+                        task_type = "time_series"
+                    elif "聚类分析" in task_type_str:
+                        task_type = "clustering"
                     else:
-                        st.caption(f"原因: {reason}")
-                with cols[4]:
-                    if st.button("📋 使用", key=f"use_rec_{i}"):
-                        task_type_str = rec.get('task_type', '')
-                        if "分类" in task_type_str:
-                            task_type = "classification"
-                        elif "数值预测" in task_type_str or "回归" in task_type_str:
-                            task_type = "regression"
-                        else:
-                            task_type = "classification"
+                        task_type = "classification"
 
-                        ml_text = rec.get('ml', '随机森林')
-                        first_model = ml_text.split(' / ')[0] if ' / ' in ml_text else ml_text
+                    # 选择模型
+                    if 'XGBoost' in first_model:
+                        model_key = 'xgboost' if task_type == 'classification' else 'xgboost_regressor'
+                    elif 'LightGBM' in first_model:
+                        model_key = 'lightgbm' if task_type == 'classification' else 'lightgbm_regressor'
+                    elif 'CatBoost' in first_model:
+                        model_key = 'catboost' if task_type == 'classification' else 'catboost'
+                    elif '逻辑回归' in first_model:
+                        model_key = 'logistic_regression'
+                    elif '线性回归' in first_model:
+                        model_key = 'linear_regression'
+                    elif '决策树' in first_model:
+                        model_key = 'decision_tree' if task_type == 'classification' else 'decision_tree_regressor'
+                    elif '随机森林' in first_model:
+                        model_key = 'random_forest' if task_type == 'classification' else 'random_forest_regressor'
+                    elif 'K-Means' in first_model or '聚类' in first_model:
+                        model_key = 'kmeans'
+                        task_type = "clustering"
+                    elif 'ARIMA' in first_model or 'SARIMA' in first_model:
+                        model_key = 'arima'
+                        task_type = "time_series"
+                    else:
+                        model_key = 'random_forest' if task_type == 'classification' else 'random_forest_regressor'
 
-                        if 'XGBoost' in first_model:
-                            model_key = 'xgboost' if task_type == 'classification' else 'xgboost_regressor'
-                        elif 'LightGBM' in first_model:
-                            model_key = 'lightgbm' if task_type == 'classification' else 'lightgbm_regressor'
-                        elif 'CatBoost' in first_model:
-                            model_key = 'catboost' if task_type == 'classification' else 'catboost'
-                        elif '逻辑回归' in first_model:
-                            model_key = 'logistic_regression'
-                        elif '线性回归' in first_model:
-                            model_key = 'linear_regression'
-                        elif '决策树' in first_model:
-                            model_key = 'decision_tree' if task_type == 'classification' else 'decision_tree_regressor'
-                        elif '随机森林' in first_model:
-                            model_key = 'random_forest' if task_type == 'classification' else 'random_forest_regressor'
-                        else:
-                            model_key = 'random_forest' if task_type == 'classification' else 'random_forest_regressor'
+                    recommended_features = rec.get('feature_columns', [])
+                    valid_features = [f for f in recommended_features if f in available_cols]
+                    if not valid_features:
+                        target = rec.get('target_column', '')
+                        valid_features = [col for col in available_cols if col != target]
 
-                        recommended_features = rec.get('feature_columns', [])
-                        valid_features = [f for f in recommended_features if f in available_cols]
-                        if not valid_features:
-                            target = rec.get('target_column', '')
-                            # 不限制特征数量
-                            valid_features = [col for col in available_cols if col != target]
+                    model_params = get_model_params(task_type, model_key)
+                    default_params = {}
+                    for param_name, param_info in model_params.items():
+                        default_params[param_name] = param_info.get('default')
 
-                        model_params = get_model_params(task_type, model_key)
-                        default_params = {}
-                        for param_name, param_info in model_params.items():
-                            default_params[param_name] = param_info.get('default')
+                    auto_model_name = generate_model_name(task_type, rec.get('target_column', ''), model_key)
 
-                        auto_model_name = generate_model_name(task_type, rec.get('target_column', ''), model_key)
-
-                        st.session_state.auto_fill_task_type = task_type
-                        st.session_state.auto_fill_target_col = rec.get('target_column', '')
-                        st.session_state.auto_fill_features = valid_features
-                        st.session_state.auto_fill_model_key = model_key
-                        st.session_state.auto_fill_model_params = default_params
-                        st.session_state.auto_fill_model_name = auto_model_name
-                        st.session_state.model_training_tab = 1
-                        st.rerun()
-            st.divider()
-    else:
-        st.info("暂无模型推荐")
+                    st.session_state.auto_fill_task_type = task_type
+                    st.session_state.auto_fill_target_col = rec.get('target_column', '')
+                    st.session_state.auto_fill_features = valid_features
+                    st.session_state.auto_fill_model_key = model_key
+                    st.session_state.auto_fill_model_params = default_params
+                    st.session_state.auto_fill_model_name = auto_model_name
+                    st.session_state.model_training_tab = 1
+                    st.rerun()
+        st.divider()
 
 
 # web/components/model_training.py (续)
@@ -340,16 +378,31 @@ def render_model_creation(data: pd.DataFrame, available_cols: List[str],
 
     all_columns = list(data.columns)
 
+    # 处理自动填充
     if st.session_state.auto_fill_features:
         st.session_state.train_features_selected = st.session_state.auto_fill_features
         st.session_state.auto_fill_features = None
 
+    # 获取当前选中的特征
+    current_selected = st.session_state.get("train_features_selected", [])
+    if not current_selected:
+        # 默认选择所有数值列
+        numeric_cols = data.select_dtypes(include=['int64', 'float64']).columns.tolist()
+        target = st.session_state.train_target_col_selected
+        if target and target in numeric_cols:
+            numeric_cols.remove(target)
+        current_selected = numeric_cols
+        st.session_state.train_features_selected = current_selected
+
     selected_features = st.multiselect(
         "选择特征列",
         options=all_columns,
-        default=st.session_state.train_features_selected,
-        key="train_features_selected"
+        default=current_selected,
+        key="train_features_multiselect"
     )
+
+    # 更新 session_state
+    st.session_state.train_features_selected = selected_features
 
     if not selected_features:
         st.warning("⚠️ 请至少选择一个特征列")
