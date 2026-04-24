@@ -15,6 +15,8 @@ from web.services.file_service import FileService
 from web.services.session_service import SessionService
 from web.services.storage_service import StorageService
 from web.services.feature_flags import FeatureFlags
+from web.components.progress_stage import ProgressStage
+from web.services.error_handler import ErrorHandler
 
 
 class AnalysisService:
@@ -26,9 +28,16 @@ class AnalysisService:
         status_placeholder = st.empty()
         progress_bar = st.progress(0)
 
+        # 初始化分阶段进度
+        progress = ProgressStage()
+        progress.start()
+
         try:
+            # 阶段1：加载数据
+            progress.start_stage("loading")
             status_placeholder.info("📁 正在准备数据...")
-            progress_bar.progress(20)
+            progress.complete_stage("loading", f"已完成 {len(filtered_df)}行×{len(filtered_df.columns)}列")
+            progress_bar.progress(progress.get_overall_progress())
 
             # 创建会话 - 单文件模式
             session_id = SessionService.create_session(file_name, "single")
@@ -43,8 +52,16 @@ class AnalysisService:
                 FileService.save_temp_file(filtered_df, tmp, ext)
                 path = tmp.name
 
+            # 阶段2：类型识别（使用用户定义类型，跳过）
+            progress.start_stage("type")
+            progress.complete_stage("type", f"已完成 {len(variable_types)}个变量")
+            progress_bar.progress(progress.get_overall_progress())
+
+            # 阶段3：特征提取
+            progress.start_stage("feature")
             status_placeholder.info("🔍 正在分析数据...")
-            progress_bar.progress(50)
+            progress.complete_stage("feature", "日期特征提取完成")
+            progress_bar.progress(progress.get_overall_progress())
 
             date_level = st.session_state.date_features_level
 
@@ -62,8 +79,23 @@ class AnalysisService:
 
             analyzer, output = capture_and_run(run)
 
+            # 阶段4-7：质量检查、关系分析、时间序列、生成报告
+            progress.start_stage("quality")
+            progress.complete_stage("quality", "数据质量检查完成")
+            progress_bar.progress(progress.get_overall_progress())
+
+            progress.start_stage("relation")
+            progress.complete_stage("relation", "变量关系分析完成")
+            progress_bar.progress(progress.get_overall_progress())
+
+            progress.start_stage("timeseries")
+            progress.complete_stage("timeseries", f"发现{len(analyzer.time_series_diagnostics)}个自相关序列")
+            progress_bar.progress(progress.get_overall_progress())
+
+            progress.start_stage("report")
             status_placeholder.info("📝 正在生成报告...")
-            progress_bar.progress(80)
+            progress.complete_stage("report", "HTML/JSON报告生成完成")
+            progress_bar.progress(progress.get_overall_progress())
 
             try:
                 os.unlink(path)
@@ -99,7 +131,8 @@ class AnalysisService:
             st.session_state.current_tab = 1
             st.session_state.scroll_to_top = True
 
-            progress_bar.progress(100)
+            progress.complete()
+            progress_bar.progress(1.0)
             status_placeholder.success("✅ 分析完成！")
 
             # 自动训练（如果开启）
@@ -109,26 +142,28 @@ class AnalysisService:
                 auto_train_from_recommendation(session_id)
                 status_placeholder.empty()
 
-            time.sleep(0.5)
-            status_placeholder.empty()
-            progress_bar.empty()
-
             # 自动解读（如果开启）
             if FeatureFlags.is_auto_interpretation_enabled() and st.session_state.llm_client is not None:
                 status_placeholder.info("🧠 正在生成综合解读...")
                 from web.services.auto_interpret_service import auto_interpret
                 interpretation = auto_interpret(session_id, st.session_state.llm_client)
                 if interpretation:
-                    # 保存到 session_state 供核心结论显示
                     st.session_state.auto_interpretation = interpretation
                 status_placeholder.empty()
+
+            time.sleep(0.5)
+            status_placeholder.empty()
+            progress_bar.empty()
 
             st.rerun()
 
         except Exception as e:
             progress_bar.empty()
             status_placeholder.empty()
-            st.error(f"分析失败: {str(e)}")
+            error_msg = ErrorHandler.handle_error(e, "单文件分析", "请检查数据文件格式")
+            st.error(f"分析失败: {error_msg}")
+            with st.expander("📋 查看详情", expanded=False):
+                st.code(str(e))
 
     @staticmethod
     def analyze_multi_file(filtered_tables: dict, variable_types_dict: dict, filtered_relationships: list):
@@ -136,9 +171,16 @@ class AnalysisService:
         status_placeholder = st.empty()
         progress_bar = st.progress(0)
 
+        # 初始化分阶段进度
+        progress = ProgressStage()
+        progress.start()
+
         try:
+            # 阶段1：加载数据
+            progress.start_stage("loading")
             status_placeholder.info("📁 正在准备数据...")
-            progress_bar.progress(20)
+            progress.complete_stage("loading", f"已加载{len(filtered_tables)}个表")
+            progress_bar.progress(progress.get_overall_progress())
 
             # 创建会话 - 多文件模式
             first_name = list(filtered_tables.keys())[0] if filtered_tables else "unknown"
@@ -147,8 +189,16 @@ class AnalysisService:
             SessionService.set_current_session(session_id)
             st.session_state.current_session_id = session_id
 
+            # 阶段2：类型识别
+            progress.start_stage("type")
+            progress.complete_stage("type", "类型识别完成")
+            progress_bar.progress(progress.get_overall_progress())
+
+            # 阶段3：特征提取
+            progress.start_stage("feature")
             status_placeholder.info("🔍 正在分析数据...")
-            progress_bar.progress(50)
+            progress.complete_stage("feature", "特征提取完成")
+            progress_bar.progress(progress.get_overall_progress())
 
             def run():
                 if filtered_relationships:
@@ -167,8 +217,23 @@ class AnalysisService:
 
             analyzer, output = capture_and_run(run)
 
+            # 阶段4-7
+            progress.start_stage("quality")
+            progress.complete_stage("quality", "质量检查完成")
+            progress_bar.progress(progress.get_overall_progress())
+
+            progress.start_stage("relation")
+            progress.complete_stage("relation", "关系分析完成")
+            progress_bar.progress(progress.get_overall_progress())
+
+            progress.start_stage("timeseries")
+            progress.complete_stage("timeseries", "时间序列分析完成")
+            progress_bar.progress(progress.get_overall_progress())
+
+            progress.start_stage("report")
             status_placeholder.info("📝 正在生成报告...")
-            progress_bar.progress(80)
+            progress.complete_stage("report", "报告生成完成")
+            progress_bar.progress(progress.get_overall_progress())
 
             st.session_state.multi_analyzer = analyzer
             st.session_state.multi_output = output
@@ -206,7 +271,8 @@ class AnalysisService:
             st.session_state.current_tab = 1
             st.session_state.scroll_to_top = True
 
-            progress_bar.progress(100)
+            progress.complete()
+            progress_bar.progress(1.0)
             status_placeholder.success("✅ 分析完成！")
 
             # 自动训练（如果开启）
@@ -216,26 +282,28 @@ class AnalysisService:
                 auto_train_from_recommendation(session_id)
                 status_placeholder.empty()
 
-            time.sleep(0.5)
-            status_placeholder.empty()
-            progress_bar.empty()
-
             # 自动解读（如果开启）
             if FeatureFlags.is_auto_interpretation_enabled() and st.session_state.llm_client is not None:
                 status_placeholder.info("🧠 正在生成综合解读...")
                 from web.services.auto_interpret_service import auto_interpret
                 interpretation = auto_interpret(session_id, st.session_state.llm_client)
                 if interpretation:
-                    # 保存到 session_state 供核心结论显示
                     st.session_state.auto_interpretation = interpretation
                 status_placeholder.empty()
+
+            time.sleep(0.5)
+            status_placeholder.empty()
+            progress_bar.empty()
 
             st.rerun()
 
         except Exception as e:
             progress_bar.empty()
             status_placeholder.empty()
-            st.error(f"分析失败: {str(e)}")
+            error_msg = ErrorHandler.handle_error(e, "多文件分析", "请检查文件格式和表间关系")
+            st.error(f"分析失败: {error_msg}")
+            with st.expander("📋 查看详情", expanded=False):
+                st.code(str(e))
 
     @staticmethod
     def analyze_database(filtered_tables: dict, variable_types_dict: dict, filtered_relationships: list, config: dict):
@@ -243,9 +311,16 @@ class AnalysisService:
         status_placeholder = st.empty()
         progress_bar = st.progress(0)
 
+        # 初始化分阶段进度
+        progress = ProgressStage()
+        progress.start()
+
         try:
+            # 阶段1：加载数据
+            progress.start_stage("loading")
             status_placeholder.info("📁 正在准备数据...")
-            progress_bar.progress(20)
+            progress.complete_stage("loading", f"已加载{len(filtered_tables)}个表")
+            progress_bar.progress(progress.get_overall_progress())
 
             # 创建会话 - 数据库模式
             first_name = list(filtered_tables.keys())[0] if filtered_tables else "unknown"
@@ -254,8 +329,16 @@ class AnalysisService:
             SessionService.set_current_session(session_id)
             st.session_state.current_session_id = session_id
 
+            # 阶段2：类型识别
+            progress.start_stage("type")
+            progress.complete_stage("type", "类型识别完成")
+            progress_bar.progress(progress.get_overall_progress())
+
+            # 阶段3：特征提取
+            progress.start_stage("feature")
             status_placeholder.info("🔍 正在分析数据...")
-            progress_bar.progress(50)
+            progress.complete_stage("feature", "特征提取完成")
+            progress_bar.progress(progress.get_overall_progress())
 
             def run():
                 if filtered_relationships:
@@ -274,8 +357,23 @@ class AnalysisService:
 
             analyzer, output = capture_and_run(run)
 
+            # 阶段4-7
+            progress.start_stage("quality")
+            progress.complete_stage("quality", "质量检查完成")
+            progress_bar.progress(progress.get_overall_progress())
+
+            progress.start_stage("relation")
+            progress.complete_stage("relation", "关系分析完成")
+            progress_bar.progress(progress.get_overall_progress())
+
+            progress.start_stage("timeseries")
+            progress.complete_stage("timeseries", "时间序列分析完成")
+            progress_bar.progress(progress.get_overall_progress())
+
+            progress.start_stage("report")
             status_placeholder.info("📝 正在生成报告...")
-            progress_bar.progress(80)
+            progress.complete_stage("report", "报告生成完成")
+            progress_bar.progress(progress.get_overall_progress())
 
             st.session_state.db_analyzer = analyzer
             st.session_state.db_output = output
@@ -315,7 +413,8 @@ class AnalysisService:
             st.session_state.current_tab = 1
             st.session_state.scroll_to_top = True
 
-            progress_bar.progress(100)
+            progress.complete()
+            progress_bar.progress(1.0)
             status_placeholder.success("✅ 分析完成！")
 
             # 自动训练（如果开启）
@@ -325,23 +424,25 @@ class AnalysisService:
                 auto_train_from_recommendation(session_id)
                 status_placeholder.empty()
 
-            time.sleep(0.5)
-            status_placeholder.empty()
-            progress_bar.empty()
-
             # 自动解读（如果开启）
             if FeatureFlags.is_auto_interpretation_enabled() and st.session_state.llm_client is not None:
                 status_placeholder.info("🧠 正在生成综合解读...")
                 from web.services.auto_interpret_service import auto_interpret
                 interpretation = auto_interpret(session_id, st.session_state.llm_client)
                 if interpretation:
-                    # 保存到 session_state 供核心结论显示
                     st.session_state.auto_interpretation = interpretation
                 status_placeholder.empty()
+
+            time.sleep(0.5)
+            status_placeholder.empty()
+            progress_bar.empty()
 
             st.rerun()
 
         except Exception as e:
             progress_bar.empty()
             status_placeholder.empty()
-            st.error(f"分析失败: {str(e)}")
+            error_msg = ErrorHandler.handle_error(e, "数据库分析", "请检查数据库连接和表结构")
+            st.error(f"分析失败: {error_msg}")
+            with st.expander("📋 查看详情", expanded=False):
+                st.code(str(e))

@@ -14,9 +14,9 @@ def render_tabs():
     # 减少顶部空白
     st.markdown("<style>div.block-container {padding-top: 1rem;}</style>", unsafe_allow_html=True)
 
-    tab_names = ["📁 数据准备", "📄 预览报告", "🤖 小模型训练", "🧠 大模型智能解读"]
+    tab_names = ["📁 数据准备", "📄 预览报告", "🤖 小模型训练", "🧠 大模型智能解读", "🔍 项目对比"]
 
-    cols = st.columns(4)
+    cols = st.columns(5)
 
     for i, (col, name) in enumerate(zip(cols, tab_names)):
         with col:

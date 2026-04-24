@@ -6,6 +6,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import time
+import re
 from typing import Dict, Any, Optional, List
 
 from web.services.model_training_service import (
@@ -24,6 +25,369 @@ from web.services.model_training_service import (
 from web.services.storage_service import StorageService
 from web.services.session_service import SessionService
 from web.services.recommendation_service import RecommendationService
+
+
+def init_recommend_filters():
+    """初始化推荐过滤器状态"""
+    if "recommend_filters" not in st.session_state:
+        st.session_state.recommend_filters = {
+            "task_types": {
+                "regression": True,  # 回归预测
+                "classification": True,  # 分类预测
+                "time_series": True,  # 时间序列预测
+                "clustering": True,  # 聚类分析
+                "association": True,  # 关联规则挖掘
+                "anomaly": True  # 异常检测
+            },
+            "priorities": {
+                "高": True,
+                "中": True,
+                "低": True
+            },
+            "thresholds": {
+                "regression_r": 0.3,
+                "regression_p": 0.05,
+                "categorical_v": 0.3,
+                "categorical_p": 0.05,
+                "timeseries_p": 0.05
+            },
+            "expanded": False
+        }
+
+def reset_recommend_filters():
+    """重置推荐过滤器"""
+    st.session_state.recommend_filters = {
+        "task_types": {
+            "regression": True,
+            "classification": True,
+            "time_series": True,
+            "clustering": True,
+            "association": True,
+            "anomaly": True
+        },
+        "priorities": {
+            "高": True,
+            "中": True,
+            "低": True
+        },
+        "thresholds": {
+            "regression_r": 0.3,
+            "regression_p": 0.05,
+            "categorical_v": 0.3,
+            "categorical_p": 0.05,
+            "timeseries_p": 0.05
+        },
+        "expanded": True
+    }
+
+def render_recommend_filters():
+    """渲染推荐过滤器UI"""
+    filters = st.session_state.recommend_filters
+
+    with st.expander("🔍 筛选推荐", expanded=filters.get("expanded", False)):
+        col1, col2 = st.columns([3, 1])
+
+        with col1:
+            st.markdown("**任务类型**")
+            task_cols = st.columns(6)
+            task_options = [
+                ("regression", "📈 回归"),
+                ("classification", "📊 分类"),
+                ("time_series", "📅 时序"),
+                ("clustering", "🔘 聚类"),
+                ("association", "🔗 关联"),
+                ("anomaly", "🚨 异常")
+            ]
+
+            for col, (key, label) in zip(task_cols, task_options):
+                with col:
+                    # 直接从 filters 读取当前值
+                    current = filters["task_types"].get(key, True)
+                    new_val = st.checkbox(label, value=current)
+                    filters["task_types"][key] = new_val
+
+        st.markdown("**优先级**")
+        priority_cols = st.columns(3)
+        priority_options = [("高", "🔴"), ("中", "🟠"), ("低", "🟢")]
+
+        for col, (key, icon) in zip(priority_cols, priority_options):
+            with col:
+                current = filters["priorities"].get(key, True)
+                new_val = st.checkbox(f"{icon} {key}", value=current)
+                filters["priorities"][key] = new_val
+
+        st.markdown("**统计阈值**")
+
+        # 回归阈值
+        reg_r = filters["thresholds"].get("regression_r", 0.3)
+        reg_p = filters["thresholds"].get("regression_p", 0.05)
+
+        col1, col2 = st.columns(2)
+        with col1:
+            new_r = st.slider(
+                "回归 |r| ≥",
+                min_value=0.0, max_value=1.0, value=reg_r, step=0.05
+            )
+            filters["thresholds"]["regression_r"] = new_r
+
+        with col2:
+            new_p = st.slider(
+                "回归 p ≤",
+                min_value=0.0, max_value=0.2, value=reg_p, step=0.01
+            )
+            filters["thresholds"]["regression_p"] = new_p
+
+        # 分类阈值
+        cat_v = filters["thresholds"].get("categorical_v", 0.3)
+        cat_p = filters["thresholds"].get("categorical_p", 0.05)
+
+        col1, col2 = st.columns(2)
+        with col1:
+            new_v = st.slider(
+                "分类 V/η² ≥",
+                min_value=0.0, max_value=1.0, value=cat_v, step=0.05
+            )
+            filters["thresholds"]["categorical_v"] = new_v
+
+        with col2:
+            new_p = st.slider(
+                "分类 p ≤",
+                min_value=0.0, max_value=0.2, value=cat_p, step=0.01
+            )
+            filters["thresholds"]["categorical_p"] = new_p
+
+        # 时序阈值
+        ts_p = filters["thresholds"].get("timeseries_p", 0.05)
+        new_ts_p = st.slider(
+            "时序 p ≤",
+            min_value=0.0, max_value=0.2, value=ts_p, step=0.01
+        )
+        filters["thresholds"]["timeseries_p"] = new_ts_p
+
+        # 重置按钮
+        col1, col2, col3 = st.columns([1, 1, 2])
+        with col1:
+            if st.button("🔄 重置", use_container_width=True):
+                reset_recommend_filters()
+                st.rerun()
+
+        # 更新展开状态
+        filters["expanded"] = True
+
+
+def get_task_type_from_rec(rec: Dict) -> str:
+    """从推荐中提取任务类型标识"""
+    task_type_str = rec.get('task_type', '')
+    if "回归预测" in task_type_str:
+        return "regression"
+    elif "分类预测" in task_type_str:
+        return "classification"
+    elif "时间序列预测" in task_type_str:
+        return "time_series"
+    elif "聚类分析" in task_type_str:
+        return "clustering"
+    elif "关联规则挖掘" in task_type_str:
+        return "association"
+    elif "异常检测" in task_type_str:
+        return "anomaly"
+    return "other"
+
+
+def extract_stats_from_rec(rec: Dict) -> Dict:
+    """从推荐中提取统计值"""
+    stats = {"r": None, "p": None, "v": None, "eta": None}
+    reason = rec.get('reason', '')
+
+    # 提取相关系数 r
+    r_match = re.search(r'r=([0-9.]+)', reason)
+    if r_match:
+        stats["r"] = abs(float(r_match.group(1)))
+
+    # 提取 p 值
+    p_match = re.search(r'p=([0-9.]+)', reason)
+    if p_match:
+        stats["p"] = float(p_match.group(1))
+
+    # 提取 Cramer's V
+    v_match = re.search(r'V=([0-9.]+)', reason)
+    if v_match:
+        stats["v"] = abs(float(v_match.group(1)))
+
+    # 提取 Eta-squared
+    eta_match = re.search(r'η²=([0-9.]+)', reason)
+    if eta_match:
+        stats["eta"] = abs(float(eta_match.group(1)))
+
+    return stats
+
+
+def meets_thresholds(rec: Dict, filters: Dict) -> bool:
+    """检查推荐是否满足统计阈值"""
+    task_type = get_task_type_from_rec(rec)
+    stats = extract_stats_from_rec(rec)
+    thresholds = filters.get("thresholds", {})
+
+    if task_type == "regression":
+        r = stats.get("r")
+        p = stats.get("p")
+        if r is not None and r < thresholds.get("regression_r", 0.3):
+            return False
+        if p is not None and p > thresholds.get("regression_p", 0.05):
+            return False
+
+    elif task_type == "classification":
+        v = stats.get("v")
+        eta = stats.get("eta")
+        p = stats.get("p")
+        metric = v if v is not None else eta
+        if metric is not None and metric < thresholds.get("categorical_v", 0.3):
+            return False
+        if p is not None and p > thresholds.get("categorical_p", 0.05):
+            return False
+
+    elif task_type == "time_series":
+        p = stats.get("p")
+        if p is not None and p > thresholds.get("timeseries_p", 0.05):
+            return False
+
+    return True
+
+
+def filter_recommendations(recommendations: List[Dict], filters: Dict) -> List[Dict]:
+    """过滤推荐列表"""
+    if not recommendations:
+        return []
+
+    result = []
+    task_types_enabled = filters.get("task_types", {})
+    priorities_enabled = filters.get("priorities", {})
+
+    for rec in recommendations:
+        task_type = get_task_type_from_rec(rec)
+
+        # 1. 按任务类型过滤
+        if not task_types_enabled.get(task_type, True):
+            continue
+
+        # 2. 按优先级过滤
+        priority = rec.get("priority", "中")
+        if not priorities_enabled.get(priority, True):
+            continue
+
+        # 3. 按统计阈值过滤
+        if not meets_thresholds(rec, filters):
+            continue
+
+        result.append(rec)
+
+    return result
+
+
+def render_recommend_filters():
+    """渲染推荐过滤器UI"""
+    filters = st.session_state.recommend_filters
+
+    with st.expander("🔍 筛选推荐", expanded=filters.get("expanded", False)):
+        col1, col2 = st.columns([3, 1])
+
+        with col1:
+            st.markdown("**任务类型**")
+            task_cols = st.columns(6)
+            task_options = [
+                ("regression", "📈 回归"),
+                ("classification", "📊 分类"),
+                ("time_series", "📅 时序"),
+                ("clustering", "🔘 聚类"),
+                ("association", "🔗 关联"),
+                ("anomaly", "🚨 异常")
+            ]
+
+            for col, (key, label) in zip(task_cols, task_options):
+                with col:
+                    current = filters["task_types"].get(key, True)
+                    new_val = st.checkbox(label, value=current, key=f"filter_task_{key}")
+                    if new_val != current:
+                        filters["task_types"][key] = new_val
+
+        st.markdown("**优先级**")
+        priority_cols = st.columns(3)
+        priority_options = [("高", "🔴"), ("中", "🟠"), ("低", "🟢")]
+
+        for col, (key, icon) in zip(priority_cols, priority_options):
+            with col:
+                current = filters["priorities"].get(key, True)
+                new_val = st.checkbox(f"{icon} {key}", value=current, key=f"filter_priority_{key}")
+                if new_val != current:
+                    filters["priorities"][key] = new_val
+
+        st.markdown("**统计阈值**")
+
+        # 回归阈值
+        reg_r = filters["thresholds"].get("regression_r", 0.3)
+        reg_p = filters["thresholds"].get("regression_p", 0.05)
+
+        col1, col2 = st.columns(2)
+        with col1:
+            new_r = st.slider(
+                "回归 |r| ≥",
+                min_value=0.0, max_value=1.0, value=reg_r, step=0.05,
+                key="filter_threshold_reg_r"
+            )
+            if new_r != reg_r:
+                filters["thresholds"]["regression_r"] = new_r
+
+        with col2:
+            new_p = st.slider(
+                "回归 p ≤",
+                min_value=0.0, max_value=0.2, value=reg_p, step=0.01,
+                key="filter_threshold_reg_p"
+            )
+            if new_p != reg_p:
+                filters["thresholds"]["regression_p"] = new_p
+
+        # 分类阈值
+        cat_v = filters["thresholds"].get("categorical_v", 0.3)
+        cat_p = filters["thresholds"].get("categorical_p", 0.05)
+
+        col1, col2 = st.columns(2)
+        with col1:
+            new_v = st.slider(
+                "分类 V/η² ≥",
+                min_value=0.0, max_value=1.0, value=cat_v, step=0.05,
+                key="filter_threshold_cat_v"
+            )
+            if new_v != cat_v:
+                filters["thresholds"]["categorical_v"] = new_v
+
+        with col2:
+            new_p = st.slider(
+                "分类 p ≤",
+                min_value=0.0, max_value=0.2, value=cat_p, step=0.01,
+                key="filter_threshold_cat_p"
+            )
+            if new_p != cat_p:
+                filters["thresholds"]["categorical_p"] = new_p
+
+        # 时序阈值
+        ts_p = filters["thresholds"].get("timeseries_p", 0.05)
+        new_ts_p = st.slider(
+            "时序 p ≤",
+            min_value=0.0, max_value=0.2, value=ts_p, step=0.01,
+            key="filter_threshold_ts_p"
+        )
+        if new_ts_p != ts_p:
+            filters["thresholds"]["timeseries_p"] = new_ts_p
+
+        # 重置按钮
+        col1, col2, col3 = st.columns([1, 1, 2])
+        with col1:
+            if st.button("🔄 重置", use_container_width=True):
+                reset_recommend_filters()
+                st.rerun()
+
+        # 更新展开状态
+        filters["expanded"] = True
+
 
 def render_model_training():
     """渲染模型训练标签页"""
@@ -52,6 +416,9 @@ def render_model_training():
     if not available_cols:
         st.warning("⚠️ 没有可用的特征列，请检查数据")
         return
+
+    # 初始化过滤器状态
+    init_recommend_filters()
 
     # 初始化状态
     if 'auto_fill_task_type' not in st.session_state:
@@ -92,11 +459,9 @@ def render_model_training():
         render_model_inference(session_id)
 
 
-# web/components/model_training.py (仅修改 render_model_recommendations 函数)
-
 def render_model_recommendations(json_data: Dict, data: pd.DataFrame,
                                  available_cols: List[str], variable_types: Dict):
-    """模型推荐标签页 - 过滤非训练任务，添加任务类型标识"""
+    """模型推荐标签页 - 过滤非训练任务，添加任务类型标识，支持筛选"""
     st.markdown("基于数据分析结果，自动推荐适合的模型。点击「使用」快速填充到下方表单")
 
     n_samples = len(data)
@@ -115,8 +480,9 @@ def render_model_recommendations(json_data: Dict, data: pd.DataFrame,
     all_recommendations = get_model_recommendations_from_json(json_data)
 
     # 过滤：只保留可训练的任务（排除关联规则挖掘和异常检测）
+    # 注：关联规则和异常检测在模型推荐中不显示，但在核心结论中保留
     SKIP_TASK_TYPES = ["关联规则挖掘", "异常检测"]
-    model_recommendations = []
+    trainable_recommendations = []
     for rec in all_recommendations:
         task_type_str = rec.get('task_type', '')
         should_skip = False
@@ -125,30 +491,50 @@ def render_model_recommendations(json_data: Dict, data: pd.DataFrame,
                 should_skip = True
                 break
         if not should_skip:
-            model_recommendations.append(rec)
+            trainable_recommendations.append(rec)
 
-    if not model_recommendations:
+    if not trainable_recommendations:
         st.info("暂无可训练的模型推荐")
+        return
+
+    # 渲染过滤器
+    render_recommend_filters()
+
+    # 获取过滤器并应用
+    filters = st.session_state.recommend_filters
+    filtered_recommendations = filter_recommendations(trainable_recommendations, filters)
+
+    # 显示统计
+    total = len(trainable_recommendations)
+    filtered_total = len(filtered_recommendations)
+    if filtered_total < total:
+        st.caption(f"📊 已筛选: {filtered_total}/{total} 条推荐")
+    else:
+        st.caption(f"📊 共 {total} 条推荐")
+
+    st.markdown("---")
+
+    if not filtered_recommendations:
+        st.info("没有符合筛选条件的推荐，请调整筛选条件")
         return
 
     # 任务类型到显示格式的映射
     def get_task_display(task_type_str: str) -> str:
-        if "时间序列预测" in task_type_str:
-            return "📅 时序"
-        elif "聚类分析" in task_type_str:
-            return "🔘 聚类"
-        elif "回归预测" in task_type_str:
+        if "回归预测" in task_type_str:
             return "📈 回归"
         elif "分类预测" in task_type_str:
             return "📊 分类"
+        elif "时间序列预测" in task_type_str:
+            return "📅 时序"
+        elif "聚类分析" in task_type_str:
+            return "🔘 聚类"
         else:
             return "📊 预测"
 
-    for i, rec in enumerate(model_recommendations):
+    for i, rec in enumerate(filtered_recommendations):
         priority = rec.get('priority', '中')
         priority_icon = "🔴" if priority == "高" else "🟠" if priority == "中" else "🟢"
 
-        # 使用 task_type 而不是 title
         task_display = get_task_display(rec.get('task_type', ''))
 
         # 获取模型名称
@@ -159,7 +545,8 @@ def render_model_recommendations(json_data: Dict, data: pd.DataFrame,
             cols = st.columns([1.5, 1.5, 2, 1.5, 1])
             with cols[0]:
                 st.markdown(f"**{priority_icon} {task_display} - {first_model}**")
-                st.caption(f"目标: {rec.get('target_column', '')}")
+                target = rec.get('target_column', '')
+                st.caption(f"目标: {target if target else '无'}")
             with cols[1]:
                 st.caption(f"推荐模型: {first_model}")
             with cols[2]:
@@ -167,7 +554,6 @@ def render_model_recommendations(json_data: Dict, data: pd.DataFrame,
                 if feature_cols:
                     valid_features = [f for f in feature_cols if f in available_cols]
                     if valid_features:
-                        # 全部列出
                         feature_str = ', '.join(valid_features)
                         st.caption(f"推荐特征: {feature_str}")
                     else:
@@ -181,8 +567,8 @@ def render_model_recommendations(json_data: Dict, data: pd.DataFrame,
                 else:
                     st.caption(f"原因: {reason}")
             with cols[4]:
-                if st.button("📋 使用", key=f"use_rec_{i}"):
-                    # 解析任务类型（使用 task_type）
+                if st.button("📋 使用", key=f"use_rec_{i}_{rec.get('target_column', '')[:10]}"):
+                    # 解析任务类型
                     task_type_str = rec.get('task_type', '')
                     if "回归预测" in task_type_str:
                         task_type = "regression"
@@ -230,7 +616,8 @@ def render_model_recommendations(json_data: Dict, data: pd.DataFrame,
                     for param_name, param_info in model_params.items():
                         default_params[param_name] = param_info.get('default')
 
-                    auto_model_name = generate_model_name(task_type, rec.get('target_column', ''), model_key)
+                    auto_model_name = generate_model_name(task_type, rec.get('target_column', ''), model_key,
+                                                          valid_features)
 
                     st.session_state.auto_fill_task_type = task_type
                     st.session_state.auto_fill_target_col = rec.get('target_column', '')
@@ -243,7 +630,7 @@ def render_model_recommendations(json_data: Dict, data: pd.DataFrame,
         st.divider()
 
 
-# web/components/model_training.py (续)
+# ==================== 以下为原有函数（保持不变） ====================
 
 def render_model_creation(data: pd.DataFrame, available_cols: List[str],
                           variable_types: Dict, session_id: str):
@@ -265,7 +652,6 @@ def render_model_creation(data: pd.DataFrame, available_cols: List[str],
                     if st.button("✅ 使用推荐配置", key="use_recommended_target", use_container_width=True):
                         st.session_state.auto_fill_target_col = recommended_target
                         st.session_state.auto_fill_task_type = recommended_task
-                        # 同时推荐特征（不限制数量）
                         recommended_features = RecommendationService.get_recommended_features(
                             data, recommended_target
                         )
@@ -282,7 +668,6 @@ def render_model_creation(data: pd.DataFrame, available_cols: List[str],
     col1, col2 = st.columns([5, 1])
     with col2:
         if st.button("➕ 创建新模型", use_container_width=True):
-            # 清空自动填充标志
             st.session_state.auto_fill_task_type = None
             st.session_state.auto_fill_target_col = None
             st.session_state.auto_fill_features = None
@@ -290,14 +675,12 @@ def render_model_creation(data: pd.DataFrame, available_cols: List[str],
             st.session_state.auto_fill_model_params = None
             st.session_state.auto_fill_model_name = None
 
-            # 清空表单控件的值
             keys_to_delete = ['train_task_type_selected', 'train_target_col_selected',
                               'train_features_selected', 'train_model_key_selected', 'model_name_input']
             for key in keys_to_delete:
                 if key in st.session_state:
                     del st.session_state[key]
 
-            # 清空参数值
             param_keys = [k for k in st.session_state.keys() if k.startswith('param_')]
             for key in param_keys:
                 del st.session_state[key]
@@ -308,7 +691,6 @@ def render_model_creation(data: pd.DataFrame, available_cols: List[str],
 
     # ========== 初始化默认值 ==========
     if 'train_task_type_selected' not in st.session_state:
-        # 如果有智能推荐，使用推荐的任务类型
         if FeatureFlags.is_enabled("smart_target") and st.session_state.get("auto_fill_task_type"):
             st.session_state.train_task_type_selected = st.session_state.auto_fill_task_type
         else:
@@ -324,12 +706,11 @@ def render_model_creation(data: pd.DataFrame, available_cols: List[str],
         if FeatureFlags.is_enabled("smart_target") and st.session_state.get("auto_fill_features"):
             st.session_state.train_features_selected = st.session_state.auto_fill_features
         else:
-            # 默认选择所有数值列（不限制数量）
             numeric_cols = data.select_dtypes(include=['int64', 'float64']).columns.tolist()
             target = st.session_state.train_target_col_selected
             if target and target in numeric_cols:
                 numeric_cols.remove(target)
-            st.session_state.train_features_selected = numeric_cols  # 不限制
+            st.session_state.train_features_selected = numeric_cols
 
     if 'train_model_key_selected' not in st.session_state:
         st.session_state.train_model_key_selected = "random_forest"
@@ -378,15 +759,12 @@ def render_model_creation(data: pd.DataFrame, available_cols: List[str],
 
     all_columns = list(data.columns)
 
-    # 处理自动填充
     if st.session_state.auto_fill_features:
         st.session_state.train_features_selected = st.session_state.auto_fill_features
         st.session_state.auto_fill_features = None
 
-    # 获取当前选中的特征
     current_selected = st.session_state.get("train_features_selected", [])
     if not current_selected:
-        # 默认选择所有数值列
         numeric_cols = data.select_dtypes(include=['int64', 'float64']).columns.tolist()
         target = st.session_state.train_target_col_selected
         if target and target in numeric_cols:
@@ -401,7 +779,6 @@ def render_model_creation(data: pd.DataFrame, available_cols: List[str],
         key="train_features_multiselect"
     )
 
-    # 更新 session_state
     st.session_state.train_features_selected = selected_features
 
     if not selected_features:
@@ -410,7 +787,6 @@ def render_model_creation(data: pd.DataFrame, available_cols: List[str],
 
     st.caption(f"已选择 {len(selected_features)} 个特征")
 
-    # 智能特征推荐提示（不限制数量）
     if FeatureFlags.is_enabled("smart_target") and target_col:
         recommended_features = RecommendationService.get_recommended_features(data, target_col)
         if recommended_features and set(recommended_features) - set(selected_features):
@@ -612,7 +988,6 @@ def render_model_creation(data: pd.DataFrame, available_cols: List[str],
 
     # ========== 开始训练按钮 ==========
     if st.button("▶️ 开始训练", type="primary", use_container_width=True):
-        # 收集用户参数
         user_params = {}
         if selected_model_key:
             model_params = get_model_params(task_type, selected_model_key)
@@ -663,7 +1038,6 @@ def render_model_inference(session_id: str):
         st.info("暂无已保存的模型，请先在「模型创建」中训练模型")
         return
 
-    # 模型列表
     st.markdown("#### 📦 已保存的模型")
     for item in saved_models:
         with st.container():

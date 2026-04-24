@@ -78,3 +78,11 @@ elif current_tab == 3:
     else:
         st.info("📌 请先在「数据准备」中上传数据并点击「开始分析」，或从侧边栏选择历史项目")
         st.caption("分析完成后，可使用大模型进行智能解读")
+elif current_tab == 4:
+    session_id = SessionService.get_current_session()
+    if session_id is not None:
+        from web.components.results import render_compare_tab
+        render_compare_tab()
+    else:
+        st.info("📌 请先在「数据准备」中上传数据并点击「开始分析」，或从侧边栏选择历史项目")
+        st.caption("选择两个项目后，可进行结果对比")

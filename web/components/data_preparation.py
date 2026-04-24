@@ -187,11 +187,22 @@ def render_single_file_content(df: pd.DataFrame, ext: str, file_name: str):
 
     # 判断是否自动分析
     if FeatureFlags.is_auto_analysis_enabled():
-        with st.spinner("正在自动分析..."):
-            AnalysisService.analyze_single_file(file_name, ext, filtered_df, variable_types)
+        # 设置分析进行中标志，防止重复点击
+        if not st.session_state.get("analysis_running", False):
+            st.session_state.analysis_running = True
+            with st.spinner("正在自动分析..."):
+                AnalysisService.analyze_single_file(file_name, ext, filtered_df, variable_types)
+            st.session_state.analysis_running = False
+        else:
+            st.info("分析正在进行中，请稍候...")
     else:
-        if st.button("▶️ 开始分析", type="primary", use_container_width=True):
+        # 开始分析按钮，带防重复点击
+        if st.button("▶️ 开始分析", type="primary", use_container_width=True,
+                     disabled=st.session_state.get("analysis_running", False)):
+            st.session_state.analysis_running = True
             AnalysisService.analyze_single_file(file_name, ext, filtered_df, variable_types)
+            st.session_state.analysis_running = False
+            st.rerun()
 
 
 def render_multi_file_ui(uploaded_files):
@@ -300,8 +311,14 @@ def render_multi_file_content(tables: dict):
     valid_relationships = [rel for rel in final_relationships if rel.get('from_col') and rel.get('to_col')]
 
     st.markdown("---")
-    if st.button("▶️ 开始分析", type="primary", use_container_width=True):
+
+    # 开始分析按钮，带防重复点击
+    if st.button("▶️ 开始分析", type="primary", use_container_width=True,
+                 disabled=st.session_state.get("analysis_running", False)):
+        st.session_state.analysis_running = True
         AnalysisService.analyze_multi_file(valid_tables, variable_types_dict, valid_relationships)
+        st.session_state.analysis_running = False
+        st.rerun()
 
 
 def render_database_preparation():
@@ -400,12 +417,10 @@ def load_and_prepare_database(config: dict, table_names: list, limit: int, max_t
         # ========== 新增：自动分析 ==========
         from web.services.feature_flags import FeatureFlags
         from web.services.analysis_service import AnalysisService
-        from web.utils.data_preprocessor import get_default_variable_type
+        from web.utils.data_preprocessor import get_default_variable_type, auto_discover_relationships
 
         # 判断是否自动分析
         if FeatureFlags.is_auto_analysis_enabled():
-            from web.utils.data_preprocessor import get_default_variable_type, auto_discover_relationships
-
             variable_types_dict = {}
             filtered_tables = {}
 
@@ -515,6 +530,12 @@ def render_database_content(tables: dict):
     valid_relationships = [rel for rel in final_relationships if rel.get('from_col') and rel.get('to_col')]
 
     st.markdown("---")
-    if st.button("▶️ 开始分析", type="primary", use_container_width=True):
+
+    # 开始分析按钮，带防重复点击
+    if st.button("▶️ 开始分析", type="primary", use_container_width=True,
+                 disabled=st.session_state.get("analysis_running", False)):
+        st.session_state.analysis_running = True
         AnalysisService.analyze_database(valid_tables, variable_types_dict, valid_relationships,
                                          st.session_state.db_config)
+        st.session_state.analysis_running = False
+        st.rerun()
