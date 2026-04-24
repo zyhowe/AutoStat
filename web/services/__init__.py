@@ -27,7 +27,7 @@ from web.services.agent_service import (
     process_agent_response
 )
 
-# 新增服务（只导出实际存在的类）
+# 新增服务
 from web.services.insight_service import InsightService
 from web.services.recommendation_service import RecommendationService
 from web.services.feature_flags import FeatureFlags
@@ -50,6 +50,7 @@ __all__ = [
     'delete_model',
     'load_model_for_inference',
     'execute_inference',
+    # Agent服务
     'AgentService',
     'get_agent_tools_description',
     'build_data_context',

@@ -113,6 +113,16 @@ class AnalysisService:
             status_placeholder.empty()
             progress_bar.empty()
 
+            # 自动解读（如果开启）
+            if FeatureFlags.is_auto_interpretation_enabled() and st.session_state.llm_client is not None:
+                status_placeholder.info("🧠 正在生成综合解读...")
+                from web.services.auto_interpret_service import auto_interpret
+                interpretation = auto_interpret(session_id, st.session_state.llm_client)
+                if interpretation:
+                    # 保存到 session_state 供核心结论显示
+                    st.session_state.auto_interpretation = interpretation
+                status_placeholder.empty()
+
             st.rerun()
 
         except Exception as e:
@@ -209,6 +219,16 @@ class AnalysisService:
             time.sleep(0.5)
             status_placeholder.empty()
             progress_bar.empty()
+
+            # 自动解读（如果开启）
+            if FeatureFlags.is_auto_interpretation_enabled() and st.session_state.llm_client is not None:
+                status_placeholder.info("🧠 正在生成综合解读...")
+                from web.services.auto_interpret_service import auto_interpret
+                interpretation = auto_interpret(session_id, st.session_state.llm_client)
+                if interpretation:
+                    # 保存到 session_state 供核心结论显示
+                    st.session_state.auto_interpretation = interpretation
+                status_placeholder.empty()
 
             st.rerun()
 
@@ -308,6 +328,16 @@ class AnalysisService:
             time.sleep(0.5)
             status_placeholder.empty()
             progress_bar.empty()
+
+            # 自动解读（如果开启）
+            if FeatureFlags.is_auto_interpretation_enabled() and st.session_state.llm_client is not None:
+                status_placeholder.info("🧠 正在生成综合解读...")
+                from web.services.auto_interpret_service import auto_interpret
+                interpretation = auto_interpret(session_id, st.session_state.llm_client)
+                if interpretation:
+                    # 保存到 session_state 供核心结论显示
+                    st.session_state.auto_interpretation = interpretation
+                status_placeholder.empty()
 
             st.rerun()
 

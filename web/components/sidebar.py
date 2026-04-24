@@ -371,6 +371,24 @@ def render_auto_training_selector():
         FeatureFlags.set_auto_training(new_value)
         st.rerun()
 
+def render_auto_interpretation_selector():
+    """渲染自动解读选择器"""
+    current = FeatureFlags.is_auto_interpretation_enabled()
+    options = ["开启", "关闭"]
+    current_index = 0 if current else 1
+
+    selected = st.sidebar.selectbox(
+        "🧠 自动解读",
+        options=options,
+        index=current_index,
+        key="auto_interpretation_selector",
+        help="开启后分析完成自动生成综合解读（需配置大模型）"
+    )
+
+    new_value = (selected == "开启")
+    if new_value != current:
+        FeatureFlags.set_auto_interpretation(new_value)
+        st.rerun()
 
 def render_project_history():
     """渲染项目最近列表"""
@@ -485,6 +503,9 @@ def render_sidebar():
 
     # 自动训练选择器
     render_auto_training_selector()
+
+    # 自动解读选择器
+    render_auto_interpretation_selector()
 
     st.sidebar.markdown("---")
 

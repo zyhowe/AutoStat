@@ -6,6 +6,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import time
+import os
 from typing import Dict, Any, Optional, List, Tuple
 from sklearn.model_selection import train_test_split
 
@@ -16,6 +17,11 @@ from autostat.models.storage import ModelStorage
 from autostat.models.predictor import ModelPredictor
 from web.services.storage_service import StorageService
 from web.services.session_service import SessionService
+
+# 解决 Windows 下 threadpoolctl 的 OSError 问题
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+os.environ["OMP_NUM_THREADS"] = "1"
 
 
 def get_model_display_name(model_key: str) -> str:
@@ -63,8 +69,8 @@ def get_model_display_name(model_key: str) -> str:
     return model_names.get(model_key, model_key)
 
 
-def generate_model_name(task_type: str, target_col: str, model_key: str) -> str:
-    """生成默认模型名称"""
+def generate_model_name(task_type: str, target_col: str, model_key: str, features: List[str] = None) -> str:
+    """生成默认模型名称，包含特征信息（前3个）"""
     task_names = {
         "classification": "分类",
         "regression": "回归",
@@ -74,10 +80,22 @@ def generate_model_name(task_type: str, target_col: str, model_key: str) -> str:
 
     task_name = task_names.get(task_type, task_type)
     model_name = get_model_display_name(model_key)
+
+    # 目标列处理
     target = target_col if target_col else "无目标"
     target_short = target[:15] if len(target) > 15 else target
 
-    return f"{task_name}_{target_short}_{model_name}"
+    # 特征处理
+    if features and len(features) > 0:
+        # 取前3个特征，每个特征取前10个字符
+        feature_list = [f[:10] for f in features[:3]]
+        feature_str = "_" + "_".join(feature_list)
+        if len(features) > 3:
+            feature_str += "_等"
+    else:
+        feature_str = ""
+
+    return f"{task_name}_{target_short}_{model_name}{feature_str}"
 
 
 def get_available_features(data: pd.DataFrame, variable_types: Dict) -> List[str]:
@@ -174,15 +192,12 @@ def execute_training(
         # ========== 根据任务类型处理数据切分 ==========
         if task_type == "time_series":
             # 时间序列任务：按时间顺序划分，不随机打乱
-            # 删除缺失值
             X_clean = X.dropna()
 
             n = len(X_clean)
             train_size = int(n * train_ratio)
             val_size = int(n * val_ratio) if val_ratio > 0 else 0
 
-            # 对于 ARIMA，X 应该是目标列的值（一维）
-            # 如果有多列，取第一列
             if len(available_features) > 1:
                 target_series = X_clean.iloc[:, 0]
             else:
@@ -193,7 +208,6 @@ def execute_training(
             X_test = target_series.iloc[train_size + val_size:] if test_ratio > 0 else None
             y_train = y_val = y_test = None
 
-            # 不需要预处理器
             preprocessor = None
 
             st.info(f"时间序列数据: 总样本 {n}, 训练集 {len(X_train)}")
@@ -224,7 +238,6 @@ def execute_training(
 
             y_train = y_val = y_test = None
 
-            # 聚类需要预处理器（标准化）
             categorical_features = [col for col in available_features if
                                     col in data.select_dtypes(include=['object']).columns]
             numerical_features = [col for col in available_features if col not in categorical_features]
@@ -242,11 +255,14 @@ def execute_training(
 
         else:
             # 分类和回归任务：监督学习，正常切分
-            X_clean = X.dropna()
-            clean_indices = X_clean.index
-
+            # 创建布尔掩码：X 和 y 都没有缺失值
+            mask = ~X.isna().any(axis=1)
             if y is not None:
-                y_clean = y.loc[clean_indices] if clean_indices.isin(y.index).all() else y[clean_indices]
+                mask = mask & ~y.isna()
+
+            X_clean = X[mask]
+            if y is not None:
+                y_clean = y[mask]
             else:
                 y_clean = None
 
@@ -297,16 +313,13 @@ def execute_training(
         trainer = ModelTrainer(task_type, model_key, user_params)
 
         if task_type == "time_series" and model_key == "arima":
-            # ARIMA 训练（不需要预处理）
             train_result = trainer.train(
                 X_train, y_train, X_val, y_val,
                 cv_folds=cv_folds if cv_folds > 0 else None,
                 early_stopping=False
             )
-            # ARIMA 不需要预处理器
             preprocessor = None
         else:
-            # 其他任务：预处理数据
             if X_train is not None:
                 X_train_processed = preprocessor.fit_transform(X_train, y_train) if preprocessor else X_train
             else:
@@ -328,7 +341,6 @@ def execute_training(
         test_metrics = None
         if X_test is not None:
             if task_type == "time_series":
-                # 时间序列测试
                 test_metrics = trainer.evaluate(X_test, y_test)
             elif task_type in ["classification", "regression"] and preprocessor:
                 X_test_processed = preprocessor.transform(X_test)
@@ -338,7 +350,7 @@ def execute_training(
         model_key_full = f"{task_type}_{model_key}_{timestamp}"
 
         if user_model_name is None:
-            user_model_name = generate_model_name(task_type, target_col, model_key)
+            user_model_name = generate_model_name(task_type, target_col, model_key, available_features)
 
         model_metadata = {
             "model_key": model_key_full,

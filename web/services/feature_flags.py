@@ -21,6 +21,7 @@ class FeatureFlags:
         "demo_data": True,
         "auto_analysis": False,  # 默认关闭
         "auto_training": False,
+        "auto_interpretation": False,  # 新增：自动解读
         "value_preview": True,
         "empty_state_guide": True,
         "smart_summary": True,
@@ -153,3 +154,14 @@ class FeatureFlags:
     def set_auto_training(cls, enabled: bool):
         """设置自动训练开关"""
         cls.set_flag("auto_training", enabled)
+
+    # 添加便捷方法
+    @classmethod
+    def is_auto_interpretation_enabled(cls) -> bool:
+        """检查自动解读是否开启"""
+        return cls.is_enabled("auto_interpretation")
+
+    @classmethod
+    def set_auto_interpretation(cls, enabled: bool):
+        """设置自动解读开关"""
+        cls.set_flag("auto_interpretation", enabled)

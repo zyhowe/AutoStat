@@ -35,6 +35,9 @@ class CacheService:
         if 'current_source_name' not in st.session_state:
             st.session_state.current_source_name = None
 
+        if 'auto_interpretation' not in st.session_state:
+            st.session_state.auto_interpretation = None
+
         # 大模型相关
         if 'llm_client' not in st.session_state:
             st.session_state.llm_client = None

@@ -5,6 +5,7 @@
 import streamlit as st
 import time
 import traceback
+import os
 from typing import Dict, Any, Optional, List
 
 from web.services.session_service import SessionService
@@ -13,9 +14,15 @@ from web.services.model_training_service import (
     get_model_recommendations_from_json,
     get_models_by_task_type,
     get_model_params,
-    execute_training
+    execute_training,
+    generate_model_name
 )
 from web.services.feature_flags import FeatureFlags
+
+# 解决 Windows 下 threadpoolctl 的 OSError 问题
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+os.environ["OMP_NUM_THREADS"] = "1"
 
 
 def auto_train_from_recommendation(session_id: str) -> List[Dict]:
@@ -54,9 +61,6 @@ def auto_train_from_recommendation(session_id: str) -> List[Dict]:
             total = len(all_recommendations)
             st.progress(0, text=f"共 {total} 个模型待训练")
 
-            print(f"自动训练: 开始，共 {total} 个模型")
-            print(f"自动训练: 数据形状 {data.shape}")
-
             # 依次训练每个推荐
             for idx, rec in enumerate(all_recommendations):
                 st.markdown(f"---")
@@ -65,9 +69,7 @@ def auto_train_from_recommendation(session_id: str) -> List[Dict]:
                 # 显示推荐内容
                 task_type_str = rec.get('task_type', '')
                 target_col = rec.get('target_column', '')
-                feature_cols = rec.get('feature_columns', [])
-
-                print(f"自动训练: 模型 {idx+1} - 原始任务类型: {task_type_str}, 目标: {target_col}, 特征数: {len(feature_cols)}")
+                feature_cols = rec.get('feature_columns', []) or []
 
                 st.caption(f"任务类型: {task_type_str}")
                 st.caption(f"目标列: {target_col if target_col else '无'}")
@@ -80,11 +82,9 @@ def auto_train_from_recommendation(session_id: str) -> List[Dict]:
                 # 1. 时间序列预测 → 使用 ARIMA
                 if "时间序列预测" in task_type_str:
                     task_type = "time_series"
-                    model_key = "arima"  # statsmodels 的 ARIMA
-                    print(f"自动训练: 时间序列预测 -> 使用 ARIMA")
+                    model_key = "arima"
                     st.caption("📅 时间序列预测 -> 使用 ARIMA 模型")
 
-                    # 时间序列需要特殊处理：特征列应该是目标列本身
                     if target_col:
                         valid_features = [target_col]
                     else:
@@ -93,12 +93,10 @@ def auto_train_from_recommendation(session_id: str) -> List[Dict]:
                 # 2. 聚类分析 → 使用 K-Means
                 elif "聚类分析" in task_type_str:
                     task_type = "clustering"
-                    model_key = "kmeans"  # sklearn 的 K-Means
+                    model_key = "kmeans"
                     target_col = None
-                    print(f"自动训练: 聚类分析 -> 使用 K-Means")
                     st.caption("🔘 聚类分析 -> 使用 K-Means 模型")
 
-                    # 验证特征列存在
                     valid_features = []
                     missing_features = []
                     for f in feature_cols:
@@ -108,17 +106,14 @@ def auto_train_from_recommendation(session_id: str) -> List[Dict]:
                             missing_features.append(f)
 
                     if missing_features:
-                        print(f"自动训练: 缺失特征列 {missing_features}")
                         st.warning(f"部分特征列不存在: {missing_features}")
 
-                # 3. 回归预测 → 使用随机森林
+                # 3. 回归预测 → 使用随机森林回归
                 elif "回归预测" in task_type_str:
                     task_type = "regression"
                     model_key = "random_forest_regressor"
-                    print(f"自动训练: 回归预测 -> 使用随机森林回归")
                     st.caption("📈 回归预测 -> 使用随机森林回归模型")
 
-                    # 验证特征列存在
                     valid_features = []
                     missing_features = []
                     for f in feature_cols:
@@ -128,17 +123,14 @@ def auto_train_from_recommendation(session_id: str) -> List[Dict]:
                             missing_features.append(f)
 
                     if missing_features:
-                        print(f"自动训练: 缺失特征列 {missing_features}")
                         st.warning(f"部分特征列不存在: {missing_features}")
 
-                # 4. 分类预测 → 使用随机森林
+                # 4. 分类预测 → 使用随机森林分类
                 elif "分类预测" in task_type_str:
                     task_type = "classification"
                     model_key = "random_forest"
-                    print(f"自动训练: 分类预测 -> 使用随机森林分类")
                     st.caption("📊 分类预测 -> 使用随机森林分类模型")
 
-                    # 验证特征列存在
                     valid_features = []
                     missing_features = []
                     for f in feature_cols:
@@ -148,7 +140,6 @@ def auto_train_from_recommendation(session_id: str) -> List[Dict]:
                             missing_features.append(f)
 
                     if missing_features:
-                        print(f"自动训练: 缺失特征列 {missing_features}")
                         st.warning(f"部分特征列不存在: {missing_features}")
 
                 else:
@@ -177,11 +168,9 @@ def auto_train_from_recommendation(session_id: str) -> List[Dict]:
                 for param_name, param_info in model_params.items():
                     default_params[param_name] = param_info.get('default')
 
-                # 生成模型名称
-                from web.services.model_training_service import generate_model_name
-                user_model_name = f"自动训练_{generate_model_name(task_type, target_col if target_col else '', model_key)}"
-
-                print(f"自动训练: 开始训练 {user_model_name} (task_type={task_type}, model_key={model_key}, features={len(valid_features)})")
+                # 生成模型名称（传入特征列表）
+                base_name = generate_model_name(task_type, target_col if target_col else '', model_key, valid_features)
+                user_model_name = f"自动训练_{base_name}"
 
                 # 显示训练状态
                 status_placeholder = st.empty()
@@ -201,11 +190,9 @@ def auto_train_from_recommendation(session_id: str) -> List[Dict]:
                     if success:
                         status_placeholder.success(f"✅ 训练完成: {user_model_name}")
                         results.append({"success": True, "model_name": user_model_name, "result": result})
-                        print(f"自动训练: 成功 - {user_model_name}")
                     else:
                         error_msg = result.get('error', '未知错误')
                         status_placeholder.error(f"❌ 训练失败: {error_msg}")
-                        print(f"自动训练: 失败 - {error_msg}")
                         traceback_msg = result.get('traceback', '')
                         if traceback_msg:
                             print(traceback_msg)
@@ -214,7 +201,6 @@ def auto_train_from_recommendation(session_id: str) -> List[Dict]:
                 except Exception as e:
                     error_msg = str(e)
                     status_placeholder.error(f"❌ 训练异常: {error_msg}")
-                    print(f"自动训练: 异常 - {error_msg}")
                     print(traceback.format_exc())
                     results.append({"success": False, "error": error_msg, "recommendation": rec})
 
@@ -238,12 +224,9 @@ def auto_train_from_recommendation(session_id: str) -> List[Dict]:
                     if not r.get("success"):
                         st.caption(f"  - {r.get('recommendation', {}).get('task_type', '未知')}: {r.get('error', '未知错误')}")
 
-            print(f"自动训练: 完成 - 成功 {success_count}, 失败 {fail_count}")
-
         except Exception as e:
             error_msg = str(e)
             st.error(f"自动训练出错: {error_msg}")
-            print(f"自动训练出错: {error_msg}")
             print(traceback.format_exc())
 
     return results

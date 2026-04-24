@@ -51,33 +51,6 @@ if st.session_state.scroll_to_top:
 # 渲染功能开关弹窗（只渲染，不自动打开）
 #FeatureFlags.render_settings_dialog()
 
-# web/app.py (在 render_tabs() 之前添加)
-
-# 处理核心结论和推理预测中的操作按钮
-if st.session_state.get("pending_action"):
-    action = st.session_state.pending_action
-    st.session_state.pending_action = None
-
-    if action == "cluster":
-        # 跳转到模型训练页，自动填充聚类配置
-        st.session_state.current_tab = 2
-        st.session_state.auto_fill_task_type = "clustering"
-        st.session_state.auto_fill_features = None  # 让系统自动选择所有数值列
-        st.session_state.auto_fill_model_key = "kmeans"
-        st.session_state.auto_fill_model_name = "自动_聚类分析_KMeans"
-        st.rerun()
-    elif action == "association":
-        # 跳转到AI解读页，发送关联规则分析请求
-        st.session_state.current_tab = 3
-        st.session_state.pending_question = "请对分类变量进行关联规则挖掘，找出频繁项集和强关联规则，并解释业务含义。"
-        st.rerun()
-    elif action == "outlier":
-        # 跳转到AI解读页，发送异常值分析请求
-        st.session_state.current_tab = 3
-        st.session_state.pending_question = "请分析数据中的异常值，判断哪些是数据错误，哪些是有意义的异常，并给出处理建议。"
-        st.rerun()
-
-
 # 渲染标签页
 current_tab = render_tabs()
 

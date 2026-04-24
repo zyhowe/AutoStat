@@ -23,6 +23,11 @@ class ModelInferenceTool:
             self._models_cache = list_saved_models(self.session_id)
         return self._models_cache
 
+    def get_models_by_type(self, task_type: str) -> List[Dict]:
+        """按任务类型获取模型"""
+        models = self.get_available_models()
+        return [m for m in models if m.get('task_type') == task_type]
+
     def predict(self, model_key: str, input_values: Dict[str, Any]) -> Dict[str, Any]:
         try:
             model, preprocessor, metadata, metrics = load_model_for_inference(model_key, self.session_id)
@@ -67,7 +72,47 @@ class ModelInferenceTool:
             return {"success": False, "error": str(e)}
 
 
-# web/components/agent_inference.py (在 render_agent_inference 函数末尾添加)
+def parse_and_execute_tool(response: str, session_id: str) -> str:
+    """解析并执行工具调用，返回结果或None"""
+    patterns = [
+        r'\{[^{}]*"tool"\s*:\s*"predict"[^{}]*"input_values"\s*:\s*\{[^{}]*\}[^{}]*\}',
+        r'\{[^{}]*"tool"\s*:\s*"predict"[^{}]*\}',
+        r'```json\s*(\{[^{}]*"tool"\s*:\s*"predict"[^{}]*\})\s*```',
+        r'```\s*(\{[^{}]*"tool"\s*:\s*"predict"[^{}]*\})\s*```',
+    ]
+
+    for pattern in patterns:
+        match = re.search(pattern, response, re.DOTALL)
+        if match:
+            json_str = match.group(1) if '```' in pattern and match.group(1) else match.group(0)
+            try:
+                tool_call = json.loads(json_str)
+                if tool_call.get('tool') == 'predict':
+                    tool = ModelInferenceTool(session_id)
+                    result = tool.predict(
+                        tool_call.get('model_key', ''),
+                        tool_call.get('input_values', {})
+                    )
+                    if result.get('success'):
+                        pred = result.get('prediction')
+                        conf = result.get('confidence')
+                        output = f"**预测结果**\n\n- 使用模型: {result.get('model_name')}\n"
+                        if isinstance(pred, (int, float)):
+                            output += f"- 预测值: {pred:.4f}\n"
+                        else:
+                            output += f"- 预测结果: {pred}\n"
+                        if conf:
+                            if isinstance(conf, list):
+                                output += f"- 置信度: {conf[0]:.2%}\n"
+                            else:
+                                output += f"- 置信度: {conf:.2%}\n"
+                        return output
+                    else:
+                        return f"预测失败: {result.get('error')}"
+            except json.JSONDecodeError:
+                continue
+    return None
+
 
 def render_agent_inference():
     """渲染推理预测界面 - 显示模型列表和示例按钮"""
@@ -85,8 +130,17 @@ def render_agent_inference():
     if not available_models:
         st.info("暂无已训练的模型，请先在「小模型训练」中训练模型")
     else:
+        # 按任务类型分组
+        classification_models = tool.get_models_by_type("classification")
+        regression_models = tool.get_models_by_type("regression")
+        time_series_models = tool.get_models_by_type("time_series")
+        clustering_models = tool.get_models_by_type("clustering")
+
+        all_models = classification_models + regression_models + time_series_models + clustering_models
+
         st.markdown("**📋 可用模型及示例：**")
-        for model in available_models:
+
+        for model in all_models:
             model_name = model.get('user_model_name', model.get('model_key'))
             model_key = model.get('model_key')
             task_type = model.get('task_type', 'unknown')
@@ -94,7 +148,13 @@ def render_agent_inference():
             features = model.get('features', [])
 
             with st.expander(f"📊 {model_name}", expanded=False):
-                st.caption(f"类型: {task_type}, 预测目标: {target}")
+                task_display = {
+                    "classification": "分类",
+                    "regression": "回归",
+                    "time_series": "时序",
+                    "clustering": "聚类"
+                }.get(task_type, task_type)
+                st.caption(f"类型: {task_display}, 预测目标: {target}")
                 st.caption(f"特征: {', '.join(features[:8])}{'...' if len(features) > 8 else ''}")
 
                 if features:
@@ -112,96 +172,41 @@ def render_agent_inference():
                             sample_values[f] = 80
                         elif '心率' in f or 'heart' in f.lower():
                             sample_values[f] = 75
+                        elif '血糖' in f:
+                            sample_values[f] = 5.2
+                        elif '胆固醇' in f:
+                            sample_values[f] = 4.8
                         else:
                             sample_values[f] = 100
 
-                    sample_text = f"用「{model_name}」预测"
-                    for f, v in sample_values.items():
-                        sample_text += f"、{f}{v}"
-                    sample_text += f"的{target}"
+                    # 根据任务类型生成不同的示例文本
+                    if task_type == "time_series":
+                        sample_text = f"用「{model_name}」预测未来7天的{target}"
+                    elif task_type == "clustering":
+                        sample_values_str = "、".join([f"{k}{v}" for k, v in sample_values.items()])
+                        sample_text = f"用「{model_name}」对 [{sample_values_str}] 进行聚类"
+                    else:
+                        sample_text = f"用「{model_name}」预测"
+                        for f, v in sample_values.items():
+                            sample_text += f"、{f}{v}"
+                        sample_text += f"的{target}"
 
                     if st.button(f"🔍 {sample_text}", key=f"example_{model_key}", use_container_width=True):
                         st.session_state.pending_question = sample_text
                         st.rerun()
 
-    # ========== 新增：内置分析示例（无需训练） ==========
+    # ========== 内置分析示例（无需训练） ==========
     st.markdown("---")
     st.markdown("**📌 内置分析示例（无需训练）：**")
 
-    col1, col2, col3 = st.columns(3)
+    col1, col2 = st.columns(2)
 
     with col1:
-        if st.button("🔘 对数据进行聚类分析", use_container_width=True):
-            st.session_state.pending_action = "cluster"
+        if st.button("🔗 挖掘分类变量间的关联规则", use_container_width=True):
+            st.session_state.pending_question = "请对分类变量进行关联规则挖掘，找出频繁项集和强关联规则，并解释业务含义。"
             st.rerun()
 
     with col2:
-        if st.button("🔗 挖掘分类变量间的关联规则", use_container_width=True):
-            st.session_state.pending_action = "association"
-            st.rerun()
-
-    with col3:
         if st.button("🚨 检测异常值并分析", use_container_width=True):
-            st.session_state.pending_action = "outlier"
+            st.session_state.pending_question = "请分析数据中的异常值，判断哪些是数据错误，哪些是有意义的异常，并给出处理建议。"
             st.rerun()
-
-
-def parse_and_execute_tool(response: str, session_id: str) -> str:
-    """解析并执行工具调用，返回结果或None"""
-    # print("=== parse_and_execute_tool 被调用 ===")
-    # print(f"响应内容: {response[:500]}")
-
-    # 修改后的正则：允许嵌套一层大括号
-    # 匹配 {"tool": "predict", "model_key": "...", "input_values": {...}}
-    patterns = [
-        r'\{[^{}]*"tool"\s*:\s*"predict"[^{}]*"input_values"\s*:\s*\{[^{}]*\}[^{}]*\}',  # 精确匹配predict格式
-        r'\{[^{}]*"tool"\s*:\s*"predict"[^{}]*\}',  # 简单匹配（后备）
-        r'```json\s*(\{[^{}]*"tool"\s*:\s*"predict"[^{}]*\})\s*```',
-        r'```\s*(\{[^{}]*"tool"\s*:\s*"predict"[^{}]*\})\s*```',
-    ]
-
-    for idx, pattern in enumerate(patterns):
-        # print(f"尝试模式 {idx}: {pattern[:100]}...")
-        match = re.search(pattern, response, re.DOTALL)
-        if match:
-            # print(f"模式 {idx} 匹配成功")
-            json_str = match.group(1) if '```' in pattern and match.group(1) else match.group(0)
-            # print(f"提取的JSON: {json_str}")
-            try:
-                tool_call = json.loads(json_str)
-                # print(f"解析成功: {tool_call}")
-                if tool_call.get('tool') == 'predict':
-                    # print("tool是predict，开始执行")
-                    tool = ModelInferenceTool(session_id)
-                    result = tool.predict(
-                        tool_call.get('model_key', ''),
-                        tool_call.get('input_values', {})
-                    )
-                    # print(f"预测结果: {result}")
-                    if result.get('success'):
-                        pred = result.get('prediction')
-                        conf = result.get('confidence')
-                        output = f"**预测结果**\n\n- 使用模型: {result.get('model_name')}\n"
-                        if isinstance(pred, (int, float)):
-                            output += f"- 预测值: {pred:.4f}\n"
-                        else:
-                            output += f"- 预测结果: {pred}\n"
-                        if conf:
-                            if isinstance(conf, list):
-                                output += f"- 置信度: {conf[0]:.2%}\n"
-                            else:
-                                output += f"- 置信度: {conf:.2%}\n"
-                        # print(f"返回输出: {output}")
-                        return output
-                    else:
-                        error_msg = f"预测失败: {result.get('error')}"
-                        # print(error_msg)
-                        return error_msg
-            except json.JSONDecodeError as e:
-                print(f"JSON解析失败: {e}")
-                continue
-        # else:
-            # print(f"模式 {idx} 匹配失败")
-
-    # print("所有模式都未匹配，返回None")
-    return None
