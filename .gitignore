@@ -62,3 +62,9 @@ htmlcov/
 # Dify 插件配置（明确不忽略）
 !.dify/
 !.dify/**/*.json
+
+# 添加文本分析相关忽略
+.autotext/
+text_report_*.html
+text_result_*.json
+sample_texts.txt

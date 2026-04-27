@@ -11,7 +11,7 @@ license = {text = "MIT"}
 authors = [
     {name = "AutoStat Team", email = "howe_min@163.com"}
 ]
-keywords = ["statistics", "data-analysis", "mcp", "ai", "automl"]
+keywords = ["statistics", "data-analysis", "mcp", "ai", "automl", "text-analysis"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Science/Research",
@@ -22,6 +22,7 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Topic :: Scientific/Engineering :: Information Analysis",
+    "Topic :: Text Processing",
 ]
 requires-python = ">=3.8"
 dependencies = [
@@ -36,10 +37,26 @@ dependencies = [
     "jinja2>=3.0.0",
     "requests>=2.25.0",
     "fastmcp>=0.1.0",
+    # 文本分析依赖
+    "jieba>=0.42.1",
+    "nltk>=3.8",
+    "snownlp>=0.12.3",
+    "wordcloud>=1.9.0",
+    "langdetect>=1.0.9",
+]
+
+[project.optional-dependencies]
+text = [
+    "jieba>=0.42.1",
+    "nltk>=3.8",
+    "snownlp>=0.12.3",
+    "wordcloud>=1.9.0",
+    "langdetect>=1.0.9",
 ]
 
 [project.scripts]
 autostat-mcp = "autostat.mcp_server:main"
+autotext-mcp = "autotext.mcp_server:main"
 
 [project.urls]
 Homepage = "https://github.com/zyhowe/AutoStat"
@@ -47,8 +64,9 @@ Repository = "https://github.com/zyhowe/AutoStat"
 Issues = "https://github.com/zyhowe/AutoStat/issues"
 
 [tool.setuptools.packages.find]
-include = ["autostat*"]
-exclude = ["tests*", "examples*", "web*", "templates*"]
+include = ["autostat*", "autotext*"]
+exclude = ["tests*", "examples*", "web*", "webtext*", "templates*", "mcp_servers*"]
 
 [tool.setuptools.package-data]
 autostat = ["templates/*.html"]
+autotext = ["templates/*.html"]
