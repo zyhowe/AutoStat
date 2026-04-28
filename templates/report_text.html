@@ -11,7 +11,7 @@
             padding: 20px;
             background: #f0f2f5;
         }
-        .container { max-width: 1200px; margin: 0 auto; }
+        .container { max-width: 1400px; margin: 0 auto; }
 
         /* 头部 */
         .header {
@@ -63,6 +63,7 @@
         /* 网格 */
         .grid-2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; }
         .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+        .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; }
 
         /* 关键词云 */
         .keyword-cloud {
@@ -91,7 +92,7 @@
         }
 
         /* 信息框 */
-        .insight-box {
+        .info-box {
             background: #e3f2fd;
             border-left: 4px solid #2196f3;
             padding: 12px 16px;
@@ -99,7 +100,52 @@
             border-radius: 8px;
             font-size: 14px;
         }
+        .warning-box {
+            background: #fff3e0;
+            border-left: 4px solid #ff9800;
+            padding: 12px 16px;
+            margin: 12px 0;
+            border-radius: 8px;
+            font-size: 14px;
+        }
+        .success-box {
+            background: #e8f5e9;
+            border-left: 4px solid #4caf50;
+            padding: 12px 16px;
+            margin: 12px 0;
+            border-radius: 8px;
+            font-size: 14px;
+        }
 
+        /* 实体标签 */
+        .entity-tag {
+            display: inline-block;
+            background: #e8f5e9;
+            color: #2e7d32;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 12px;
+            margin: 2px 4px;
+        }
+        .entity-tag-person { background: #e3f2fd; color: #1565c0; }
+        .entity-tag-location { background: #fff3e0; color: #e65100; }
+        .entity-tag-organization { background: #f3e5f5; color: #6a1b9a; }
+
+        /* 进度条 */
+        .progress-bar {
+            background: #e0e0e0;
+            border-radius: 10px;
+            height: 8px;
+            margin: 8px 0;
+        }
+        .progress-fill {
+            background: #1a73e8;
+            border-radius: 10px;
+            height: 8px;
+            width: 0%;
+        }
+
+        /* 页脚 */
         .footer {
             text-align: center;
             padding: 20px;
@@ -109,12 +155,18 @@
             margin-top: 20px;
         }
 
+        /* 响应式 */
         @media (max-width: 768px) {
-            .grid-2, .grid-3 { grid-template-columns: 1fr; }
+            .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; }
             .stats-row { flex-direction: column; }
             body { padding: 12px; }
             .card { padding: 16px; }
         }
+
+        /* 折叠面板 */
+        details { margin: 12px 0; }
+        summary { cursor: pointer; font-weight: 600; color: #1a73e8; padding: 8px 0; }
+        summary:hover { color: #0d47a1; }
     </style>
 </head>
 <body>
@@ -134,6 +186,25 @@
         <div class="stat-card"><div class="value">{{ duplicate_count }}</div><div class="label">重复文本对</div></div>
     </div>
 
+    <!-- 语言分布 -->
+    {% if language_distribution %}
+    <div class="card">
+        <h2>🌐 语言分布</h2>
+        <div class="grid-3">
+            {% for lang, count in language_distribution.items() %}
+            <div class="stat-card" style="background: #2e7d32;">
+                <div class="value">{{ count }}</div>
+                <div class="label">
+                    {% if lang == 'zh' %}中文
+                    {% elif lang == 'en' %}英文
+                    {% else %}{{ lang|upper }}{% endif %}
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+
     <!-- 情感分布 -->
     <div class="card">
         <h2>😊 情感分布</h2>
@@ -142,14 +213,78 @@
             <div class="stat-card" style="background: #ff4757;"><div class="value">{{ negative_rate }}</div><div class="label">消极</div></div>
             <div class="stat-card" style="background: #747d8c;"><div class="value">{{ neutral_rate }}</div><div class="label">中性</div></div>
         </div>
+        <div class="progress-bar">
+            <div class="progress-fill" style="width: {{ positive_rate|replace('%', '') }}%; background: #2ed573;"></div>
+        </div>
+        <div class="progress-bar">
+            <div class="progress-fill" style="width: {{ negative_rate|replace('%', '') }}%; background: #ff4757;"></div>
+        </div>
+        <div class="progress-bar">
+            <div class="progress-fill" style="width: {{ neutral_rate|replace('%', '') }}%; background: #747d8c;"></div>
+        </div>
     </div>
+
+    <!-- 实体识别 -->
+    {% if entity %}
+    <div class="card">
+        <h2>🏷️ 实体识别</h2>
+        <div class="grid-3">
+            {% if entity.per and entity.per.unique > 0 %}
+            <div class="info-box">
+                <strong>👤 人名 ({{ entity.per.unique }})</strong>
+                <div style="margin-top: 8px; max-height: 200px; overflow-y: auto;">
+                    {% for name, count in entity.per.top[:15] %}
+                    <span class="entity-tag entity-tag-person">{{ name }} ({{ count }})</span>
+                    {% endfor %}
+                    {% if entity.per.unique > 15 %}
+                    <span class="entity-tag">... 还有 {{ entity.per.unique - 15 }} 个</span>
+                    {% endif %}
+                </div>
+            </div>
+            {% endif %}
+
+            {% if entity.org and entity.org.unique > 0 %}
+            <div class="info-box">
+                <strong>🏢 组织名 ({{ entity.org.unique }})</strong>
+                <div style="margin-top: 8px; max-height: 200px; overflow-y: auto;">
+                    {% for name, count in entity.org.top[:15] %}
+                    <span class="entity-tag entity-tag-organization">{{ name }} ({{ count }})</span>
+                    {% endfor %}
+                    {% if entity.org.unique > 15 %}
+                    <span class="entity-tag">... 还有 {{ entity.org.unique - 15 }} 个</span>
+                    {% endif %}
+                </div>
+            </div>
+            {% endif %}
+
+            {% if entity.loc and entity.loc.unique > 0 %}
+            <div class="info-box">
+                <strong>📍 地名 ({{ entity.loc.unique }})</strong>
+                <div style="margin-top: 8px; max-height: 200px; overflow-y: auto;">
+                    {% for name, count in entity.loc.top[:15] %}
+                    <span class="entity-tag entity-tag-location">{{ name }} ({{ count }})</span>
+                    {% endfor %}
+                    {% if entity.loc.unique > 15 %}
+                    <span class="entity-tag">... 还有 {{ entity.loc.unique - 15 }} 个</span>
+                    {% endif %}
+                </div>
+            </div>
+            {% endif %}
+        </div>
+        {% if entity.per and entity.per.unique == 0 and entity.org and entity.org.unique == 0 and entity.loc and entity.loc.unique == 0 %}
+        <div class="warning-box">
+            ⚠️ 未识别到有效实体。可能原因：文本格式特殊、专有名词较多。
+        </div>
+        {% endif %}
+    </div>
+    {% endif %}
 
     <!-- 关键词 -->
     <div class="card">
-        <h2>🔑 高频关键词 TOP 30</h2>
+        <h2>🔑 高频关键词 TOP 50</h2>
         <div class="keyword-cloud">
-            {% for item in keywords %}
-            <span class="keyword-item">{{ item.word }} ({{ item.count }})</span>
+            {% for word, count in keywords[:50] %}
+            <span class="keyword-item">{{ word }} ({{ count }})</span>
             {% endfor %}
         </div>
     </div>
@@ -166,12 +301,57 @@
     </div>
     {% endif %}
 
-    <!-- AI 深度洞察 -->
-    {% if llm_insight %}
+    <!-- 模板词检测 -->
+    {% if start_templates or end_templates %}
     <div class="card">
-        <h2>🧠 AI 深度洞察</h2>
-        <div class="insight-box">
-            {{ llm_insight }}
+        <h2>🧹 模板词检测</h2>
+        <div class="grid-2">
+            {% if start_templates %}
+            <div class="info-box">
+                <strong>📌 开头模板词 ({{ start_templates|length }} 个)</strong>
+                <div style="margin-top: 8px;">
+                    {% for word in start_templates[:20] %}
+                    <span class="entity-tag">「{{ word }}」</span>
+                    {% endfor %}
+                    {% if start_templates|length > 20 %}
+                    <span class="entity-tag">... 还有 {{ start_templates|length - 20 }} 个</span>
+                    {% endif %}
+                </div>
+            </div>
+            {% endif %}
+            {% if end_templates %}
+            <div class="info-box">
+                <strong>📌 结尾模板词 ({{ end_templates|length }} 个)</strong>
+                <div style="margin-top: 8px;">
+                    {% for word in end_templates[:20] %}
+                    <span class="entity-tag">「{{ word }}」</span>
+                    {% endfor %}
+                    {% if end_templates|length > 20 %}
+                    <span class="entity-tag">... 还有 {{ end_templates|length - 20 }} 个</span>
+                    {% endif %}
+                </div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- 洞察发现 -->
+    {% if insights %}
+    <div class="card">
+        <h2>💡 洞察发现</h2>
+        <div class="grid-2">
+            {% for insight in insights[:8] %}
+            <div class="info-box" style="margin: 8px;">
+                <div style="font-weight: bold;">
+                    {% set priority_icon = {'高': '🔴', '中': '🟠', '低': '🟢'}.get(insight.priority, '⚪') %}
+                    {{ priority_icon }} {{ insight.title }}
+                </div>
+                <div style="font-size: 12px; color: #666; margin-top: 4px;">
+                    {{ insight.description[:100] }}{% if insight.description|length > 100 %}...{% endif %}
+                </div>
+            </div>
+            {% endfor %}
         </div>
     </div>
     {% endif %}
@@ -181,17 +361,34 @@
     <div class="card">
         <h2>🔘 文本聚类</h2>
         <div class="grid-2">
-            {% for cluster in clusters[:4] %}
+            {% for cluster in clusters %}
             <div class="cluster-card">
-                <h3>簇 {{ cluster.cluster_id }}</h3>
-                <p><strong>数量:</strong> {{ cluster.size }} 条 ({{ "%.1f"|format(cluster.percentage * 100) }}%)</p>
-                <p><strong>关键词:</strong> {{ cluster.top_words[:8]|join(', ') }}</p>
-                {% if cluster.name %}
-                <p><strong>📌 命名:</strong> {{ cluster.name }}</p>
+                <h3>
+                    簇 {{ cluster.id }}
+                    <span style="font-size: 12px; color: #666;">({{ cluster.size }} 条, {{ "%.1f"|format(cluster.percentage * 100) }}%)</span>
+                </h3>
+                <p><strong>🏷️ 关键词:</strong></p>
+                <div class="keyword-cloud" style="padding: 8px; margin-top: 0;">
+                    {% for word in cluster.top_words[:10] %}
+                    <span class="keyword-item" style="font-size: 12px;">{{ word }}</span>
+                    {% endfor %}
+                </div>
+                {% if cluster.center_text %}
+                <details>
+                    <summary>查看代表文本</summary>
+                    <div class="info-box" style="margin-top: 8px; font-size: 12px;">
+                        {{ cluster.center_text[:200] }}{% if cluster.center_text|length > 200 %}...{% endif %}
+                    </div>
+                </details>
                 {% endif %}
             </div>
             {% endfor %}
         </div>
+        {% if clusters|length == 1 %}
+        <div class="warning-box">
+            ⚠️ 仅发现1个聚类，文本内容可能比较单一。
+        </div>
+        {% endif %}
     </div>
     {% endif %}
 
@@ -200,13 +397,34 @@
     <div class="card">
         <h2>📚 主题建模</h2>
         <div class="grid-2">
-            {% for topic in topics[:4] %}
+            {% for topic in topics %}
             <div class="cluster-card">
-                <h3>主题 {{ topic.topic_id }}</h3>
-                <p><strong>关键词:</strong> {{ topic.keywords[:8]|join(', ') }}</p>
+                <h3>主题 {{ topic.id }} <span style="font-size: 12px;">({{ topic.texts_count }} 条)</span></h3>
+                <p><strong>🏷️ 关键词:</strong></p>
+                <div class="keyword-cloud" style="padding: 8px; margin-top: 0;">
+                    {% for word in topic.keywords[:10] %}
+                    <span class="keyword-item" style="font-size: 12px;">{{ word }}</span>
+                    {% endfor %}
+                </div>
             </div>
             {% endfor %}
         </div>
+    </div>
+    {% endif %}
+
+    <!-- 样本文本 -->
+    {% if sample_texts %}
+    <div class="card">
+        <h2>📄 样本文本</h2>
+        <details>
+            <summary>显示前 10 条文本</summary>
+            {% for text in sample_texts[:10] %}
+            <div class="info-box" style="margin: 8px 0;">
+                <strong>文本 {{ loop.index }}:</strong><br>
+                {{ text[:300] }}{% if text|length > 300 %}...{% endif %}
+            </div>
+            {% endfor %}
+        </details>
     </div>
     {% endif %}
 

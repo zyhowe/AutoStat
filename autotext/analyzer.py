@@ -14,12 +14,50 @@ from autotext.core.stats import TextStats
 from autotext.core.quality import TextQuality
 from autotext.core.keyword import KeywordExtractor
 from autotext.core.sentiment import SentimentAnalyzer
-from autotext.core.entity import EntityRecognizer
-from autotext.core.cluster import TextClusterer
-from autotext.core.topic import TopicModeler
-from autotext.core.trend import TrendAnalyzer
-from autotext.core.llm_enhance import LLMEnhancer
 from autotext.reporter import TextReporter
+
+# 新增导入（带异常处理）
+try:
+    from autotext.core.vectorizer import BertVectorizer
+except ImportError:
+    BertVectorizer = None
+    print("⚠️ BertVectorizer 导入失败，请安装 transformers")
+
+try:
+    from autotext.core.ner import EntityRecognizer
+except ImportError:
+    EntityRecognizer = None
+    print("⚠️ EntityRecognizer 导入失败")
+
+try:
+    from autotext.core.relation import RelationDiscoverer
+except ImportError:
+    RelationDiscoverer = None
+    print("⚠️ RelationDiscoverer 导入失败")
+
+try:
+    from autotext.core.cluster import TextClusterer
+except ImportError:
+    TextClusterer = None
+    print("⚠️ TextClusterer 导入失败")
+
+try:
+    from autotext.core.topic import TopicModeler
+except ImportError:
+    TopicModeler = None
+    print("⚠️ TopicModeler 导入失败")
+
+try:
+    from autotext.core.event_timeline import EventTimelineAnalyzer
+except ImportError:
+    EventTimelineAnalyzer = None
+    print("⚠️ EventTimelineAnalyzer 导入失败")
+
+try:
+    from autotext.core.insight import InsightDiscoverer
+except ImportError:
+    InsightDiscoverer = None
+    print("⚠️ InsightDiscoverer 导入失败")
 
 
 class TextAnalyzer:
@@ -31,9 +69,20 @@ class TextAnalyzer:
                  time_col: Optional[str] = None,
                  metric_cols: Optional[Dict[str, str]] = None,
                  source_name: Optional[str] = None,
-                 quiet: bool = False):
+                 quiet: bool = False,
+                 use_bert: bool = True):
         """
         初始化文本分析器
+
+        参数:
+        - data: DataFrame、文件路径、文件夹路径或文本列表
+        - text_col: 文本列名（DataFrame模式或CSV模式）
+        - title_col: 标题列名（可选）
+        - time_col: 时间列名（可选）
+        - metric_cols: 指标列名（可选）
+        - source_name: 数据源名称
+        - quiet: 静默模式
+        - use_bert: 是否使用BERT增强分析
         """
         self.source_name = source_name
         self.quiet = quiet
@@ -41,12 +90,14 @@ class TextAnalyzer:
         self.title_col = title_col
         self.time_col = time_col
         self.metric_cols = metric_cols
+        self.use_bert = use_bert
 
         # 初始化结果容器
         self.texts = []
         self.titles = []
         self.dates = []
         self.metrics = {}
+        self.data = None
 
         # 多版本数据存储
         self.raw_texts = []
@@ -55,6 +106,7 @@ class TextAnalyzer:
         self.filtered_texts = []
         self.tokens_list = []
         self.tokens_cleaned_list = []
+        self.tokens_filtered_list = []
 
         self.preprocessed_data = []
         self.field_info = {}
@@ -63,20 +115,32 @@ class TextAnalyzer:
         self.keywords = {}
         self.sentiment_results = []
         self.sentiment_distribution = {}
-        self.entity_results = []
-        self.entity_stats = {}
-        self.clusterer = None
-        self.cluster_info = []
-        self.topic_modeler = None
-        self.topics = []
-        self.trend_analyzer = None
         self.trend_info = {}
-        self.llm_enhancer = None
         self.cleaning_suggestions = []
+
+        # BERT分析结果容器
+        self.embeddings = None
+        self.entity_stats = {}
+        self.entity_results = []
+        self.relation_result = {}
+        self.cluster_info = []
+        self.topics = []
+        self.event_timeline = {}
+        self.insights = []
+
+        # 模块实例
+        self.topic_modeler = None
+        self.clusterer = None
+        self.vectorizer = None
+        self.ner_model = None
+        self.relation_discoverer = None
 
         # 模板词
         self.start_templates = set()
         self.end_templates = set()
+
+        # 语言分布
+        self.language_distribution = {}
 
         # 加载数据
         self._load_data(data, text_col, title_col, time_col, metric_cols)
@@ -90,7 +154,9 @@ class TextAnalyzer:
             print("=" * 70)
 
     def _load_data(self, data, text_col, title_col, time_col, metric_cols):
-        """加载数据"""
+        """加载数据 - 支持 CSV 文件路径 + text_col"""
+
+        # 情况1: 传入的是 DataFrame
         if isinstance(data, pd.DataFrame):
             loaded = TextLoader.from_dataframe(data, text_col, title_col, time_col, metric_cols)
             self.data = data
@@ -98,21 +164,78 @@ class TextAnalyzer:
             self.titles = loaded.get("titles", [])
             self.dates = loaded.get("dates", [])
             self.metrics = loaded.get("metrics", {})
+            if not self.quiet:
+                print(f"  ✅ 从 DataFrame 加载: {len(self.texts)} 条文本")
+
+        # 情况2: 传入的是文件路径
         elif isinstance(data, str):
             if os.path.isdir(data):
+                # 文件夹模式
                 result = TextLoader.from_folder(data)
                 self.texts = []
                 for file_name, file_texts in result.items():
                     self.texts.extend(file_texts)
                 self.source_name = self.source_name or data
                 self.data = None
+                if not self.quiet:
+                    print(f"  ✅ 从文件夹加载: {len(self.texts)} 条文本")
             else:
+                # 单文件模式
+                file_ext = os.path.splitext(data)[1].lower()
+
+                # 如果是 CSV/Excel 且指定了 text_col，按结构化数据加载
+                if file_ext in ['.csv', '.xlsx', '.xls', '.json'] and text_col:
+                    try:
+                        if file_ext == '.csv':
+                            df = pd.read_csv(data, encoding='utf-8-sig', engine='python', on_bad_lines='skip')
+                        elif file_ext in ['.xlsx', '.xls']:
+                            df = pd.read_excel(data, engine='openpyxl')
+                        elif file_ext == '.json':
+                            df = pd.read_json(data)
+                        else:
+                            df = None
+
+                        if df is not None:
+                            # 清理列名
+                            df.columns = [str(col).strip().replace('\n', '_').replace('\r', '_') for col in df.columns]
+
+                            # 检查 text_col 是否存在
+                            if text_col not in df.columns:
+                                raise ValueError(f"文本列 '{text_col}' 不存在于文件中。可用列: {list(df.columns)}")
+
+                            # 从 DataFrame 加载
+                            loaded = TextLoader.from_dataframe(df, text_col, title_col, time_col, metric_cols)
+                            self.data = df
+                            self.texts = loaded["texts"]
+                            self.titles = loaded.get("titles", [])
+                            self.dates = loaded.get("dates", [])
+                            self.metrics = loaded.get("metrics", {})
+                            if not self.quiet:
+                                print(f"  ✅ 从 CSV/Excel 加载: {len(self.texts)} 条文本")
+                                print(f"     文本列: {text_col}")
+                                if title_col:
+                                    print(f"     标题列: {title_col}")
+                                if time_col:
+                                    print(f"     时间列: {time_col}")
+                            return
+                    except Exception as e:
+                        if not self.quiet:
+                            print(f"  ⚠️ 结构化加载失败: {e}，尝试作为纯文本加载")
+
+                # 否则按纯文本文件加载
                 self.texts = TextLoader.from_file(data)
                 self.source_name = self.source_name or data
                 self.data = None
+                if not self.quiet:
+                    print(f"  ✅ 从文件加载: {len(self.texts)} 条文本")
+
+        # 情况3: 传入的是文本列表
         elif isinstance(data, list):
             self.texts = data
             self.data = None
+            if not self.quiet:
+                print(f"  ✅ 从列表加载: {len(self.texts)} 条文本")
+
         else:
             raise ValueError("data 必须是 DataFrame、文件路径、文件夹路径或文本列表")
 
@@ -131,9 +254,9 @@ class TextAnalyzer:
         if not self.quiet:
             print("\n【阶段1】文本预处理...")
 
-        preprocessor = TextPreprocessor()  # 保存实例
+        preprocessor = TextPreprocessor()
 
-        # 第一步：基础清洗，获取清洗后文本用于模板检测
+        # 第一步：基础清洗
         cleaned_texts = [preprocessor.clean_text(t) for t in self.texts if t]
         effective_texts = [t for t in cleaned_texts if len(t) > 50]
 
@@ -155,6 +278,8 @@ class TextAnalyzer:
             preprocessor.end_templates = end_tmpl
             self.start_templates = start_tmpl
             self.end_templates = end_tmpl
+            if not self.quiet and (start_tmpl or end_tmpl):
+                print(f"  🧹 检测到开头模板词: {len(start_tmpl)} 个, 结尾模板词: {len(end_tmpl)} 个")
         else:
             if not self.quiet:
                 print("  ⚠️ 有效文本不足，跳过模板检测")
@@ -169,6 +294,8 @@ class TextAnalyzer:
         self.filtered_texts = []
         self.tokens_list = []
         self.tokens_cleaned_list = []
+        self.tokens_filtered_list = []
+        self.language_distribution = {}
 
         for text in self.texts:
             result = preprocessor.full_process(
@@ -183,22 +310,23 @@ class TextAnalyzer:
             self.filtered_texts.append(result["filtered"])
             self.tokens_list.append(result["tokens"])
             self.tokens_cleaned_list.append(result["tokens_cleaned"])
+            self.tokens_filtered_list.append(result.get("tokens_filtered", result["tokens_cleaned"]))
 
-        # 统计语言分布
-        lang_dist = {}
-        for d in self.preprocessed_data:
-            lang = d.get("language", "unknown")
+            # 统计语言
+            lang = result.get("language", "unknown")
             if lang != "unknown":
-                lang_dist[lang] = lang_dist.get(lang, 0) + 1
+                self.language_distribution[lang] = self.language_distribution.get(lang, 0) + 1
 
         if not self.quiet:
             print(f"  ✅ 完成，共 {len(self.texts)} 条文本")
-            print(f"  📊 语言分布: 中文 {lang_dist.get('zh', 0)} 条, 英文 {lang_dist.get('en', 0)} 条")
+            if self.language_distribution:
+                print(f"  📊 语言分布: 中文 {self.language_distribution.get('zh', 0)} 条, "
+                      f"英文 {self.language_distribution.get('en', 0)} 条")
             if self.start_templates or self.end_templates:
                 print(f"  🧹 已切除首尾模板句子")
 
     def _compute_stats(self):
-        """计算基础统计（使用 content_texts）"""
+        """基础统计"""
         if not self.quiet:
             print("\n【阶段2】基础统计...")
 
@@ -208,9 +336,10 @@ class TextAnalyzer:
         if not self.quiet:
             print(f"  ✅ 总文本数: {self.stats_result['total_count']}")
             print(f"  ✅ 平均长度: {self.stats_result['char_length']['mean']:.1f} 字符")
+            print(f"  ✅ 空文本率: {self.stats_result['empty_rate']:.1%}")
 
     def _check_quality(self):
-        """检查数据质量（使用 content_texts）"""
+        """数据质量检查"""
         if not self.quiet:
             print("\n【阶段3】数据质量检查...")
 
@@ -222,14 +351,18 @@ class TextAnalyzer:
             summary = quality.get_summary()
             print(f"  ✅ 空文本: {summary['empty_count']} 条")
             print(f"  ✅ 重复文本: {summary['duplicate_count']} 对")
+            if summary.get('short_count', 0) > 0:
+                print(f"  ⚠️ 过短文本: {summary['short_count']} 条")
+            if summary.get('long_count', 0) > 0:
+                print(f"  ⚠️ 过长文本: {summary['long_count']} 条")
 
     def _extract_keywords(self):
-        """提取关键词（使用 tokens_cleaned_list）"""
+        """关键词提取"""
         if not self.quiet:
             print("\n【阶段4】关键词提取...")
 
         extractor = KeywordExtractor()
-        self.keywords["frequency"] = extractor.extract_frequency(self.tokens_cleaned_list, top_n=50)
+        self.keywords["frequency"] = extractor.extract_frequency(self.tokens_filtered_list, top_n=50)
 
         if len(self.filtered_texts) > 1:
             try:
@@ -242,7 +375,7 @@ class TextAnalyzer:
             print(f"  ✅ 提取高频词 {len(self.keywords.get('frequency', []))} 个")
 
     def _analyze_sentiment(self):
-        """情感分析（使用 content_texts）"""
+        """情感分析"""
         if not self.quiet:
             print("\n【阶段5】情感分析...")
 
@@ -255,107 +388,232 @@ class TextAnalyzer:
             neg_rate = self.sentiment_distribution["negative_rate"]
             print(f"  ✅ 积极: {pos_rate:.1%}  消极: {neg_rate:.1%}  中性: {self.sentiment_distribution['neutral_rate']:.1%}")
 
-    def _recognize_entities(self):
-        """实体识别（使用 content_texts）"""
-        if not self.quiet:
-            print("\n【阶段6】实体识别...")
+    def _filter_valid_entities(self, entity_stats: Dict) -> Dict:
+        """过滤无效实体"""
+        stopwords = {'的', '了', '是', '在', '和', '与', '或', '也', '都', '还',
+                     '这', '那', '有', '为', '对', '而', '并', '且', '但', '就',
+                     '到', '从', '由', '于', '之', '将', '会', '能', '可', '以',
+                     '年', '月', '日', '时', '分', '秒', '上', '下', '中', '内',
+                     '外', '前', '后', '左', '右', '高', '低', '大', '小', '多',
+                     '少', '新', '旧', '好', '坏', '正', '负', '涨', '跌', '不',
+                     '没', '无', '非', '莫', '勿', '别', '未', '过', '很', '太',
+                     '同比', '环比', '增长', '下降', '上升', '回落', '稳定'}
 
-        recognizer = EntityRecognizer()
-        self.entity_results = recognizer.recognize_batch(self.content_texts)
-        self.entity_stats = recognizer.get_statistics(self.entity_results)
+        filtered = {}
+        for entity_type, stats in entity_stats.items():
+            filtered_top = []
+            for name, count in stats.get('top', []):
+                if len(name) < 2:
+                    continue
+                if name in stopwords:
+                    continue
+                if name.isdigit():
+                    continue
+                import re
+                if re.match(r'^[A-Z0-9]{6,}$', name):
+                    continue
+                if re.match(r'^[A-Z]{2,}[0-9]{4,}[A-Z]?$', name):
+                    continue
+                filtered_top.append((name, count))
 
-        if not self.quiet:
-            person_count = self.entity_stats.get("person", {}).get("unique", 0)
-            location_count = self.entity_stats.get("location", {}).get("unique", 0)
-            print(f"  ✅ 识别到人名: {person_count} 个, 地名: {location_count} 个")
+            filtered[entity_type] = {
+                'total': stats.get('total', 0),
+                'unique': len(filtered_top),
+                'top': filtered_top[:20]
+            }
 
-    def _cluster_texts(self):
-        """文本聚类（与主题建模使用相同数据）"""
-        clustering_check = self.checker.check_clustering()
-        if not clustering_check.get("suitable"):
+        return filtered
+
+    def _bert_analysis(self):
+        """BERT增强分析"""
+        if not self.use_bert or len(self.texts) < 5:
             if not self.quiet:
-                print(f"\n【阶段7】文本聚类... 跳过 ({clustering_check.get('reason')})")
+                print("\n【BERT增强】跳过（文本数量不足或未启用）")
             return
 
         if not self.quiet:
-            print("\n【阶段7】文本聚类...")
+            print("\n【BERT增强】深度语义分析...")
+            print("  ⚠️ 首次运行会下载BERT模型（约400MB），请耐心等待...")
 
-        # 与主题建模使用相同数据
-        texts_for_modeling = self._get_texts_for_modeling()
+        # 准备有效文本
+        valid_texts = [t if t and len(t) > 0 else " " for t in self.content_texts]
 
-        if len(texts_for_modeling) < 20:
-            if not self.quiet:
-                print(f"  ⚠️ 有效文本不足 ({len(texts_for_modeling)} < 20)，跳过聚类")
-            return
+        # ==================== 1. 向量化 ====================
+        if not self.quiet:
+            print("  🔄 文本向量化...")
 
-        self.clusterer = TextClusterer()
         try:
-            self.clusterer.fit(texts_for_modeling)
-            self.cluster_info = self.clusterer.get_cluster_info(texts_for_modeling)
+            if BertVectorizer is None:
+                raise ImportError("BertVectorizer 未导入")
+            self.vectorizer = BertVectorizer(device="cpu")
+            self.embeddings = self.vectorizer.get_embeddings(valid_texts)
+
             if not self.quiet:
-                print(f"  ✅ 聚类完成，共 {len(self.cluster_info)} 个簇")
-                # 打印关键词示例
-                for cluster in self.cluster_info[:3]:
-                    print(f"    簇{cluster['cluster_id']}: {cluster['top_words'][:5]}")
+                print(f"  ✅ 向量化完成，维度: {self.embeddings.shape}")
         except Exception as e:
             if not self.quiet:
-                print(f"  ⚠️ 聚类失败: {e}")
-
-    def _topic_modeling(self):
-        """主题建模（使用建模专用文本）"""
-        topic_check = self.checker.check_topic_modeling()
-        if not topic_check.get("suitable"):
-            if not self.quiet:
-                print(f"\n【阶段8】主题建模... 跳过 ({topic_check.get('reason')})")
+                print(f"  ❌ 向量化失败: {e}")
             return
 
+        # ==================== 2. 实体识别 ====================
         if not self.quiet:
-            print("\n【阶段8】主题建模...")
+            print("  🔍 实体识别...")
 
-        # 获取建模专用文本
-        texts_for_modeling = self._get_texts_for_modeling()
-
-        if len(texts_for_modeling) < 50:
-            if not self.quiet:
-                print(f"  ⚠️ 有效文本不足 ({len(texts_for_modeling)} < 50)，跳过分组")
-            return
-
-        self.topic_modeler = TopicModeler()
         try:
-            self.topic_modeler.fit(texts_for_modeling)
+            if EntityRecognizer is None:
+                raise ImportError("EntityRecognizer 未导入")
+            self.ner_model = EntityRecognizer(device="cpu")
+            self.entity_results = self.ner_model.recognize(valid_texts)
+            entity_stats_raw = self.ner_model.get_entity_stats(self.entity_results)
+            self.entity_stats = self._filter_valid_entities(entity_stats_raw)
+
+            if not self.quiet:
+                total_entities = sum(len(ents) for ents in self.entity_results)
+                print(f"  ✅ 识别到 {total_entities} 个实体")
+                for entity_type in ['per', 'org', 'loc']:
+                    count = self.entity_stats.get(entity_type, {}).get('unique', 0)
+                    if count > 0:
+                        top_entities = self.entity_stats.get(entity_type, {}).get('top', [])[:3]
+                        top_names = [name for name, _ in top_entities]
+                        print(f"     - {entity_type}: {count} 个, 示例: {', '.join(top_names)}")
+        except Exception as e:
+            if not self.quiet:
+                print(f"  ❌ 实体识别失败: {e}")
+            self.entity_results = []
+            self.entity_stats = {}
+
+        # ==================== 3. 关系发现 ====================
+        if not self.quiet:
+            print("  🔗 关系发现...")
+
+        try:
+            if self.entity_results and RelationDiscoverer is not None:
+                self.relation_discoverer = RelationDiscoverer()
+                self.relation_result = self.relation_discoverer.discover(self.entity_results, valid_texts)
+
+                if not self.quiet:
+                    pairs = len(self.relation_result.get('cooccurrence_pairs', []))
+                    print(f"  ✅ 发现 {pairs} 个强关联实体对")
+                    for pair in self.relation_result.get('cooccurrence_pairs', [])[:3]:
+                        e1 = pair['entity1'].split(':', 1)[-1] if ':' in pair['entity1'] else pair['entity1']
+                        e2 = pair['entity2'].split(':', 1)[-1] if ':' in pair['entity2'] else pair['entity2']
+                        print(f"     - {e1} ↔ {e2} (PMI={pair['pmi']:.2f})")
+            else:
+                self.relation_result = {}
+                if not self.quiet:
+                    print("  ⚠️ 无实体数据，跳过关系发现")
+        except Exception as e:
+            if not self.quiet:
+                print(f"  ❌ 关系发现失败: {e}")
+            self.relation_result = {}
+
+        # ==================== 4. 文本聚类 ====================
+        if not self.quiet:
+            print("  🔘 文本聚类...")
+
+        try:
+            if TextClusterer is None:
+                raise ImportError("TextClusterer 未导入")
+            self.clusterer = TextClusterer()
+            self.clusterer.fit(self.embeddings)
+            self.cluster_info = self.clusterer.get_cluster_info(valid_texts, self.embeddings)
+
+            if not self.quiet:
+                n_clusters = len(self.cluster_info)
+                if n_clusters > 0:
+                    print(f"  ✅ 聚类完成，共 {n_clusters} 个簇")
+                    for cluster in self.cluster_info[:3]:
+                        keywords = ', '.join(cluster['top_words'][:5])
+                        print(f"     - 簇{cluster['cluster_id']}: {cluster['size']} 条, 关键词: {keywords}")
+                else:
+                    print(f"  ⚠️ 未发现有效聚类")
+        except Exception as e:
+            if not self.quiet:
+                print(f"  ❌ 聚类失败: {e}")
+            self.cluster_info = []
+            self.clusterer = None
+
+        # ==================== 5. 主题建模 ====================
+        if not self.quiet:
+            print("  📚 主题建模...")
+
+        try:
+            if TopicModeler is None:
+                raise ImportError("TopicModeler 未导入")
+            self.topic_modeler = TopicModeler()
+            cluster_labels = getattr(self.clusterer, 'labels', None) if self.clusterer else None
+            self.topic_modeler.fit(valid_texts, cluster_labels)
             self.topics = self.topic_modeler.get_topics()
+
             if not self.quiet:
                 print(f"  ✅ 主题建模完成，共 {len(self.topics)} 个主题")
-                # 打印每个主题的关键词示例
                 for topic in self.topics[:3]:
-                    print(f"    主题{topic['topic_id']}: {topic['keywords'][:5]}")
+                    keywords = ', '.join(topic.get('keywords', [])[:5])
+                    print(f"     - 主题{topic['topic_id']}: {keywords}")
         except Exception as e:
             if not self.quiet:
-                print(f"  ⚠️ 主题建模失败: {e}")
+                print(f"  ❌ 主题建模失败: {e}")
+            self.topics = []
+            self.topic_modeler = None
 
-    def _analyze_trend(self):
-        """时间趋势分析（使用 dates 和 raw_texts）"""
-        if self.dates:
-            trend_check = self.checker.check_time_series()
-            if trend_check.get("suitable"):
-                if not self.quiet:
-                    print("\n【阶段9】时间趋势分析...")
-                self.trend_analyzer = TrendAnalyzer(self.content_texts, self.dates)
-                self.trend_info = {
-                    "time_range": self.trend_analyzer.get_time_range(),
-                    "trend_line": self.trend_analyzer.get_trend_line(),
-                    "seasonal_pattern": self.trend_analyzer.get_seasonal_pattern(),
-                    "anomalies": self.trend_analyzer.detect_anomalies()
-                }
-                if not self.quiet:
-                    print(f"  ✅ 时间范围: {self.trend_info['time_range'].get('start')} -> {self.trend_info['time_range'].get('end')}")
-                    print(f"  ✅ 趋势方向: {self.trend_info['trend_line'].get('direction', 'stable')}")
-
-    def set_llm_client(self, llm_client):
-        """设置大模型客户端"""
-        self.llm_enhancer = LLMEnhancer(llm_client)
+        # ==================== 6. 事件脉络分析 ====================
         if not self.quiet:
-            print("\n【阶段10】大模型增强已启用")
+            print("  📅 事件脉络分析...")
+
+        try:
+            valid_dates = [d for d in self.dates if d is not None]
+            if len(valid_dates) >= 5 and self.entity_results and EventTimelineAnalyzer is not None:
+                timeline = EventTimelineAnalyzer()
+                self.event_timeline = timeline.analyze(
+                    valid_texts, self.dates, self.entity_results, self.sentiment_results
+                )
+
+                if not self.quiet and 'error' not in self.event_timeline:
+                    time_range = self.event_timeline.get('time_range', {})
+                    print(f"  ✅ 事件脉络分析完成")
+                    if time_range.get('start') and time_range.get('end'):
+                        start_str = str(time_range['start'])[:10] if time_range['start'] else 'N/A'
+                        end_str = str(time_range['end'])[:10] if time_range['end'] else 'N/A'
+                        print(f"     - 时间范围: {start_str} ~ {end_str}")
+
+                    hot_topics = self.event_timeline.get('hot_topics', [])
+                    if hot_topics:
+                        print(f"     - 热点话题: {len(hot_topics)} 个")
+                elif not self.quiet:
+                    error_msg = self.event_timeline.get('error', '时间信息不足')
+                    print(f"  ⚠️ 事件脉络分析跳过: {error_msg}")
+            else:
+                self.event_timeline = {}
+                if not self.quiet:
+                    if len(valid_dates) < 5:
+                        print(f"  ⚠️ 事件脉络跳过（有效时间点不足: {len(valid_dates)} < 5）")
+        except Exception as e:
+            if not self.quiet:
+                print(f"  ❌ 事件脉络分析失败: {e}")
+            self.event_timeline = {}
+
+        # ==================== 7. 洞察发现 ====================
+        if not self.quiet:
+            print("  💡 洞察发现...")
+
+        try:
+            if InsightDiscoverer is None:
+                raise ImportError("InsightDiscoverer 未导入")
+            insight_discoverer = InsightDiscoverer()
+            self.insights = insight_discoverer.discover_all(self)
+
+            if not self.quiet:
+                print(f"  ✅ 发现 {len(self.insights)} 个洞察")
+                for insight_item in self.insights[:5]:
+                    priority_icon = {'高': '🔴', '中': '🟠', '低': '🟢'}.get(insight_item.get('priority', '中'), '⚪')
+                    print(f"     {priority_icon} {insight_item['title']}")
+        except Exception as e:
+            if not self.quiet:
+                print(f"  ❌ 洞察发现失败: {e}")
+            self.insights = []
+
+        if not self.quiet:
+            print("\n  🎉 BERT增强分析完成")
 
     def generate_full_report(self):
         """生成完整分析报告"""
@@ -364,10 +622,7 @@ class TextAnalyzer:
         self._check_quality()
         self._extract_keywords()
         self._analyze_sentiment()
-        self._recognize_entities()
-        self._cluster_texts()
-        self._topic_modeling()
-        self._analyze_trend()
+        self._bert_analysis()
 
         if not self.quiet:
             print("\n" + "=" * 70)
@@ -400,7 +655,8 @@ class TextAnalyzer:
                 f.write(f"=== 文本 {i+1} ===\n")
                 f.write(text[:500] + "..." if len(text) > 500 else text)
                 f.write("\n\n")
-        print(f"✅ 原始文本已保存到 {output_path}")
+        if not self.quiet:
+            print(f"✅ 原始文本已保存到 {output_path}")
 
     def save_cleaned_texts(self, output_path: str = None):
         """保存清洗后文本"""
@@ -412,7 +668,8 @@ class TextAnalyzer:
                     f.write(f"=== 文本 {i+1} ===\n")
                     f.write(text[:500] + "..." if len(text) > 500 else text)
                     f.write("\n\n")
-        print(f"✅ 清洗后文本已保存到 {output_path}")
+        if not self.quiet:
+            print(f"✅ 清洗后文本已保存到 {output_path}")
 
     def save_content_texts(self, output_path: str = None):
         """保存正文文本（切除模板后）"""
@@ -424,7 +681,8 @@ class TextAnalyzer:
                     f.write(f"=== 文本 {i+1} ===\n")
                     f.write(text[:500] + "..." if len(text) > 500 else text)
                     f.write("\n\n")
-        print(f"✅ 正文文本已保存到 {output_path}")
+        if not self.quiet:
+            print(f"✅ 正文文本已保存到 {output_path}")
 
     def save_filtered_texts(self, output_path: str = None):
         """保存过滤后文本（去除噪音）"""
@@ -436,7 +694,8 @@ class TextAnalyzer:
                     f.write(f"=== 文本 {i+1} ===\n")
                     f.write(text[:500] + "..." if len(text) > 500 else text)
                     f.write("\n\n")
-        print(f"✅ 过滤后文本已保存到 {output_path}")
+        if not self.quiet:
+            print(f"✅ 过滤后文本已保存到 {output_path}")
 
     def save_templates(self, output_path: str = None):
         """保存检测到的模板词"""
@@ -449,45 +708,83 @@ class TextAnalyzer:
             f.write("\n=== 结尾模板词 ===\n")
             for word in sorted(self.end_templates):
                 f.write(word + "\n")
-        print(f"✅ 模板词已保存到 {output_path}")
+        if not self.quiet:
+            print(f"✅ 模板词已保存到 {output_path}")
 
-    def _get_texts_for_modeling(self) -> List[str]:
-        """
-        获取用于建模（聚类、主题建模）的清洗文本
 
-        额外处理：
-        1. 过滤包含股票代码的句子
-        2. 过滤过短句子
-        3. 使用词级别过滤后的 tokens 重建文本
-        """
-        texts = []
+# ==================== 便捷函数 ====================
 
-        for i, text in enumerate(self.content_texts):
-            if not text:
-                continue
+def analyze_texts(
+    texts: List[str],
+    output_file: str = None,
+    format: str = "html",
+    quiet: bool = False,
+    use_bert: bool = True
+) -> TextAnalyzer:
+    """便捷函数：快速分析文本列表"""
+    analyzer = TextAnalyzer(texts, quiet=quiet, use_bert=use_bert)
+    analyzer.generate_full_report()
 
-            # 使用预处理后的 tokens
-            tokens = self.tokens_cleaned_list[i] if i < len(self.tokens_cleaned_list) else []
+    if output_file:
+        if format == "html":
+            analyzer.to_html(output_file)
+        elif format == "json":
+            analyzer.to_json(output_file)
+        elif format == "md":
+            analyzer.to_markdown(output_file)
 
-            # 应用词级别过滤
-            if hasattr(self, 'preprocessor') and self.preprocessor:
-                tokens = self.preprocessor.filter_tokens(tokens)
+    return analyzer
 
-            if not tokens:
-                continue
 
-            # 重建文本（用空格连接）
-            cleaned_text = ' '.join(tokens)
+def analyze_file(
+    file_path: str,
+    text_col: str = None,
+    title_col: str = None,
+    time_col: str = None,
+    output_file: str = None,
+    format: str = "html",
+    quiet: bool = False,
+    use_bert: bool = True
+) -> TextAnalyzer:
+    """便捷函数：分析文本文件"""
+    analyzer = TextAnalyzer(
+        data=file_path,
+        text_col=text_col,
+        title_col=title_col,
+        time_col=time_col,
+        quiet=quiet,
+        use_bert=use_bert
+    )
+    analyzer.generate_full_report()
 
-            # 过滤过短文本
-            if len(cleaned_text) < 50:
-                continue
+    if output_file:
+        if format == "html":
+            analyzer.to_html(output_file)
+        elif format == "json":
+            analyzer.to_json(output_file)
+        elif format == "md":
+            analyzer.to_markdown(output_file)
 
-            # 过滤包含股票代码的文本
-            import re
-            if re.search(r'[06]\d{5}', cleaned_text):
-                continue
+    return analyzer
 
-            texts.append(cleaned_text)
 
-        return texts
+def analyze_folder(
+    folder_path: str,
+    output_file: str = None,
+    format: str = "html",
+    quiet: bool = False,
+    use_bert: bool = True
+) -> TextAnalyzer:
+    """便捷函数：分析文件夹中的所有文本文件"""
+    analyzer = TextAnalyzer(folder_path, quiet=quiet, use_bert=use_bert)
+    analyzer.generate_full_report()
+
+    if output_file:
+        if format == "html":
+            analyzer.to_html(output_file)
+        elif format == "json":
+            analyzer.to_json(output_file)
+        elif format == "md":
+            analyzer.to_markdown(output_file)
+
+    return analyzer

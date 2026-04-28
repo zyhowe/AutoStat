@@ -12,36 +12,55 @@ class TextLoader:
     """文本加载器 - 支持多种数据源"""
 
     @staticmethod
-    def from_file(file_path: str, encoding: str = 'utf-8') -> List[str]:
+    def from_file(file_path: str, encoding: str = 'utf-8', text_col: str = None) -> Union[List[str], pd.DataFrame]:
         """
-        从文本文件加载文本
+        从文本文件或CSV文件加载文本
 
         参数:
         - file_path: 文件路径
         - encoding: 编码
+        - text_col: 如果文件是CSV/Excel，指定文本列名
 
-        返回: 文本列表（每行作为一条文本）
+        返回:
+        - 如果是TXT文件：文本列表
+        - 如果是CSV/Excel：DataFrame
         """
-        texts = []
-        with open(file_path, 'r', encoding=encoding, errors='ignore') as f:
-            for line in f:
-                line = line.strip()
-                if line:
-                    texts.append(line)
-        return texts
+        ext = os.path.splitext(file_path)[1].lower()
+
+        if ext == '.txt':
+            texts = []
+            with open(file_path, 'r', encoding=encoding, errors='ignore') as f:
+                for line in f:
+                    line = line.strip()
+                    if line:
+                        texts.append(line)
+            return texts
+        elif ext == '.csv':
+            df = pd.read_csv(file_path, encoding=encoding, engine='python', on_bad_lines='skip')
+            # 清理列名
+            df.columns = [str(col).strip().replace('\n', '_').replace('\r', '_') for col in df.columns]
+            return df
+        elif ext in ['.xlsx', '.xls']:
+            df = pd.read_excel(file_path, engine='openpyxl')
+            df.columns = [str(col).strip().replace('\n', '_').replace('\r', '_') for col in df.columns]
+            return df
+        elif ext == '.json':
+            df = pd.read_json(file_path)
+            df.columns = [str(col).strip().replace('\n', '_').replace('\r', '_') for col in df.columns]
+            return df
+        else:
+            # 尝试作为文本文件读取
+            texts = []
+            with open(file_path, 'r', encoding=encoding, errors='ignore') as f:
+                for line in f:
+                    line = line.strip()
+                    if line:
+                        texts.append(line)
+            return texts
 
     @staticmethod
     def from_folder(folder_path: str, extensions: List[str] = None, encoding: str = 'utf-8') -> Dict[str, List[str]]:
-        """
-        从文件夹加载所有文本文件
-
-        参数:
-        - folder_path: 文件夹路径
-        - extensions: 文件扩展名列表，默认 ['.txt']
-        - encoding: 编码
-
-        返回: {"file_name": [文本列表]}
-        """
+        """从文件夹加载所有文本文件"""
         if extensions is None:
             extensions = ['.txt']
 
@@ -80,8 +99,9 @@ class TextLoader:
 
         # 提取文本列
         if text_col not in df.columns:
-            raise ValueError(f"文本列 '{text_col}' 不存在于 DataFrame 中")
+            raise ValueError(f"文本列 '{text_col}' 不存在于 DataFrame 中，可用列: {list(df.columns)}")
 
+        # 转换为字符串，处理空值
         result["texts"] = df[text_col].fillna("").astype(str).tolist()
 
         # 提取标题列
@@ -104,16 +124,7 @@ class TextLoader:
     @staticmethod
     def from_text_list(texts: List[str], titles: Optional[List[str]] = None,
                        dates: Optional[List[Any]] = None) -> Dict[str, Any]:
-        """
-        从文本列表加载
-
-        参数:
-        - texts: 文本列表
-        - titles: 标题列表（可选）
-        - dates: 时间列表（可选）
-
-        返回: {"texts": List[str], "titles": List[str] (可选), "dates": List[Any] (可选)}
-        """
+        """从文本列表加载"""
         result = {"texts": texts}
         if titles:
             result["titles"] = titles

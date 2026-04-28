@@ -74,14 +74,19 @@ class ReportDataBuilder:
 
         # 聚类
         cluster_info = []
+        # if self.analyzer.clusterer and self.analyzer.clusterer._fitted:
+        #     cluster_info = self.analyzer.clusterer.get_cluster_info(texts)
+
         if self.analyzer.clusterer and self.analyzer.clusterer._fitted:
-            cluster_info = self.analyzer.clusterer.get_cluster_info(texts)
+            cluster_info = self.analyzer.clusterer.get_cluster_info(top_n_words=10)
 
         # 主题
         topic_info = []
         if self.analyzer.topic_modeler and self.analyzer.topic_modeler._fitted:
             topic_info = self.analyzer.topic_modeler.get_topics()
             topic_distribution = self.analyzer.topic_modeler.get_topic_distribution()
+
+
 
         # 时间趋势
         trend_info = {}

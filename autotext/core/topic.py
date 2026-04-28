@@ -1,160 +1,113 @@
 """
-主题建模模块 - LDA
+主题建模模块 - 基于聚类结果的TF-IDF关键词
 """
 
+from collections import Counter
+from typing import List, Dict, Any, Optional
 import numpy as np
-from typing import List, Dict, Any, Optional, Tuple
 
 
 class TopicModeler:
-    """主题建模器 - LDA"""
+    """主题建模器 - 基于聚类结果的TF-IDF"""
 
-    def __init__(self, n_topics: int = 10, max_features: int = 2000, random_state: int = 42):
-        """
-        初始化主题建模器
-
-        参数:
-        - n_topics: 主题数量
-        - max_features: 最大特征数
-        - random_state: 随机种子
-        """
+    def __init__(self, n_topics: int = 10):
         self.n_topics = n_topics
-        self.max_features = max_features
-        self.random_state = random_state
-        self.model = None
-        self.vectorizer = None
-        self.topic_distributions = None
         self._fitted = False
+        self.topics = []
 
-    def fit(self, texts: List[str]):
+    def fit(self, texts: List[str], cluster_labels: List[int]):
         """
-        训练 LDA 模型
+        训练主题模型
 
         参数:
-        - texts: 文本列表（已预处理）
+        - texts: 文本列表
+        - cluster_labels: 聚类标签（-1表示噪声）
         """
-        from sklearn.feature_extraction.text import CountVectorizer
-        from sklearn.decomposition import LatentDirichletAllocation
+        # 只使用有聚类标签的文本
+        valid_indices = [i for i, l in enumerate(cluster_labels) if l != -1]
+        if not valid_indices:
+            self._fitted = True
+            return self
 
-        # 向量化
-        documents = [' '.join(text.split()) if isinstance(text, str) else str(text) for text in texts]
+        valid_texts = [texts[i] for i in valid_indices]
+        valid_labels = [cluster_labels[i] for i in valid_indices]
 
-        self.vectorizer = CountVectorizer(max_features=self.max_features, token_pattern=r'(?u)\b\w+\b')
-        X = self.vectorizer.fit_transform(documents)
+        unique_labels = set(valid_labels)
+        self.topics = []
 
-        # LDA
-        self.model = LatentDirichletAllocation(
-            n_components=self.n_topics,
-            random_state=self.random_state,
-            learning_method='online'
-        )
-        self.topic_distributions = self.model.fit_transform(X)
-        self._fitted = True
+        # 计算全局词频（用于TF-IDF）
+        global_word_freq = Counter()
+        for text in valid_texts:
+            words = self._simple_tokenize(text)
+            global_word_freq.update(words)
+        total_docs = len(valid_texts)
 
-        return self
+        for label in unique_labels:
+            # 获取该主题的文本
+            topic_indices = [i for i, l in enumerate(valid_labels) if l == label]
+            topic_texts = [valid_texts[i] for i in topic_indices]
 
-    def get_topics(self, top_n_words: int = 10) -> List[Dict]:
-        """
-        获取主题及关键词
+            # 统计主题内词频
+            topic_word_freq = Counter()
+            for text in topic_texts:
+                words = self._simple_tokenize(text)
+                topic_word_freq.update(words)
 
-        返回:
-        [
-            {
-                "topic_id": int,
-                "keywords": List[str],
-                "weights": List[float]
-            },
-            ...
-        ]
-        """
-        if not self._fitted:
-            raise ValueError("请先调用 fit() 训练模型")
+            # 计算TF-IDF分数
+            word_scores = []
+            for word, tf in topic_word_freq.most_common(50):
+                # 计算文档频率
+                df = global_word_freq.get(word, 1)
+                idf = np.log(total_docs / df) if df > 0 else 0
+                score = tf * idf
+                word_scores.append((word, score))
 
-        feature_names = self.vectorizer.get_feature_names_out()
-        topics = []
+            word_scores.sort(key=lambda x: x[1], reverse=True)
 
-        for topic_idx, topic in enumerate(self.model.components_):
-            top_indices = topic.argsort()[:-top_n_words - 1:-1]
-            keywords = [feature_names[i] for i in top_indices]
-            weights = [topic[i] for i in top_indices]
-            # 归一化权重
-            total = sum(weights)
-            weights = [w / total for w in weights]
+            # 找代表性文本
+            representative_text = ""
+            if topic_texts:
+                # 选择最长的文本作为代表
+                representative_text = max(topic_texts, key=len)[:300]
 
-            topics.append({
-                "topic_id": topic_idx,
-                "keywords": keywords,
-                "weights": weights
+            self.topics.append({
+                "topic_id": int(label),
+                "texts_count": len(topic_texts),
+                "keywords": [w for w, _ in word_scores[:15]],
+                "weights": [round(s, 3) for _, s in word_scores[:15]],
+                "representative_text": representative_text
             })
 
-        return topics
+        # 按文本数量排序
+        self.topics.sort(key=lambda x: x["texts_count"], reverse=True)
+
+        # 重新编号
+        for i, topic in enumerate(self.topics):
+            topic["topic_id"] = i
+
+        self._fitted = True
+        return self
+
+    def get_topics(self) -> List[Dict]:
+        """获取主题列表"""
+        if not self._fitted:
+            return []
+        return self.topics
 
     def get_topic_distribution(self) -> List[float]:
-        """
-        获取整体主题分布（各主题在所有文档中的平均比例）
-
-        返回: 各主题的比例列表
-        """
+        """获取主题分布"""
         if not self._fitted:
-            raise ValueError("请先调用 fit() 训练模型")
+            return []
+        total = sum(t["texts_count"] for t in self.topics)
+        if total == 0:
+            return []
+        return [t["texts_count"] / total for t in self.topics]
 
-        return (self.topic_distributions.mean(axis=0)).tolist()
-
-    def get_document_topics(self, doc_index: int) -> List[Tuple[int, float]]:
-        """
-        获取单篇文档的主题分布
-
-        参数:
-        - doc_index: 文档索引
-
-        返回: [(主题ID, 比例), ...] 按比例降序
-        """
-        if not self._fitted:
-            raise ValueError("请先调用 fit() 训练模型")
-
-        dist = self.topic_distributions[doc_index]
-        topics = [(i, dist[i]) for i in range(len(dist))]
-        topics.sort(key=lambda x: x[1], reverse=True)
-        return topics
-
-    def predict(self, text: str) -> List[Tuple[int, float]]:
-        """
-        预测新文本的主题分布
-
-        参数:
-        - text: 文本
-
-        返回: [(主题ID, 比例), ...] 按比例降序
-        """
-        if not self._fitted:
-            raise ValueError("请先调用 fit() 训练模型")
-
-        doc = self.vectorizer.transform([text])
-        dist = self.model.transform(doc)[0]
-        topics = [(i, dist[i]) for i in range(len(dist))]
-        topics.sort(key=lambda x: x[1], reverse=True)
-        return topics
-
-    def get_coherence_score(self) -> float:
-        """
-        获取主题一致性（评估主题质量）
-
-        返回: 一致性分数（越高越好）
-        """
-        # 简化实现，实际可以使用 gensim 的 CoherenceModel
-        # 这里返回基于主题词之间共现的简单评分
-        if not self._fitted:
-            return 0
-
-        topics = self.get_topics(top_n_words=10)
-        coherence_sum = 0
-        for topic in topics:
-            keywords = topic["keywords"]
-            # 简单的词频相关性
-            score = 0
-            for i in range(len(keywords)):
-                for j in range(i + 1, len(keywords)):
-                    # 这里简化处理，实际需要词共现矩阵
-                    score += 1
-            coherence_sum += score / max(len(keywords) * (len(keywords) - 1) / 2, 1)
-        return coherence_sum / len(topics) / 10  # 归一化到 0-1 范围
+    def _simple_tokenize(self, text: str) -> List[str]:
+        """简单分词"""
+        import re
+        words = re.findall(r'[\u4e00-\u9fff]{2,4}', text)
+        stopwords = {'的', '了', '是', '在', '和', '与', '或', '也', '都', '还',
+                     '这', '那', '有', '为', '对', '而', '并', '且', '但', '就',
+                     '到', '从', '由', '于', '之', '将', '会', '能', '可', '以'}
+        return [w for w in words if w not in stopwords and len(w) >= 2]
