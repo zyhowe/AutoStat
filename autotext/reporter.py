@@ -22,7 +22,6 @@ class TextReporter:
         try:
             html = self._build_html(title)
             if output_file:
-                # 确保输出目录存在
                 os.makedirs(os.path.dirname(output_file) if os.path.dirname(output_file) else '.', exist_ok=True)
                 with open(output_file, 'w', encoding='utf-8') as f:
                     f.write(html)
@@ -68,6 +67,7 @@ class TextReporter:
 | 空文本率 | {data['stats']['empty_rate']:.1%} |
 | 平均长度 | {data['stats']['char_length']['mean']:.1f} 字符 |
 | 重复文本对 | {data['quality'].get('duplicates', {}).get('count', 0)} |
+| 高相似文本对 | {len(data['quality'].get('similarity', {}).get('high_similarity_pairs', []))} |
 
 ## 语言分布
 
@@ -95,14 +95,14 @@ class TextReporter:
 
         # 实体统计
         entity = data.get('entity', {})
-        if entity.get('per', {}).get('unique', 0) > 0:
-            md += "\n## 人名实体\n"
-            for name, count in entity.get('per', {}).get('top', [])[:20]:
-                md += f"- {name}: {count}次\n"
-
         if entity.get('org', {}).get('unique', 0) > 0:
             md += "\n## 组织名实体\n"
             for name, count in entity.get('org', {}).get('top', [])[:20]:
+                md += f"- {name}: {count}次\n"
+
+        if entity.get('per', {}).get('unique', 0) > 0:
+            md += "\n## 人名实体\n"
+            for name, count in entity.get('per', {}).get('top', [])[:20]:
                 md += f"- {name}: {count}次\n"
 
         if entity.get('loc', {}).get('unique', 0) > 0:
@@ -117,6 +117,10 @@ class TextReporter:
             for cluster in clusters:
                 md += f"\n### 簇 {cluster.get('id', 0)}\n"
                 md += f"- 数量: {cluster.get('size', 0)} 条 ({cluster.get('percentage', 0):.1%})\n"
+                if cluster.get('llm_title'):
+                    md += f"- AI主题: {cluster.get('llm_title')}\n"
+                if cluster.get('llm_summary'):
+                    md += f"- AI摘要: {cluster.get('llm_summary')}\n"
                 md += f"- 关键词: {', '.join(cluster.get('top_words', [])[:10])}\n"
 
         # 主题结果
@@ -137,9 +141,30 @@ class TextReporter:
                 md += f"\n### {priority_icon} {insight.get('title', '')}\n"
                 md += f"{insight.get('description', '')}\n"
 
+        # 关联规则
+        association_rules = data.get('association_rules', [])
+        if association_rules:
+            md += "\n## 关联规则挖掘\n"
+            for rule in association_rules[:10]:
+                antecedent = rule.get('antecedent', '').split(':', 1)[-1] if ':' in rule.get('antecedent', '') else rule.get('antecedent', '')
+                consequent = rule.get('consequent', '').split(':', 1)[-1] if ':' in rule.get('consequent', '') else rule.get('consequent', '')
+                md += f"\n- **{antecedent} → {consequent}**\n"
+                md += f"  置信度: {rule.get('confidence', 0)*100:.0f}% | 提升度: {rule.get('lift', 0):.1f}\n"
+                md += f"  {rule.get('interpretation', '')}\n"
+
+        # 热点话题
+        hot_topics = data.get('hot_topics', [])
+        if hot_topics:
+            md += "\n## 热点话题趋势\n"
+            for topic in hot_topics[:10]:
+                entity_name = topic.get('entity', '').split(':', 1)[-1] if ':' in topic.get('entity', '') else topic.get('entity', '')
+                md += f"\n- **{entity_name}** (增长 {topic.get('increase_pct', 0):.0f}%)\n"
+                md += f"  近期均值: {topic.get('recent_avg', 0):.1f} | 历史均值: {topic.get('history_avg', 0):.1f}\n"
+                md += f"  峰值日期: {topic.get('peak_date', '')}\n"
+
         # 清洗建议
         if data.get('cleaning_suggestions'):
-            md += "\n## 清洗建议\n"
+            md += "\n## 数据清洗建议\n"
             for s in data['cleaning_suggestions'][:5]:
                 md += f"- {s}\n"
 
@@ -154,7 +179,7 @@ class TextReporter:
     def _build_json_data(self) -> Dict[str, Any]:
         """构建完整的 JSON 数据"""
 
-        # 处理关键词格式：保持 [(word, count), ...] 格式
+        # 处理关键词格式
         keywords_frequency = []
         for item in self.analyzer.keywords.get("frequency", [])[:50]:
             if isinstance(item, (list, tuple)) and len(item) >= 2:
@@ -162,7 +187,7 @@ class TextReporter:
             elif isinstance(item, dict):
                 keywords_frequency.append([item.get('word', ''), item.get('count', 0)])
 
-        # 处理聚类信息
+        # 处理聚类信息（增强版，包含摘要）
         clusters = []
         for cluster in self.analyzer.cluster_info[:10]:
             clusters.append({
@@ -170,20 +195,26 @@ class TextReporter:
                 "size": cluster.get("size", 0),
                 "percentage": cluster.get("percentage", 0),
                 "top_words": cluster.get("top_words", [])[:10],
-                "center_text": cluster.get("center_text", "")[:200] if cluster.get("center_text") else ""
+                "center_text": cluster.get("center_text", "")[:200] if cluster.get("center_text") else "",
+                "textrank_sentences": cluster.get("textrank_sentences", [])[:3],
+                "llm_title": cluster.get("llm_title", ""),
+                "llm_summary": cluster.get("llm_summary", "")
             })
 
-        # 处理主题信息
+        # 处理主题信息（增强版，包含摘要）
         topics = []
         for topic in self.analyzer.topics[:10]:
             topics.append({
                 "id": topic.get("topic_id", 0),
                 "texts_count": topic.get("texts_count", 0),
                 "keywords": topic.get("keywords", [])[:10],
-                "weights": topic.get("weights", [])[:10] if topic.get("weights") else []
+                "weights": topic.get("weights", [])[:10] if topic.get("weights") else [],
+                "textrank_sentences": topic.get("textrank_sentences", [])[:3],
+                "llm_title": topic.get("llm_title", ""),
+                "llm_summary": topic.get("llm_summary", "")
             })
 
-        # 处理实体信息（已过滤）
+        # 处理实体信息
         entity = getattr(self.analyzer, 'entity_stats', {})
 
         # 处理洞察信息
@@ -198,11 +229,24 @@ class TextReporter:
                 "data": insight.get("data", {})
             })
 
+        # 获取质量详情
+        quality_data = self.analyzer.quality_report
+        cleaning_suggestions = self.analyzer.cleaning_suggestions
+
+        # 提取重复、相似、长度异常的详情
+        duplicates_detail = quality_data.get('duplicates', {})
+        similarity_detail = quality_data.get('similarity', {})
+        length_detail = quality_data.get('length_anomalies', {})
+
+        # 获取增强分析数据
+        association_rules = getattr(self.analyzer, 'association_rules', [])[:15]
+        hot_topics = getattr(self.analyzer, 'hot_topics', [])[:15]
+
         data = {
             'stats': self.analyzer.stats_result,
             'language_distribution': getattr(self.analyzer, 'language_distribution', {}),
-            'quality': self.analyzer.quality_report,
-            'cleaning_suggestions': self.analyzer.cleaning_suggestions[:10],
+            'quality': quality_data,
+            'cleaning_suggestions': cleaning_suggestions[:10],
             'keywords': {
                 'frequency': keywords_frequency,
                 'tfidf': []
@@ -221,7 +265,28 @@ class TextReporter:
                 'end': list(self.analyzer.end_templates)[:20]
             },
             'insights': insights,
-            'sample_texts': self.analyzer.content_texts[:10]
+            'sample_texts': self.analyzer.content_texts[:10],
+            # 质量详情区块数据
+            'quality_details': {
+                'duplicates': {
+                    'count': duplicates_detail.get('count', 0),
+                    'rate': duplicates_detail.get('rate', 0),
+                    'duplicate_summary': duplicates_detail.get('duplicate_summary', [])
+                },
+                'similarity': {
+                    'count': len(similarity_detail.get('high_similarity_pairs', [])),
+                    'similarity_summary': similarity_detail.get('similarity_summary', [])
+                },
+                'length': {
+                    'short_count': len(length_detail.get('short', [])),
+                    'long_count': len(length_detail.get('long', [])),
+                    'short_summary': length_detail.get('short_summary', []),
+                    'long_summary': length_detail.get('long_summary', [])
+                }
+            },
+            # 增强分析数据
+            'association_rules': association_rules,
+            'hot_topics': hot_topics
         }
 
         return data
@@ -259,7 +324,6 @@ class TextReporter:
         template_path = os.path.join(os.path.dirname(__file__), '..', 'templates', 'report_text.html')
 
         if not os.path.exists(template_path):
-            # 尝试另一种路径
             template_path = os.path.join(os.path.dirname(__file__), 'templates', 'report_text.html')
 
         if not os.path.exists(template_path):
@@ -272,7 +336,7 @@ class TextReporter:
 
             stats = data['stats']
             sentiment = data['sentiment']
-            keywords = data['keywords']['frequency']  # 保持 [(word, count), ...] 格式
+            keywords = data['keywords']['frequency']
             clusters = data['clusters']
             topics = data['topics']
             quality = data['quality']
@@ -282,6 +346,9 @@ class TextReporter:
             templates = data.get('templates', {})
             insights = data.get('insights', [])
             sample_texts = data.get('sample_texts', [])
+            quality_details = data.get('quality_details', {})
+            association_rules = data.get('association_rules', [])
+            hot_topics = data.get('hot_topics', [])
 
             return template.render(
                 title=title,
@@ -303,7 +370,10 @@ class TextReporter:
                 start_templates=list(templates.get('start', []))[:20],
                 end_templates=list(templates.get('end', []))[:20],
                 insights=insights,
-                sample_texts=sample_texts
+                sample_texts=sample_texts,
+                quality_details=quality_details,
+                association_rules=association_rules,
+                hot_topics=hot_topics
             )
         except Exception as e:
             import traceback

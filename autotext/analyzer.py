@@ -54,10 +54,33 @@ except ImportError:
     print("⚠️ EventTimelineAnalyzer 导入失败")
 
 try:
-    from autotext.core.insight import InsightDiscoverer
+    from autotext.core.insight import InsightDiscoverer, format_insights_for_report
 except ImportError:
     InsightDiscoverer = None
+    format_insights_for_report = lambda x: ""
     print("⚠️ InsightDiscoverer 导入失败")
+
+# 新增增强模块导入
+try:
+    from autotext.core.summarizer import TextRankSummarizer, LLMSummarizer
+except ImportError:
+    TextRankSummarizer = None
+    LLMSummarizer = None
+
+try:
+    from autotext.core.relation_mining import RelationMiner
+except ImportError:
+    RelationMiner = None
+
+try:
+    from autotext.core.trend_detector import TrendDetector
+except ImportError:
+    TrendDetector = None
+
+try:
+    from autotext.core.info_extractor import InfoExtractor
+except ImportError:
+    InfoExtractor = None
 
 
 class TextAnalyzer:
@@ -135,6 +158,16 @@ class TextAnalyzer:
         self.ner_model = None
         self.relation_discoverer = None
 
+        # 增强模块实例
+        self.textrank_summarizer = None
+        self.llm_summarizer = None
+        self.relation_miner = None
+        self.trend_detector = None
+        self.info_extractor = None
+        self.association_rules = []
+        self.hot_topics = []
+        self.llm_client = None  # 大模型客户端（外部注入）
+
         # 模板词
         self.start_templates = set()
         self.end_templates = set()
@@ -152,6 +185,12 @@ class TextAnalyzer:
             print("\n" + "=" * 70)
             print("📝 启动文本分析流程")
             print("=" * 70)
+
+    def set_llm_client(self, llm_client):
+        """设置大模型客户端（用于摘要生成等）"""
+        self.llm_client = llm_client
+        if not self.quiet:
+            print("  ✅ 大模型客户端已设置")
 
     def _load_data(self, data, text_col, title_col, time_col, metric_cols):
         """加载数据 - 支持 CSV 文件路径 + text_col"""
@@ -425,7 +464,7 @@ class TextAnalyzer:
         return filtered
 
     def _bert_analysis(self):
-        """BERT增强分析"""
+        """BERT增强分析 - 包含向量化、实体识别、聚类、主题等"""
         if not self.use_bert or len(self.texts) < 5:
             if not self.quiet:
                 print("\n【BERT增强】跳过（文本数量不足或未启用）")
@@ -433,7 +472,6 @@ class TextAnalyzer:
 
         if not self.quiet:
             print("\n【BERT增强】深度语义分析...")
-            print("  ⚠️ 首次运行会下载BERT模型（约400MB），请耐心等待...")
 
         # 准备有效文本
         valid_texts = [t if t and len(t) > 0 else " " for t in self.content_texts]
@@ -447,7 +485,6 @@ class TextAnalyzer:
                 raise ImportError("BertVectorizer 未导入")
             self.vectorizer = BertVectorizer(device="cpu")
             self.embeddings = self.vectorizer.get_embeddings(valid_texts)
-
             if not self.quiet:
                 print(f"  ✅ 向量化完成，维度: {self.embeddings.shape}")
         except Exception as e:
@@ -466,16 +503,9 @@ class TextAnalyzer:
             self.entity_results = self.ner_model.recognize(valid_texts)
             entity_stats_raw = self.ner_model.get_entity_stats(self.entity_results)
             self.entity_stats = self._filter_valid_entities(entity_stats_raw)
-
             if not self.quiet:
                 total_entities = sum(len(ents) for ents in self.entity_results)
                 print(f"  ✅ 识别到 {total_entities} 个实体")
-                for entity_type in ['per', 'org', 'loc']:
-                    count = self.entity_stats.get(entity_type, {}).get('unique', 0)
-                    if count > 0:
-                        top_entities = self.entity_stats.get(entity_type, {}).get('top', [])[:3]
-                        top_names = [name for name, _ in top_entities]
-                        print(f"     - {entity_type}: {count} 个, 示例: {', '.join(top_names)}")
         except Exception as e:
             if not self.quiet:
                 print(f"  ❌ 实体识别失败: {e}")
@@ -490,18 +520,11 @@ class TextAnalyzer:
             if self.entity_results and RelationDiscoverer is not None:
                 self.relation_discoverer = RelationDiscoverer()
                 self.relation_result = self.relation_discoverer.discover(self.entity_results, valid_texts)
-
                 if not self.quiet:
                     pairs = len(self.relation_result.get('cooccurrence_pairs', []))
                     print(f"  ✅ 发现 {pairs} 个强关联实体对")
-                    for pair in self.relation_result.get('cooccurrence_pairs', [])[:3]:
-                        e1 = pair['entity1'].split(':', 1)[-1] if ':' in pair['entity1'] else pair['entity1']
-                        e2 = pair['entity2'].split(':', 1)[-1] if ':' in pair['entity2'] else pair['entity2']
-                        print(f"     - {e1} ↔ {e2} (PMI={pair['pmi']:.2f})")
             else:
                 self.relation_result = {}
-                if not self.quiet:
-                    print("  ⚠️ 无实体数据，跳过关系发现")
         except Exception as e:
             if not self.quiet:
                 print(f"  ❌ 关系发现失败: {e}")
@@ -517,14 +540,10 @@ class TextAnalyzer:
             self.clusterer = TextClusterer()
             self.clusterer.fit(self.embeddings)
             self.cluster_info = self.clusterer.get_cluster_info(valid_texts, self.embeddings)
-
             if not self.quiet:
                 n_clusters = len(self.cluster_info)
                 if n_clusters > 0:
                     print(f"  ✅ 聚类完成，共 {n_clusters} 个簇")
-                    for cluster in self.cluster_info[:3]:
-                        keywords = ', '.join(cluster['top_words'][:5])
-                        print(f"     - 簇{cluster['cluster_id']}: {cluster['size']} 条, 关键词: {keywords}")
                 else:
                     print(f"  ⚠️ 未发现有效聚类")
         except Exception as e:
@@ -544,12 +563,8 @@ class TextAnalyzer:
             cluster_labels = getattr(self.clusterer, 'labels', None) if self.clusterer else None
             self.topic_modeler.fit(valid_texts, cluster_labels)
             self.topics = self.topic_modeler.get_topics()
-
             if not self.quiet:
                 print(f"  ✅ 主题建模完成，共 {len(self.topics)} 个主题")
-                for topic in self.topics[:3]:
-                    keywords = ', '.join(topic.get('keywords', [])[:5])
-                    print(f"     - 主题{topic['topic_id']}: {keywords}")
         except Exception as e:
             if not self.quiet:
                 print(f"  ❌ 主题建模失败: {e}")
@@ -567,26 +582,10 @@ class TextAnalyzer:
                 self.event_timeline = timeline.analyze(
                     valid_texts, self.dates, self.entity_results, self.sentiment_results
                 )
-
                 if not self.quiet and 'error' not in self.event_timeline:
-                    time_range = self.event_timeline.get('time_range', {})
                     print(f"  ✅ 事件脉络分析完成")
-                    if time_range.get('start') and time_range.get('end'):
-                        start_str = str(time_range['start'])[:10] if time_range['start'] else 'N/A'
-                        end_str = str(time_range['end'])[:10] if time_range['end'] else 'N/A'
-                        print(f"     - 时间范围: {start_str} ~ {end_str}")
-
-                    hot_topics = self.event_timeline.get('hot_topics', [])
-                    if hot_topics:
-                        print(f"     - 热点话题: {len(hot_topics)} 个")
-                elif not self.quiet:
-                    error_msg = self.event_timeline.get('error', '时间信息不足')
-                    print(f"  ⚠️ 事件脉络分析跳过: {error_msg}")
             else:
                 self.event_timeline = {}
-                if not self.quiet:
-                    if len(valid_dates) < 5:
-                        print(f"  ⚠️ 事件脉络跳过（有效时间点不足: {len(valid_dates)} < 5）")
         except Exception as e:
             if not self.quiet:
                 print(f"  ❌ 事件脉络分析失败: {e}")
@@ -601,16 +600,201 @@ class TextAnalyzer:
                 raise ImportError("InsightDiscoverer 未导入")
             insight_discoverer = InsightDiscoverer()
             self.insights = insight_discoverer.discover_all(self)
-
             if not self.quiet:
                 print(f"  ✅ 发现 {len(self.insights)} 个洞察")
-                for insight_item in self.insights[:5]:
-                    priority_icon = {'高': '🔴', '中': '🟠', '低': '🟢'}.get(insight_item.get('priority', '中'), '⚪')
-                    print(f"     {priority_icon} {insight_item['title']}")
         except Exception as e:
             if not self.quiet:
                 print(f"  ❌ 洞察发现失败: {e}")
             self.insights = []
+
+        # ==================== 8. 增强分析 ====================
+        if not self.quiet:
+            print("  📊 增强分析...")
+
+        # 8.1 TextRank 摘要（聚类）
+        try:
+            if TextRankSummarizer is not None and self.clusterer is not None:
+                self.textrank_summarizer = TextRankSummarizer()
+                for cluster in self.cluster_info:
+                    cluster_id = cluster.get('cluster_id')
+                    # 使用 cluster_id 匹配原始标签（注意：get_cluster_info 已重新编号）
+                    # 需要遍历所有索引找到对应标签
+                    target_label = None
+                    for i, info in enumerate(self.cluster_info):
+                        if info.get('cluster_id') == cluster_id:
+                            if hasattr(self.clusterer, 'labels') and self.clusterer.labels is not None:
+                                # 获取该簇在原始 labels 中的值
+                                unique_labels = list(set(self.clusterer.labels) - {-1})
+                                if i < len(unique_labels):
+                                    target_label = unique_labels[i]
+                            break
+
+                    if target_label is not None:
+                        cluster_indices = [i for i, l in enumerate(self.clusterer.labels) if l == target_label]
+                    else:
+                        # fallback: 使用 cluster_id 作为标签
+                        cluster_indices = [i for i, l in enumerate(self.clusterer.labels) if l == cluster_id]
+
+                    cluster_texts = [valid_texts[i] for i in cluster_indices[:10] if i < len(valid_texts)]
+                    if cluster_texts:
+                        key_sentences = self.textrank_summarizer.extract_cluster_key_sentences(cluster_texts, top_n=3)
+                        cluster['textrank_sentences'] = key_sentences
+                if not self.quiet and self.cluster_info:
+                    print(f"  ✅ TextRank摘要完成（{len(self.cluster_info)}个簇）")
+        except Exception as e:
+            if not self.quiet:
+                print(f"  ⚠️ TextRank摘要失败: {e}")
+
+        # 8.1.1 TextRank 摘要（主题建模）- 修复版
+        try:
+            if TextRankSummarizer is not None and self.topics and self.topic_modeler is not None:
+                for topic in self.topics:
+                    topic_id = topic.get('id', topic.get('topic_id', 0))
+                    topic_indices = []
+
+                    # 修复：先检查属性是否存在，再获取值
+                    if hasattr(self.topic_modeler, 'topic_labels'):
+                        topic_labels = getattr(self.topic_modeler, 'topic_labels')
+                        if topic_labels is not None and hasattr(topic_labels, '__len__'):
+                            for i, label in enumerate(topic_labels):
+                                if label == topic_id:
+                                    topic_indices.append(i)
+                    elif hasattr(self.topic_modeler, 'labels'):
+                        labels = getattr(self.topic_modeler, 'labels')
+                        if labels is not None:
+                            topic_indices = [i for i, l in enumerate(labels) if l == topic_id]
+
+                    topic_texts = [valid_texts[i] for i in topic_indices[:10] if i < len(valid_texts)]
+                    if topic_texts:
+                        key_sentences = self.textrank_summarizer.extract_cluster_key_sentences(topic_texts, top_n=3)
+                        topic['textrank_sentences'] = key_sentences
+                if not self.quiet and self.topics:
+                    print(f"  ✅ TextRank摘要完成（{len(self.topics)}个主题）")
+        except Exception as e:
+            if not self.quiet:
+                print(f"  ⚠️ 主题TextRank摘要失败: {e}")
+
+        # 8.2 大模型摘要（聚类 + 主题）
+        if self.llm_client is not None and LLMSummarizer is not None:
+            try:
+                self.llm_summarizer = LLMSummarizer(self.llm_client)
+
+                # 聚类 LLM 摘要
+                for cluster in self.cluster_info:
+                    cluster_id = cluster.get('cluster_id')
+                    target_label = None
+                    for i, info in enumerate(self.cluster_info):
+                        if info.get('cluster_id') == cluster_id:
+                            if hasattr(self.clusterer, 'labels') and self.clusterer.labels is not None:
+                                unique_labels = list(set(self.clusterer.labels) - {-1})
+                                if i < len(unique_labels):
+                                    target_label = unique_labels[i]
+                            break
+
+                    if target_label is not None:
+                        cluster_indices = [i for i, l in enumerate(self.clusterer.labels) if l == target_label]
+                    else:
+                        cluster_indices = [i for i, l in enumerate(self.clusterer.labels) if l == cluster_id]
+
+                    cluster_texts = [valid_texts[i] for i in cluster_indices[:5] if i < len(valid_texts)]
+                    if cluster_texts:
+                        llm_result = self.llm_summarizer.generate_cluster_summary(
+                            cluster.get('top_words', [])[:10],
+                            cluster_texts
+                        )
+                        cluster['llm_title'] = llm_result.get('title', '')
+                        cluster['llm_summary'] = llm_result.get('summary', '')
+
+                if not self.quiet and self.cluster_info:
+                    print(f"  ✅ LLM摘要完成（{len(self.cluster_info)}个簇）")
+
+                # 主题 LLM 摘要 - 修复版
+                if self.topics:
+                    for topic in self.topics:
+                        topic_id = topic.get('id', topic.get('topic_id', 0))
+                        topic_indices = []
+
+                        # 修复：先检查属性是否存在，再获取值
+                        if hasattr(self.topic_modeler, 'topic_labels'):
+                            topic_labels = getattr(self.topic_modeler, 'topic_labels')
+                            if topic_labels is not None and hasattr(topic_labels, '__len__'):
+                                for i, label in enumerate(topic_labels):
+                                    if label == topic_id:
+                                        topic_indices.append(i)
+                                        if len(topic_indices) >= 5:
+                                            break
+                        elif hasattr(self.topic_modeler, 'labels'):
+                            labels = getattr(self.topic_modeler, 'labels')
+                            if labels is not None:
+                                for i, label in enumerate(labels):
+                                    if label == topic_id:
+                                        topic_indices.append(i)
+                                        if len(topic_indices) >= 5:
+                                            break
+
+                        topic_texts = [valid_texts[i] for i in topic_indices[:5] if i < len(valid_texts)]
+                        if topic_texts:
+                            llm_result = self.llm_summarizer.generate_cluster_summary(
+                                topic.get('keywords', [])[:10],
+                                topic_texts,
+                                summary_type="topic"
+                            )
+                            topic['llm_title'] = llm_result.get('title', '')
+                            topic['llm_summary'] = llm_result.get('summary', '')
+
+                    if not self.quiet:
+                        print(f"  ✅ 主题LLM摘要完成（{len(self.topics)}个主题）")
+
+            except Exception as e:
+                if not self.quiet:
+                    print(f"  ⚠️ LLM摘要失败: {e}")
+        elif not self.quiet and self.llm_client is None:
+            print("  ⚠️ 未配置大模型，跳过LLM摘要（仅使用TextRank）")
+
+        # 8.3 关联规则挖掘
+        try:
+            if RelationMiner is not None and self.entity_results:
+                self.relation_miner = RelationMiner()
+                cooccurrence = self.relation_miner.get_entity_cooccurrence_from_results(self.entity_results)
+                self.association_rules = self.relation_miner.mine_association_rules(cooccurrence)
+                if not self.quiet and self.association_rules:
+                    print(f"  ✅ 发现 {len(self.association_rules)} 条关联规则")
+        except Exception as e:
+            if not self.quiet:
+                print(f"  ⚠️ 关联规则挖掘失败: {e}")
+
+        # 8.4 趋势检测
+        try:
+            if TrendDetector is not None and self.dates and len([d for d in self.dates if d]) > 10:
+                self.trend_detector = TrendDetector()
+                entity_by_date = self.trend_detector.build_entity_by_date(self.entity_results, self.dates)
+                sentiment_by_date = self.trend_detector.build_sentiment_by_date(
+                    self.entity_results, self.sentiment_results, self.dates
+                )
+                self.hot_topics = self.trend_detector.detect_hot_topics(entity_by_date)
+                sentiment_shifts = self.trend_detector.detect_sentiment_shifts(sentiment_by_date)
+
+                if self.event_timeline:
+                    self.event_timeline['hot_topics'] = self.hot_topics
+                    self.event_timeline['sentiment_shifts'] = sentiment_shifts
+                else:
+                    self.event_timeline = {'hot_topics': self.hot_topics, 'sentiment_shifts': sentiment_shifts}
+
+                if not self.quiet and self.hot_topics:
+                    print(f"  ✅ 检测到 {len(self.hot_topics)} 个热点话题")
+        except Exception as e:
+            if not self.quiet:
+                print(f"  ⚠️ 趋势检测失败: {e}")
+
+        # 8.5 信息抽取
+        try:
+            if InfoExtractor is not None:
+                self.info_extractor = InfoExtractor()
+                if self.info_extractor.is_available() and not self.quiet:
+                    print(f"  ✅ 信息抽取已启用（实体-属性-关系）")
+        except Exception as e:
+            if not self.quiet:
+                print(f"  ⚠️ 信息抽取初始化失败: {e}")
 
         if not self.quiet:
             print("\n  🎉 BERT增强分析完成")
@@ -719,10 +903,13 @@ def analyze_texts(
     output_file: str = None,
     format: str = "html",
     quiet: bool = False,
-    use_bert: bool = True
+    use_bert: bool = True,
+    llm_client=None
 ) -> TextAnalyzer:
     """便捷函数：快速分析文本列表"""
     analyzer = TextAnalyzer(texts, quiet=quiet, use_bert=use_bert)
+    if llm_client:
+        analyzer.set_llm_client(llm_client)
     analyzer.generate_full_report()
 
     if output_file:
@@ -744,7 +931,8 @@ def analyze_file(
     output_file: str = None,
     format: str = "html",
     quiet: bool = False,
-    use_bert: bool = True
+    use_bert: bool = True,
+    llm_client=None
 ) -> TextAnalyzer:
     """便捷函数：分析文本文件"""
     analyzer = TextAnalyzer(
@@ -755,6 +943,8 @@ def analyze_file(
         quiet=quiet,
         use_bert=use_bert
     )
+    if llm_client:
+        analyzer.set_llm_client(llm_client)
     analyzer.generate_full_report()
 
     if output_file:
@@ -773,10 +963,13 @@ def analyze_folder(
     output_file: str = None,
     format: str = "html",
     quiet: bool = False,
-    use_bert: bool = True
+    use_bert: bool = True,
+    llm_client=None
 ) -> TextAnalyzer:
     """便捷函数：分析文件夹中的所有文本文件"""
     analyzer = TextAnalyzer(folder_path, quiet=quiet, use_bert=use_bert)
+    if llm_client:
+        analyzer.set_llm_client(llm_client)
     analyzer.generate_full_report()
 
     if output_file:

@@ -1,5 +1,5 @@
 """
-主题建模模块 - 基于聚类结果的TF-IDF关键词
+主题建模模块 - 基于聚类结果的TF-IDF
 """
 
 from collections import Counter
@@ -14,8 +14,10 @@ class TopicModeler:
         self.n_topics = n_topics
         self._fitted = False
         self.topics = []
+        self.topic_labels = None  # 新增：存储每条文本的主题标签
+        self.labels = None        # 新增：兼容 cluster_labels 参数
 
-    def fit(self, texts: List[str], cluster_labels: List[int]):
+    def fit(self, texts: List[str], cluster_labels: List[int] = None):
         """
         训练主题模型
 
@@ -23,14 +25,23 @@ class TopicModeler:
         - texts: 文本列表
         - cluster_labels: 聚类标签（-1表示噪声）
         """
+        # 存储标签供后续使用
+        if cluster_labels is not None:
+            self.topic_labels = cluster_labels.copy()
+            self.labels = cluster_labels.copy()
+        else:
+            # 如果没有传入标签，创建默认标签（所有文本归为一类）
+            self.topic_labels = [0] * len(texts)
+            self.labels = [0] * len(texts)
+
         # 只使用有聚类标签的文本
-        valid_indices = [i for i, l in enumerate(cluster_labels) if l != -1]
+        valid_indices = [i for i, l in enumerate(self.topic_labels) if l != -1]
         if not valid_indices:
             self._fitted = True
             return self
 
         valid_texts = [texts[i] for i in valid_indices]
-        valid_labels = [cluster_labels[i] for i in valid_indices]
+        valid_labels = [self.topic_labels[i] for i in valid_indices]
 
         unique_labels = set(valid_labels)
         self.topics = []
@@ -81,9 +92,23 @@ class TopicModeler:
         # 按文本数量排序
         self.topics.sort(key=lambda x: x["texts_count"], reverse=True)
 
-        # 重新编号
+        # 重新编号，并更新 topic_labels 中的标签
+        old_to_new = {}
         for i, topic in enumerate(self.topics):
+            old_id = topic["topic_id"]
+            old_to_new[old_id] = i
             topic["topic_id"] = i
+
+        # 更新 topic_labels 为新编号
+        if self.topic_labels is not None:
+            new_labels = []
+            for label in self.topic_labels:
+                if label == -1:
+                    new_labels.append(-1)
+                else:
+                    new_labels.append(old_to_new.get(label, -1))
+            self.topic_labels = new_labels
+            self.labels = new_labels
 
         self._fitted = True
         return self

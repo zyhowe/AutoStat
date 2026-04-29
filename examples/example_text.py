@@ -222,6 +222,17 @@ def example_from_csv_file():
         print("   请先运行 fetch_sina_finance.py 生成数据")
         return
 
+    from autostat.llm_client import LLMClient
+
+    # 1. 配置大模型
+    config = {
+        "api_base": "https://api.deepseek.com/v1",  # 或其他兼容 API
+        "api_key": "sk-c0e1f1ad1a3b41429a92f29251775ecf",
+        "model": "deepseek-chat"
+    }
+    llm_client = LLMClient(config)
+
+
     # 从CSV读取并分析
     # 方式1: 直接传入文件路径和列名
     analyzer = TextAnalyzer(
@@ -233,6 +244,7 @@ def example_from_csv_file():
         quiet=False,
         use_bert=True
     )
+    analyzer.set_llm_client(llm_client)
     analyzer.generate_full_report()
 
     # 生成报告
