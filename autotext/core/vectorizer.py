@@ -1,6 +1,4 @@
-"""
-向量化模块 - BERT文本向量化，支持离线模式和国内镜像
-"""
+# autotext/core/vectorizer.py
 
 import os
 import numpy as np
@@ -20,20 +18,10 @@ class BertVectorizer:
 
     def __init__(self, model_name: str = "bert-base-chinese", device: str = "cpu",
                  cache_dir: Optional[str] = None, offline: bool = False):
-        """
-        初始化向量化器
-
-        参数:
-        - model_name: 模型名称
-        - device: 设备 ('cpu' 或 'cuda')
-        - cache_dir: 缓存目录
-        - offline: 是否离线模式
-        """
         self.model_name = model_name
         self.device = device
         self.offline = offline
 
-        # 设置离线模式
         if offline:
             os.environ['TRANSFORMERS_OFFLINE'] = '1'
             print("  📴 离线模式已启用")
@@ -41,9 +29,9 @@ class BertVectorizer:
         print(f"  🔄 加载BERT模型: {model_name}...")
 
         try:
+            # 关键：直接导入，不要用 try-except 包裹
             from transformers import AutoTokenizer, AutoModel
 
-            # 设置缓存目录
             if cache_dir:
                 self.cache_dir = Path(cache_dir)
             else:
@@ -51,7 +39,6 @@ class BertVectorizer:
 
             self.cache_dir.mkdir(parents=True, exist_ok=True)
 
-            # 加载 tokenizer 和 model
             self.tokenizer = AutoTokenizer.from_pretrained(
                 model_name,
                 cache_dir=str(self.cache_dir),
@@ -72,11 +59,12 @@ class BertVectorizer:
             print(f"  💡 提示: 请先运行 download_bert_model.py 下载模型")
             raise
 
-        # 缓存
         from .cache import CacheManager
         self.cache = CacheManager()
         self._embedding_index, self._cached_embeddings = self.cache.load_embeddings_cache()
         self._next_index = len(self._embedding_index) if self._embedding_index else 0
+
+
 
     def _get_bert_embedding(self, text: str) -> np.ndarray:
         """获取单条文本的BERT向量"""

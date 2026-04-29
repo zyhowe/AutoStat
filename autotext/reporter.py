@@ -14,8 +14,6 @@ class TextReporter:
 
     def __init__(self, analyzer):
         self.analyzer = analyzer
-        from autotext.core.report_data import ReportDataBuilder
-        self.builder = ReportDataBuilder(analyzer)
 
     def to_html(self, output_file: Optional[str] = None, title: str = "文本分析报告") -> str:
         """生成 HTML 报告"""
@@ -67,7 +65,6 @@ class TextReporter:
 | 空文本率 | {data['stats']['empty_rate']:.1%} |
 | 平均长度 | {data['stats']['char_length']['mean']:.1f} 字符 |
 | 重复文本对 | {data['quality'].get('duplicates', {}).get('count', 0)} |
-| 高相似文本对 | {len(data['quality'].get('similarity', {}).get('high_similarity_pairs', []))} |
 
 ## 语言分布
 
@@ -80,13 +77,24 @@ class TextReporter:
         else:
             md += "- 未检测到语言信息\n"
 
-        md += f"""
+        # 情感分布（仅在极化时展示）
+        sentiment = data.get('sentiment', {})
+        dist = sentiment.get('distribution', {})
+        pos = dist.get('positive_rate', 0)
+        neg = dist.get('negative_rate', 0)
+        if pos > 0.4 or neg > 0.2:
+            md += f"""
 ## 情感分布
 
-- 积极: {data['sentiment']['distribution']['positive_rate']:.1%}
-- 消极: {data['sentiment']['distribution']['negative_rate']:.1%}
-- 中性: {data['sentiment']['distribution']['neutral_rate']:.1%}
+- 积极: {pos:.1%}
+- 消极: {neg:.1%}
+- 中性: {dist.get('neutral_rate', 0):.1%}
 
+"""
+        else:
+            md += "\n## 情感分布\n整体情感中性，无明显倾向。\n"
+
+        md += """
 ## 高频关键词 TOP 30
 
 """
@@ -105,32 +113,42 @@ class TextReporter:
             for name, count in entity.get('per', {}).get('top', [])[:20]:
                 md += f"- {name}: {count}次\n"
 
-        if entity.get('loc', {}).get('unique', 0) > 0:
-            md += "\n## 地名实体\n"
-            for name, count in entity.get('loc', {}).get('top', [])[:20]:
-                md += f"- {name}: {count}次\n"
-
-        # 聚类结果
-        clusters = data.get('clusters', [])
-        if clusters:
-            md += "\n## 文本聚类\n"
-            for cluster in clusters:
-                md += f"\n### 簇 {cluster.get('id', 0)}\n"
-                md += f"- 数量: {cluster.get('size', 0)} 条 ({cluster.get('percentage', 0):.1%})\n"
-                if cluster.get('llm_title'):
-                    md += f"- AI主题: {cluster.get('llm_title')}\n"
-                if cluster.get('llm_summary'):
-                    md += f"- AI摘要: {cluster.get('llm_summary')}\n"
-                md += f"- 关键词: {', '.join(cluster.get('top_words', [])[:10])}\n"
+        # 事件统计
+        events = data.get('events', [])
+        if events:
+            event_types = {}
+            for event in events:
+                et = event.get('event_type', '未知')
+                event_types[et] = event_types.get(et, 0) + 1
+            md += "\n## 事件统计\n"
+            for et, count in sorted(event_types.items(), key=lambda x: x[1], reverse=True)[:10]:
+                md += f"- {et}: {count}次\n"
 
         # 主题结果
         topics = data.get('topics', [])
         if topics:
             md += "\n## 主题建模\n"
             for topic in topics:
-                md += f"\n### 主题 {topic.get('id', 0)}\n"
+                md += f"\n### 主题 {topic.get('topic_id', 0)}\n"
                 kw_list = ', '.join(topic.get('keywords', [])[:10])
                 md += f"- 关键词: {kw_list}\n"
+                md += f"- 文本数量: {topic.get('texts_count', 0)} 条\n"
+
+        # 实体档案
+        entity_profiles = data.get('entity_profiles', [])
+        if entity_profiles:
+            md += "\n## 实体档案\n"
+            for profile in entity_profiles[:10]:
+                md += f"\n### {profile['name']} ({profile['type']})\n"
+                md += f"- 提及次数: {profile['mention_count']}\n"
+                if profile.get('topics'):
+                    topic_str = ', '.join([t['topic_name'] for t in profile['topics'][:3]])
+                    md += f"- 相关主题: {topic_str}\n"
+                if profile.get('events'):
+                    md += f"- 相关事件: {len(profile['events'])} 个\n"
+                if profile.get('related_entities'):
+                    related_str = ', '.join([r['name'] for r in profile['related_entities'][:5]])
+                    md += f"- 关联实体: {related_str}\n"
 
         # 洞察发现
         insights = data.get('insights', [])
@@ -141,26 +159,27 @@ class TextReporter:
                 md += f"\n### {priority_icon} {insight.get('title', '')}\n"
                 md += f"{insight.get('description', '')}\n"
 
-        # 关联规则
-        association_rules = data.get('association_rules', [])
-        if association_rules:
-            md += "\n## 关联规则挖掘\n"
-            for rule in association_rules[:10]:
-                antecedent = rule.get('antecedent', '').split(':', 1)[-1] if ':' in rule.get('antecedent', '') else rule.get('antecedent', '')
-                consequent = rule.get('consequent', '').split(':', 1)[-1] if ':' in rule.get('consequent', '') else rule.get('consequent', '')
-                md += f"\n- **{antecedent} → {consequent}**\n"
-                md += f"  置信度: {rule.get('confidence', 0)*100:.0f}% | 提升度: {rule.get('lift', 0):.1f}\n"
-                md += f"  {rule.get('interpretation', '')}\n"
+        # 图分析洞察
+        graph_insights = data.get('graph_insights', {})
+        center_nodes = graph_insights.get('center_nodes', [])
+        if center_nodes:
+            md += "\n## 核心节点（PageRank）\n"
+            for node in center_nodes[:5]:
+                md += f"- **{node.get('name', '')}** ({node.get('type', '')}): 中心性分数 {node.get('score', 0):.4f}\n"
 
-        # 热点话题
-        hot_topics = data.get('hot_topics', [])
-        if hot_topics:
-            md += "\n## 热点话题趋势\n"
-            for topic in hot_topics[:10]:
-                entity_name = topic.get('entity', '').split(':', 1)[-1] if ':' in topic.get('entity', '') else topic.get('entity', '')
-                md += f"\n- **{entity_name}** (增长 {topic.get('increase_pct', 0):.0f}%)\n"
-                md += f"  近期均值: {topic.get('recent_avg', 0):.1f} | 历史均值: {topic.get('history_avg', 0):.1f}\n"
-                md += f"  峰值日期: {topic.get('peak_date', '')}\n"
+        bridge_nodes = graph_insights.get('bridge_nodes', [])
+        if bridge_nodes:
+            md += "\n## 桥梁节点（Betweenness）\n"
+            for node in bridge_nodes[:5]:
+                md += f"- **{node.get('name', '')}** ({node.get('type', '')}): 介数 {node.get('score', 0):.4f}\n"
+
+        # 时间线
+        timeline = data.get('timeline', {})
+        if timeline.get('has_data'):
+            md += "\n## 事件时间线\n"
+            date_range = timeline.get('date_range', {})
+            md += f"- 时间范围: {date_range.get('start', '')} ~ {date_range.get('end', '')}\n"
+            md += f"- 总事件数: {timeline.get('total_events', 0)}\n"
 
         # 清洗建议
         if data.get('cleaning_suggestions'):
@@ -187,35 +206,18 @@ class TextReporter:
             elif isinstance(item, dict):
                 keywords_frequency.append([item.get('word', ''), item.get('count', 0)])
 
-        # 处理聚类信息（增强版，包含摘要）
-        clusters = []
-        for cluster in self.analyzer.cluster_info[:10]:
-            clusters.append({
-                "id": cluster.get("cluster_id", 0),
-                "size": cluster.get("size", 0),
-                "percentage": cluster.get("percentage", 0),
-                "top_words": cluster.get("top_words", [])[:10],
-                "center_text": cluster.get("center_text", "")[:200] if cluster.get("center_text") else "",
-                "textrank_sentences": cluster.get("textrank_sentences", [])[:3],
-                "llm_title": cluster.get("llm_title", ""),
-                "llm_summary": cluster.get("llm_summary", "")
-            })
+        # 处理实体信息
+        entity = getattr(self.analyzer, 'entity_stats', {})
 
-        # 处理主题信息（增强版，包含摘要）
+        # 处理主题信息
         topics = []
-        for topic in self.analyzer.topics[:10]:
+        for topic in getattr(self.analyzer, 'topics', [])[:10]:
             topics.append({
                 "id": topic.get("topic_id", 0),
                 "texts_count": topic.get("texts_count", 0),
                 "keywords": topic.get("keywords", [])[:10],
-                "weights": topic.get("weights", [])[:10] if topic.get("weights") else [],
-                "textrank_sentences": topic.get("textrank_sentences", [])[:3],
-                "llm_title": topic.get("llm_title", ""),
-                "llm_summary": topic.get("llm_summary", "")
+                "weights": topic.get("weights", [])[:10] if topic.get("weights") else []
             })
-
-        # 处理实体信息
-        entity = getattr(self.analyzer, 'entity_stats', {})
 
         # 处理洞察信息
         insights = []
@@ -238,9 +240,27 @@ class TextReporter:
         similarity_detail = quality_data.get('similarity', {})
         length_detail = quality_data.get('length_anomalies', {})
 
-        # 获取增强分析数据
-        association_rules = getattr(self.analyzer, 'association_rules', [])[:15]
-        hot_topics = getattr(self.analyzer, 'hot_topics', [])[:15]
+        # 获取事件数据
+        events = getattr(self.analyzer, 'events', [])[:100]
+
+        # 获取实体档案
+        entity_profiles = []
+        if hasattr(self.analyzer, 'entity_profiles'):
+            for profile in self.analyzer.entity_profiles[:20]:
+                entity_profiles.append(profile.to_dict())
+
+        # 获取图分析洞察
+        graph_insights = getattr(self.analyzer, 'graph_insights', {})
+
+        # 获取时间线摘要
+        timeline_summary = {}
+        if hasattr(self.analyzer, 'timeline') and self.analyzer.timeline:
+            timeline_summary = self.analyzer.timeline.get_summary()
+
+        # 获取图谱可视化数据
+        graph_viz = {}
+        if hasattr(self.analyzer, 'graph') and self.analyzer.graph:
+            graph_viz = self.analyzer.graph.export_for_visualization()
 
         data = {
             'stats': self.analyzer.stats_result,
@@ -253,19 +273,23 @@ class TextReporter:
             },
             'sentiment': {
                 'distribution': self.analyzer.sentiment_distribution,
-                'results': self.analyzer.sentiment_results[:20]
+                'is_polarized': self.analyzer.sentiment_distribution.get('positive_rate', 0) > 0.4 or
+                                self.analyzer.sentiment_distribution.get('negative_rate', 0) > 0.2
             },
             'entity': entity,
-            'clusters': clusters,
             'topics': topics,
-            'trend': getattr(self.analyzer, 'trend_info', {}),
-            'event_timeline': getattr(self.analyzer, 'event_timeline', {}),
             'templates': {
                 'start': list(self.analyzer.start_templates)[:20],
                 'end': list(self.analyzer.end_templates)[:20]
             },
             'insights': insights,
             'sample_texts': self.analyzer.content_texts[:10],
+            # 新增数据
+            'events': events[:50],
+            'entity_profiles': entity_profiles,
+            'graph_insights': graph_insights,
+            'timeline': timeline_summary,
+            'graph_viz': graph_viz,
             # 质量详情区块数据
             'quality_details': {
                 'duplicates': {
@@ -283,10 +307,7 @@ class TextReporter:
                     'short_summary': length_detail.get('short_summary', []),
                     'long_summary': length_detail.get('long_summary', [])
                 }
-            },
-            # 增强分析数据
-            'association_rules': association_rules,
-            'hot_topics': hot_topics
+            }
         }
 
         return data
@@ -337,7 +358,6 @@ class TextReporter:
             stats = data['stats']
             sentiment = data['sentiment']
             keywords = data['keywords']['frequency']
-            clusters = data['clusters']
             topics = data['topics']
             quality = data['quality']
             cleaning_suggestions = data['cleaning_suggestions']
@@ -347,8 +367,11 @@ class TextReporter:
             insights = data.get('insights', [])
             sample_texts = data.get('sample_texts', [])
             quality_details = data.get('quality_details', {})
-            association_rules = data.get('association_rules', [])
-            hot_topics = data.get('hot_topics', [])
+            events = data.get('events', [])
+            entity_profiles = data.get('entity_profiles', [])
+            graph_insights = data.get('graph_insights', {})
+            timeline = data.get('timeline', {})
+            graph_viz = data.get('graph_viz', {})
 
             return template.render(
                 title=title,
@@ -360,8 +383,8 @@ class TextReporter:
                 positive_rate=f"{sentiment['distribution']['positive_rate']:.1%}",
                 negative_rate=f"{sentiment['distribution']['negative_rate']:.1%}",
                 neutral_rate=f"{sentiment['distribution']['neutral_rate']:.1%}",
+                sentiment_is_polarized=sentiment.get('is_polarized', False),
                 keywords=keywords,
-                clusters=clusters,
                 topics=topics,
                 duplicate_count=quality.get('duplicates', {}).get('count', 0),
                 cleaning_suggestions=cleaning_suggestions[:10],
@@ -372,8 +395,11 @@ class TextReporter:
                 insights=insights,
                 sample_texts=sample_texts,
                 quality_details=quality_details,
-                association_rules=association_rules,
-                hot_topics=hot_topics
+                events=events,
+                entity_profiles=entity_profiles,
+                graph_insights=graph_insights,
+                timeline=timeline,
+                graph_viz=graph_viz
             )
         except Exception as e:
             import traceback
