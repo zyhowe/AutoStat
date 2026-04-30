@@ -6,32 +6,20 @@ from autotext.core.stats import TextStats
 from autotext.core.quality import TextQuality
 from autotext.core.keyword import KeywordExtractor
 from autotext.core.sentiment import SentimentAnalyzer
-from autotext.core.entity import EntityRecognizer
-from autotext.core.cluster import TextClusterer
-from autotext.core.topic import TopicModeler
-from autotext.core.trend import TrendAnalyzer
+from autotext.core.topic_model import TopicModeler
+from autotext.core.relation import RelationDiscoverer
+from autotext.core.summarizer import TextRankSummarizer, LLMSummarizer
+from autotext.core.event_extractor import EventExtractor
+from autotext.core.graph_builder import GraphBuilder
+from autotext.core.graph_analyzer import GraphAnalyzer
+from autotext.core.entity_profile import EntityProfileBuilder
+from autotext.core.timeline_builder import TimelineBuilder, build_timeline_from_analyzer
 
-# 新增模块
+# entity.py 保留但不导出
 try:
-    from autotext.core.summarizer import TextRankSummarizer, LLMSummarizer
+    from autotext.core.entity import EntityRecognizer
 except ImportError:
-    TextRankSummarizer = None
-    LLMSummarizer = None
-
-try:
-    from autotext.core.relation_mining import RelationMiner
-except ImportError:
-    RelationMiner = None
-
-try:
-    from autotext.core.trend_detector import TrendDetector
-except ImportError:
-    TrendDetector = None
-
-try:
-    from autotext.core.info_extractor import InfoExtractor
-except ImportError:
-    InfoExtractor = None
+    EntityRecognizer = None
 
 __all__ = [
     "FieldDetector",
@@ -40,13 +28,15 @@ __all__ = [
     "TextQuality",
     "KeywordExtractor",
     "SentimentAnalyzer",
-    "EntityRecognizer",
-    "TextClusterer",
     "TopicModeler",
-    "TrendAnalyzer",
+    "RelationDiscoverer",
+    "EntityRecognizer",
     "TextRankSummarizer",
     "LLMSummarizer",
-    "RelationMiner",
-    "TrendDetector",
-    "InfoExtractor",
+    "EventExtractor",
+    "GraphBuilder",
+    "GraphAnalyzer",
+    "EntityProfileBuilder",
+    "TimelineBuilder",
+    "build_timeline_from_analyzer"
 ]

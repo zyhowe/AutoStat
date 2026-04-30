@@ -5,7 +5,7 @@
 import json
 import os
 from datetime import datetime
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from jinja2 import Template
 
 
@@ -16,7 +16,6 @@ class TextReporter:
         self.analyzer = analyzer
 
     def to_html(self, output_file: Optional[str] = None, title: str = "文本分析报告") -> str:
-        """生成 HTML 报告"""
         try:
             html = self._build_html(title)
             if output_file:
@@ -33,7 +32,6 @@ class TextReporter:
             return error_html
 
     def to_json(self, output_file: Optional[str] = None, indent: int = 2) -> str:
-        """生成 JSON 报告"""
         report_data = self._build_json_data()
         report_data["analysis_time"] = datetime.now().isoformat()
         report_data["source"] = getattr(self.analyzer, "source_name", "未知")
@@ -49,7 +47,6 @@ class TextReporter:
         return json_str
 
     def to_markdown(self, output_file: Optional[str] = None) -> str:
-        """生成 Markdown 报告"""
         data = self._build_json_data()
 
         md = f"""# 文本分析报告
@@ -77,18 +74,15 @@ class TextReporter:
         else:
             md += "- 未检测到语言信息\n"
 
-        # 情感分布（仅在极化时展示）
-        sentiment = data.get('sentiment', {})
-        dist = sentiment.get('distribution', {})
-        pos = dist.get('positive_rate', 0)
-        neg = dist.get('negative_rate', 0)
+        pos = data['sentiment']['distribution']['positive_rate']
+        neg = data['sentiment']['distribution']['negative_rate']
         if pos > 0.4 or neg > 0.2:
             md += f"""
 ## 情感分布
 
 - 积极: {pos:.1%}
 - 消极: {neg:.1%}
-- 中性: {dist.get('neutral_rate', 0):.1%}
+- 中性: {data['sentiment']['distribution']['neutral_rate']:.1%}
 
 """
         else:
@@ -101,85 +95,33 @@ class TextReporter:
         for word, count in data['keywords']['frequency'][:30]:
             md += f"- {word}: {count}\n"
 
-        # 实体统计
-        entity = data.get('entity', {})
-        if entity.get('org', {}).get('unique', 0) > 0:
+        # 实体识别
+        entity_stats = data.get('entity_stats_with_details', {})
+        if entity_stats.get('org', {}).get('items'):
             md += "\n## 组织名实体\n"
-            for name, count in entity.get('org', {}).get('top', [])[:20]:
-                md += f"- {name}: {count}次\n"
+            for item in entity_stats['org']['items'][:15]:
+                md += f"- {item['name']}: {item['count']}次\n"
 
-        if entity.get('per', {}).get('unique', 0) > 0:
+        if entity_stats.get('per', {}).get('items'):
             md += "\n## 人名实体\n"
-            for name, count in entity.get('per', {}).get('top', [])[:20]:
-                md += f"- {name}: {count}次\n"
+            for item in entity_stats['per']['items'][:15]:
+                md += f"- {item['name']}: {item['count']}次\n"
 
         # 事件统计
-        events = data.get('events', [])
-        if events:
-            event_types = {}
-            for event in events:
-                et = event.get('event_type', '未知')
-                event_types[et] = event_types.get(et, 0) + 1
+        events_by_type = data.get('events_by_type', {})
+        if events_by_type:
             md += "\n## 事件统计\n"
-            for et, count in sorted(event_types.items(), key=lambda x: x[1], reverse=True)[:10]:
-                md += f"- {et}: {count}次\n"
+            for et, events in events_by_type.items():
+                md += f"- {et}: {len(events)}次\n"
 
-        # 主题结果
-        topics = data.get('topics', [])
-        if topics:
+        # 主题建模
+        topics_enhanced = data.get('topics_enhanced', [])
+        if topics_enhanced:
             md += "\n## 主题建模\n"
-            for topic in topics:
-                md += f"\n### 主题 {topic.get('topic_id', 0)}\n"
-                kw_list = ', '.join(topic.get('keywords', [])[:10])
-                md += f"- 关键词: {kw_list}\n"
-                md += f"- 文本数量: {topic.get('texts_count', 0)} 条\n"
-
-        # 实体档案
-        entity_profiles = data.get('entity_profiles', [])
-        if entity_profiles:
-            md += "\n## 实体档案\n"
-            for profile in entity_profiles[:10]:
-                md += f"\n### {profile['name']} ({profile['type']})\n"
-                md += f"- 提及次数: {profile['mention_count']}\n"
-                if profile.get('topics'):
-                    topic_str = ', '.join([t['topic_name'] for t in profile['topics'][:3]])
-                    md += f"- 相关主题: {topic_str}\n"
-                if profile.get('events'):
-                    md += f"- 相关事件: {len(profile['events'])} 个\n"
-                if profile.get('related_entities'):
-                    related_str = ', '.join([r['name'] for r in profile['related_entities'][:5]])
-                    md += f"- 关联实体: {related_str}\n"
-
-        # 洞察发现
-        insights = data.get('insights', [])
-        if insights:
-            md += "\n## 洞察发现\n"
-            for insight in insights[:10]:
-                priority_icon = {'高': '🔴', '中': '🟠', '低': '🟢'}.get(insight.get('priority', '中'), '⚪')
-                md += f"\n### {priority_icon} {insight.get('title', '')}\n"
-                md += f"{insight.get('description', '')}\n"
-
-        # 图分析洞察
-        graph_insights = data.get('graph_insights', {})
-        center_nodes = graph_insights.get('center_nodes', [])
-        if center_nodes:
-            md += "\n## 核心节点（PageRank）\n"
-            for node in center_nodes[:5]:
-                md += f"- **{node.get('name', '')}** ({node.get('type', '')}): 中心性分数 {node.get('score', 0):.4f}\n"
-
-        bridge_nodes = graph_insights.get('bridge_nodes', [])
-        if bridge_nodes:
-            md += "\n## 桥梁节点（Betweenness）\n"
-            for node in bridge_nodes[:5]:
-                md += f"- **{node.get('name', '')}** ({node.get('type', '')}): 介数 {node.get('score', 0):.4f}\n"
-
-        # 时间线
-        timeline = data.get('timeline', {})
-        if timeline.get('has_data'):
-            md += "\n## 事件时间线\n"
-            date_range = timeline.get('date_range', {})
-            md += f"- 时间范围: {date_range.get('start', '')} ~ {date_range.get('end', '')}\n"
-            md += f"- 总事件数: {timeline.get('total_events', 0)}\n"
+            for topic in topics_enhanced:
+                md += f"\n### 主题 {topic.get('topic_id', 0)}: {topic.get('llm_title', '')}\n"
+                md += f"{topic.get('llm_summary', '')}\n\n"
+                md += f"**关键词**: {', '.join(topic.get('keywords', [])[:8])}\n\n"
 
         # 清洗建议
         if data.get('cleaning_suggestions'):
@@ -195,6 +137,60 @@ class TextReporter:
 
         return md
 
+    def _build_event_description(self, event_type: str, args: Dict, fallback_desc: str) -> str:
+        """构建更好的事件描述"""
+        company = args.get("公司", "")
+        person = args.get("人物", "")
+        money = args.get("金额", "")
+        percent = args.get("比例", "")
+
+        if event_type == "发布财报":
+            if company and money:
+                return f"{company}发布财报，{money}"
+            elif company and percent:
+                return f"{company}发布财报，同比增长{percent}"
+            elif company:
+                return f"{company}发布财报"
+            else:
+                return fallback_desc[:50] if fallback_desc else "发布财报"
+        elif event_type == "收购":
+            if company and money:
+                return f"{company}收购，交易金额{money}"
+            elif company:
+                return f"{company}收购"
+            else:
+                return fallback_desc[:50] if fallback_desc else "收购"
+        elif event_type == "投资":
+            if company and money:
+                return f"{company}投资{money}"
+            elif company:
+                return f"{company}投资"
+            else:
+                return fallback_desc[:50] if fallback_desc else "投资"
+        elif event_type == "高管任命":
+            if company and person:
+                return f"{company}任命{person}"
+            elif company:
+                return f"{company}高管任命"
+            else:
+                return fallback_desc[:50] if fallback_desc else "高管任命"
+        elif event_type == "高管离职":
+            if company and person:
+                return f"{company}{person}离职"
+            elif company:
+                return f"{company}高管离职"
+            else:
+                return fallback_desc[:50] if fallback_desc else "高管离职"
+        elif event_type in ["涨价", "降价"]:
+            if company and percent:
+                return f"{company}{event_type}{percent}"
+            elif company:
+                return f"{company}{event_type}"
+            else:
+                return fallback_desc[:50] if fallback_desc else event_type
+        else:
+            return fallback_desc[:60] if fallback_desc else event_type
+
     def _build_json_data(self) -> Dict[str, Any]:
         """构建完整的 JSON 数据"""
 
@@ -203,94 +199,229 @@ class TextReporter:
         for item in self.analyzer.keywords.get("frequency", [])[:50]:
             if isinstance(item, (list, tuple)) and len(item) >= 2:
                 keywords_frequency.append([item[0], item[1]])
-            elif isinstance(item, dict):
-                keywords_frequency.append([item.get('word', ''), item.get('count', 0)])
 
-        # 处理实体信息
-        entity = getattr(self.analyzer, 'entity_stats', {})
+        # ========== 1. 获取实体统计 ==========
+        entity_stats_raw = getattr(self.analyzer, 'entity_stats', {})
 
-        # 处理主题信息
-        topics = []
-        for topic in getattr(self.analyzer, 'topics', [])[:10]:
-            topics.append({
-                "id": topic.get("topic_id", 0),
+        entity_stats = {
+            "org": {"unique": 0, "top": []},
+            "per": {"unique": 0, "top": []},
+            "loc": {"unique": 0, "top": []}
+        }
+
+        if entity_stats_raw:
+            for key in ["org", "per", "loc"]:
+                if key in entity_stats_raw:
+                    stats = entity_stats_raw[key]
+                    entity_stats[key] = {
+                        "unique": stats.get("unique", 0),
+                        "top": stats.get("top", [])
+                    }
+
+        # ========== 2. 获取事件 ==========
+        events = getattr(self.analyzer, 'events', [])[:200]
+
+        # 获取主题标签
+        topic_labels = []
+        if hasattr(self.analyzer, 'topic_modeler') and self.analyzer.topic_modeler:
+            topic_labels = self.analyzer.topic_modeler.get_topic_labels()
+
+        # 获取主题信息
+        topics = getattr(self.analyzer, 'topics', [])[:10]
+
+        # 构建主题名称映射
+        topic_name_map = {}
+        for topic in topics:
+            tid = topic.get("topic_id", 0)
+            name = topic.get("llm_title", f"主题{tid}")
+            topic_name_map[tid] = name
+
+        # 为每个事件添加所属主题
+        for idx, event in enumerate(events):
+            if idx < len(topic_labels):
+                topic_id = topic_labels[idx]
+                event["topic_id"] = topic_id
+                event["topic_name"] = topic_name_map.get(topic_id, f"主题{topic_id}")
+            else:
+                event["topic_id"] = -1
+                event["topic_name"] = ""
+
+        # 按事件类型分组
+        events_by_type = {}
+        for event in events:
+            et = event.get("event_type", "未知")
+            if et not in events_by_type:
+                events_by_type[et] = []
+            events_by_type[et].append(event)
+
+        # ========== 3. 获取主题增强数据 ==========
+        content_texts = getattr(self.analyzer, 'content_texts', [])
+        topics_enhanced = []
+        for topic in topics:
+            tid = topic.get("topic_id", 0)
+            sample_indices = []
+            for idx, label in enumerate(topic_labels):
+                if label == tid and idx < len(content_texts):
+                    sample_indices.append(idx)
+
+            sample_texts = []
+            for idx in sample_indices[:3]:
+                text = content_texts[idx] if idx < len(content_texts) else ""
+                if text:
+                    sample = text[:200] + "..." if len(text) > 200 else text
+                    sample_texts.append({"index": idx, "text": sample})
+
+            topics_enhanced.append({
+                "topic_id": tid,
                 "texts_count": topic.get("texts_count", 0),
-                "keywords": topic.get("keywords", [])[:10],
-                "weights": topic.get("weights", [])[:10] if topic.get("weights") else []
+                "keywords": topic.get("keywords", [])[:8],
+                "llm_title": topic.get("llm_title", f"主题{tid}"),
+                "llm_summary": topic.get("llm_summary", ""),
+                "sample_texts": sample_texts,
+                "timeline_events": []
             })
 
-        # 处理洞察信息
-        insights = []
-        for insight in getattr(self.analyzer, 'insights', [])[:15]:
-            insights.append({
-                "type": insight.get("type", ""),
-                "title": insight.get("title", ""),
-                "description": insight.get("description", ""),
-                "priority": insight.get("priority", "中"),
-                "score": insight.get("score", 0),
-                "data": insight.get("data", {})
-            })
+        # ========== 4. 构建带详情的实体数据 ==========
+        relation_result = getattr(self.analyzer, 'relation_result', {})
+        pairs = relation_result.get('cooccurrence_pairs', [])
 
-        # 获取质量详情
-        quality_data = self.analyzer.quality_report
-        cleaning_suggestions = self.analyzer.cleaning_suggestions
+        # 构建实体详情映射
+        entity_details_map = {}
 
-        # 提取重复、相似、长度异常的详情
-        duplicates_detail = quality_data.get('duplicates', {})
-        similarity_detail = quality_data.get('similarity', {})
-        length_detail = quality_data.get('length_anomalies', {})
+        for entity_type in ["org", "per"]:
+            if entity_type in entity_stats_raw:
+                for name, count in entity_stats_raw[entity_type].get("top", [])[:15]:
+                    if len(name) < 2:
+                        continue
 
-        # 获取事件数据
-        events = getattr(self.analyzer, 'events', [])[:100]
+                    # 查找相关事件
+                    events_list = []
+                    for event in events[:80]:
+                        event_desc = event.get("description", "")
+                        event_type = event.get("event_type", "")
+                        args = event.get("args", {})
 
-        # 获取实体档案
-        entity_profiles = []
-        if hasattr(self.analyzer, 'entity_profiles'):
-            for profile in self.analyzer.entity_profiles[:20]:
-                entity_profiles.append(profile.to_dict())
+                        is_related = (name in event_desc or name in event_type)
+                        if not is_related:
+                            for arg_value in args.values():
+                                if arg_value and name in str(arg_value):
+                                    is_related = True
+                                    break
 
-        # 获取图分析洞察
-        graph_insights = getattr(self.analyzer, 'graph_insights', {})
+                        if is_related:
+                            desc = self._build_event_description(event_type, args, event_desc)
+                            events_list.append({
+                                "type": event_type,
+                                "description": desc,
+                                "topic_name": event.get("topic_name", "")
+                            })
 
-        # 获取时间线摘要
-        timeline_summary = {}
-        if hasattr(self.analyzer, 'timeline') and self.analyzer.timeline:
-            timeline_summary = self.analyzer.timeline.get_summary()
+                    # 查找关联实体
+                    related = []
+                    for pair in pairs[:50]:
+                        e1 = pair.get("entity1", "").split(":", 1)[-1]
+                        e2 = pair.get("entity2", "").split(":", 1)[-1]
+                        if name == e1 and e2 not in related:
+                            related.append(e2)
+                        elif name == e2 and e1 not in related:
+                            related.append(e1)
 
-        # 获取图谱可视化数据
+                    # 查找所属主题
+                    topic_names = []
+                    for topic in topics[:10]:
+                        for kw in topic.get("keywords", [])[:5]:
+                            if kw and len(kw) >= 2 and (kw in name or name in kw):
+                                tname = topic.get("llm_title", f"主题{topic.get('topic_id', 0)}")
+                                if tname not in topic_names:
+                                    topic_names.append(tname)
+                                break
+
+                    has_details = len(events_list) > 0 or len(related) > 0 or len(topic_names) > 0
+
+                    entity_details_map[(name, entity_type)] = {
+                        "name": name,
+                        "type": "组织" if entity_type == "org" else "人物",
+                        "count": count,
+                        "has_details": has_details,
+                        "events": events_list[:5],
+                        "related_entities": related[:5],
+                        "topics": topic_names[:3]
+                    }
+
+        # 构建带详情的实体统计
+        entity_stats_with_details = {
+            "org": {"unique": entity_stats.get("org", {}).get("unique", 0), "items": []},
+            "per": {"unique": entity_stats.get("per", {}).get("unique", 0), "items": []},
+            "loc": {"unique": entity_stats.get("loc", {}).get("unique", 0), "items": []}
+        }
+
+        for entity_type in ["org", "per"]:
+            if entity_type in entity_stats_raw:
+                for name, count in entity_stats_raw[entity_type].get("top", [])[:15]:
+                    if len(name) < 2:
+                        continue
+                    key = (name, entity_type)
+                    if key in entity_details_map:
+                        entity_stats_with_details[entity_type]["items"].append(entity_details_map[key])
+                    else:
+                        entity_stats_with_details[entity_type]["items"].append({
+                            "name": name,
+                            "type": "组织" if entity_type == "org" else "人物",
+                            "count": count,
+                            "has_details": False,
+                            "events": [],
+                            "related_entities": [],
+                            "topics": []
+                        })
+
+        # 添加地名
+        if "loc" in entity_stats_raw:
+            for name, count in entity_stats_raw["loc"].get("top", [])[:15]:
+                if len(name) >= 2:
+                    entity_stats_with_details["loc"]["items"].append({
+                        "name": name,
+                        "type": "地名",
+                        "count": count,
+                        "has_details": False,
+                        "events": [],
+                        "related_entities": [],
+                        "topics": []
+                    })
+
+        # ========== 5. 获取图谱数据 ==========
         graph_viz = {}
         if hasattr(self.analyzer, 'graph') and self.analyzer.graph:
             graph_viz = self.analyzer.graph.export_for_visualization()
 
+        # ========== 6. 获取质量详情 ==========
+        quality_data = self.analyzer.quality_report
+        cleaning_suggestions = self.analyzer.cleaning_suggestions
+        duplicates_detail = quality_data.get('duplicates', {})
+        similarity_detail = quality_data.get('similarity', {})
+        length_detail = quality_data.get('length_anomalies', {})
+
+        # ========== 7. 构建返回数据 ==========
         data = {
             'stats': self.analyzer.stats_result,
             'language_distribution': getattr(self.analyzer, 'language_distribution', {}),
             'quality': quality_data,
             'cleaning_suggestions': cleaning_suggestions[:10],
-            'keywords': {
-                'frequency': keywords_frequency,
-                'tfidf': []
-            },
+            'keywords': {'frequency': keywords_frequency, 'tfidf': []},
             'sentiment': {
                 'distribution': self.analyzer.sentiment_distribution,
                 'is_polarized': self.analyzer.sentiment_distribution.get('positive_rate', 0) > 0.4 or
                                 self.analyzer.sentiment_distribution.get('negative_rate', 0) > 0.2
             },
-            'entity': entity,
-            'topics': topics,
             'templates': {
                 'start': list(self.analyzer.start_templates)[:20],
                 'end': list(self.analyzer.end_templates)[:20]
             },
-            'insights': insights,
+            'insights': getattr(self.analyzer, 'insights', [])[:15],
             'sample_texts': self.analyzer.content_texts[:10],
-            # 新增数据
-            'events': events[:50],
-            'entity_profiles': entity_profiles,
-            'graph_insights': graph_insights,
-            'timeline': timeline_summary,
+            'entity_stats_with_details': entity_stats_with_details,
+            'events_by_type': events_by_type,
+            'topics_enhanced': topics_enhanced,
             'graph_viz': graph_viz,
-            # 质量详情区块数据
             'quality_details': {
                 'duplicates': {
                     'count': duplicates_detail.get('count', 0),
@@ -313,7 +444,6 @@ class TextReporter:
         return data
 
     def _get_error_html(self, title: str, error_msg: str) -> str:
-        """生成错误 HTML"""
         return f"""<!DOCTYPE html>
 <html>
 <head>
@@ -338,15 +468,11 @@ class TextReporter:
 </html>"""
 
     def _build_html(self, title: str) -> str:
-        """构建 HTML 内容"""
         data = self._build_json_data()
 
-        # 获取模板路径
         template_path = os.path.join(os.path.dirname(__file__), '..', 'templates', 'report_text.html')
-
         if not os.path.exists(template_path):
             template_path = os.path.join(os.path.dirname(__file__), 'templates', 'report_text.html')
-
         if not os.path.exists(template_path):
             return self._get_error_html(title, f"模板文件不存在: {template_path}")
 
@@ -358,20 +484,18 @@ class TextReporter:
             stats = data['stats']
             sentiment = data['sentiment']
             keywords = data['keywords']['frequency']
-            topics = data['topics']
             quality = data['quality']
             cleaning_suggestions = data['cleaning_suggestions']
-            entity = data.get('entity', {})
             language_dist = data.get('language_distribution', {})
             templates = data.get('templates', {})
             insights = data.get('insights', [])
             sample_texts = data.get('sample_texts', [])
             quality_details = data.get('quality_details', {})
-            events = data.get('events', [])
-            entity_profiles = data.get('entity_profiles', [])
-            graph_insights = data.get('graph_insights', {})
-            timeline = data.get('timeline', {})
             graph_viz = data.get('graph_viz', {})
+
+            entity_stats_with_details = data.get('entity_stats_with_details', {})
+            events_by_type = data.get('events_by_type', {})
+            topics_enhanced = data.get('topics_enhanced', [])
 
             return template.render(
                 title=title,
@@ -385,24 +509,20 @@ class TextReporter:
                 neutral_rate=f"{sentiment['distribution']['neutral_rate']:.1%}",
                 sentiment_is_polarized=sentiment.get('is_polarized', False),
                 keywords=keywords,
-                topics=topics,
                 duplicate_count=quality.get('duplicates', {}).get('count', 0),
                 cleaning_suggestions=cleaning_suggestions[:10],
-                entity=entity,
                 language_distribution=language_dist,
                 start_templates=list(templates.get('start', []))[:20],
                 end_templates=list(templates.get('end', []))[:20],
                 insights=insights,
                 sample_texts=sample_texts,
                 quality_details=quality_details,
-                events=events,
-                entity_profiles=entity_profiles,
-                graph_insights=graph_insights,
-                timeline=timeline,
-                graph_viz=graph_viz
+                graph_viz=graph_viz,
+                entity_stats_with_details=entity_stats_with_details,
+                events_by_type=events_by_type,
+                topics_enhanced=topics_enhanced
             )
         except Exception as e:
             import traceback
-            error_detail = traceback.format_exc()
-            print(f"模板渲染失败: {error_detail}")
+            print(f"模板渲染失败: {traceback.format_exc()}")
             return self._get_error_html(title, f"模板渲染失败: {str(e)}")

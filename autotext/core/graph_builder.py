@@ -1,5 +1,5 @@
 """
-关系图谱构建模块 - 构建实体-事件-主题知识图谱
+关系图谱构建模块
 """
 
 import networkx as nx
@@ -16,181 +16,118 @@ class GraphBuilder:
         self._node_counter = 0
         self._edge_counter = 0
 
-        # 节点类型颜色映射（用于前端）
         self.node_colors = {
-            "ENTITY": "#4facfe",  # 蓝色
-            "EVENT": "#ff9f43",  # 橙色
-            "TOPIC": "#2ed573"  # 绿色
+            "ENTITY": "#4facfe",
+            "EVENT": "#ff9f43",
+            "TOPIC": "#2ed573"
         }
 
-        # 边类型样式映射
-        self.edge_styles = {
-            "PARTICIPATE": {"color": "#4facfe", "width": 1, "style": "solid"},
-            "CO_OCCUR": {"color": "#a4b0be", "width": 1, "style": "dashed"},
-            "BELONG_TO": {"color": "#2ed573", "width": 1, "style": "solid"},
-            "TEMPORAL": {"color": "#ff9f43", "width": 1, "style": "dotted"}
+        self.node_categories = {
+            "ENTITY": "实体",
+            "EVENT": "事件",
+            "TOPIC": "主题"
         }
 
-    def _add_node(self, node_id: str, name: str, node_type: str,
-                  metadata: Dict = None) -> str:
-        """添加节点"""
+    def _add_node(self, node_id: str, name: str, node_type: str, metadata: Dict = None) -> str:
         if metadata is None:
             metadata = {}
-
         self.graph.add_node(node_id,
-                            name=name,
-                            type=node_type,
-                            color=self.node_colors.get(node_type, "#a4b0be"),
-                            **metadata)
+                           name=name,
+                           type=node_type,
+                           category=self.node_categories.get(node_type, node_type),
+                           color=self.node_colors.get(node_type, "#a4b0be"),
+                           **metadata)
         return node_id
 
-    def _add_edge(self, source: str, target: str, edge_type: str,
-                  weight: float = 1.0, **kwargs) -> str:
-        """添加边"""
+    def _add_edge(self, source: str, target: str, edge_type: str, weight: float = 1.0, **kwargs) -> str:
         edge_id = f"e_{self._edge_counter}"
         self._edge_counter += 1
-
-        style = self.edge_styles.get(edge_type, {"color": "#a4b0be", "width": 1, "style": "solid"})
-
         self.graph.add_edge(source, target,
-                            edge_id=edge_id,
-                            type=edge_type,
-                            weight=weight,
-                            color=style["color"],
-                            width=style["width"],
-                            style=style["style"],
-                            **kwargs)
+                           edge_id=edge_id,
+                           type=edge_type,
+                           weight=weight,
+                           **kwargs)
         return edge_id
 
-    def add_entity_node(self, entity_id: str, name: str, entity_type: str,
-                        count: int = 1) -> str:
-        """添加实体节点"""
+    def add_entity_node(self, entity_id: str, name: str, entity_type: str, count: int = 1) -> str:
+        # 去掉前缀，直接使用名称作为显示名
+        clean_name = name.split(":", 1)[-1] if ":" in name else name
         return self._add_node(
-            f"ENTITY:{entity_id}",
-            name,
+            clean_name,
+            clean_name,
             "ENTITY",
             {"entity_type": entity_type, "count": count, "original_id": entity_id}
         )
 
-    def add_event_node(self, event_id: str, event_type: str, trigger: str,
-                       timestamp: str = None, text: str = None) -> str:
-        """添加事件节点"""
+    def add_event_node(self, event_id: str, event_type: str, trigger: str, timestamp: str = None, text: str = None) -> str:
+        display_name = f"{event_type}" if len(event_type) <= 15 else event_type[:12] + "..."
         return self._add_node(
-            f"EVENT:{event_id}",
-            f"{event_type}",
+            event_id,
+            display_name,
             "EVENT",
             {
                 "event_type": event_type,
                 "trigger": trigger,
                 "timestamp": timestamp,
-                "text": text[:100] if text else "",
-                "original_id": event_id
+                "full_name": f"{event_type}({trigger})" if trigger else event_type
             }
         )
 
-    def add_topic_node(self, topic_id: int, topic_name: str,
-                       keywords: List[str] = None) -> str:
-        """添加主题节点"""
+    def add_topic_node(self, topic_id: int, topic_name: str, keywords: List[str] = None) -> str:
+        display_name = topic_name if len(topic_name) <= 15 else topic_name[:12] + "..."
         return self._add_node(
-            f"TOPIC:{topic_id}",
-            topic_name,
+            f"T{topic_id}",
+            display_name,
             "TOPIC",
-            {"topic_id": topic_id, "keywords": keywords or []}
+            {"topic_id": topic_id, "keywords": keywords or [], "full_name": topic_name}
         )
 
     def add_entity_event_edge(self, entity_id: str, event_id: str, role: str = "参与") -> str:
-        """添加实体-事件边（实体参与事件）"""
-        return self._add_edge(
-            f"ENTITY:{entity_id}",
-            f"EVENT:{event_id}",
-            "PARTICIPATE",
-            role=role
-        )
+        return self._add_edge(entity_id, event_id, "PARTICIPATE", role=role)
 
-    def add_entity_entity_edge(self, entity_a: str, entity_b: str,
-                               weight: float = 1.0, pmi: float = 0) -> str:
-        """添加实体-实体边（共现关系）"""
-        return self._add_edge(
-            f"ENTITY:{entity_a}",
-            f"ENTITY:{entity_b}",
-            "CO_OCCUR",
-            weight=weight,
-            pmi=pmi
-        )
+    def add_entity_entity_edge(self, entity_a: str, entity_b: str, weight: float = 1.0, pmi: float = 0) -> str:
+        clean_a = entity_a.split(":", 1)[-1] if ":" in entity_a else entity_a
+        clean_b = entity_b.split(":", 1)[-1] if ":" in entity_b else entity_b
+        return self._add_edge(clean_a, clean_b, "CO_OCCUR", weight=weight, pmi=pmi)
 
-    def add_entity_topic_edge(self, entity_id: str, topic_id: int,
-                              probability: float = 0.5) -> str:
-        """添加实体-主题边（实体属于主题）"""
-        return self._add_edge(
-            f"ENTITY:{entity_id}",
-            f"TOPIC:{topic_id}",
-            "BELONG_TO",
-            weight=probability,
-            probability=probability
-        )
+    def add_entity_topic_edge(self, entity_id: str, topic_id: int, probability: float = 0.5) -> str:
+        return self._add_edge(entity_id, f"T{topic_id}", "BELONG_TO", weight=probability)
 
-    def add_event_topic_edge(self, event_id: str, topic_id: int,
-                             probability: float = 0.5) -> str:
-        """添加事件-主题边（事件属于主题）"""
-        return self._add_edge(
-            f"EVENT:{event_id}",
-            f"TOPIC:{topic_id}",
-            "BELONG_TO",
-            weight=probability,
-            probability=probability
-        )
-
-    def add_event_event_edge(self, event_a: str, event_b: str,
-                             relation_type: str = "PRECEDES",
-                             time_gap: int = 0) -> str:
-        """添加事件-事件边（时序关系）"""
-        return self._add_edge(
-            f"EVENT:{event_a}",
-            f"EVENT:{event_b}",
-            "TEMPORAL",
-            relation=relation_type,
-            time_gap=time_gap
-        )
+    def add_event_topic_edge(self, event_id: str, topic_id: int, probability: float = 0.5) -> str:
+        return self._add_edge(event_id, f"T{topic_id}", "BELONG_TO", weight=probability)
 
     def get_graph(self) -> nx.MultiDiGraph:
-        """获取 NetworkX 图对象"""
         return self.graph
 
     def export_for_visualization(self) -> Dict:
-        """导出 ECharts 可用的格式"""
         nodes = []
         links = []
 
-        # 导出节点
         for node_id, attrs in self.graph.nodes(data=True):
+            node_type = attrs.get("type", "UNKNOWN")
+            node_color = self.node_colors.get(node_type, "#a4b0be")
+            node_category = self.node_categories.get(node_type, node_type)
+
             nodes.append({
                 "id": node_id,
                 "name": attrs.get("name", node_id),
-                "type": attrs.get("type", "UNKNOWN"),
+                "category": node_category,
                 "value": attrs.get("count", 1),
-                "itemStyle": {"color": attrs.get("color", "#a4b0be")},
-                "symbolSize": min(50, 10 + attrs.get("count", 1) * 2),
-                "category": attrs.get("type", "UNKNOWN")
+                "itemStyle": {"color": node_color},
+                "symbolSize": min(40, 15 + attrs.get("count", 1) // 5)
             })
 
-        # 导出边
         for u, v, attrs in self.graph.edges(data=True):
             links.append({
                 "source": u,
                 "target": v,
                 "value": attrs.get("weight", 1),
-                "type": attrs.get("type", "UNKNOWN"),
-                "lineStyle": {
-                    "color": attrs.get("color", "#a4b0be"),
-                    "width": attrs.get("width", 1),
-                    "type": attrs.get("style", "solid")
-                }
+                "type": attrs.get("type", "UNKNOWN")
             })
 
         return {"nodes": nodes, "links": links}
 
     def get_statistics(self) -> Dict:
-        """获取图谱统计"""
         return {
             "node_count": self.graph.number_of_nodes(),
             "edge_count": self.graph.number_of_edges(),

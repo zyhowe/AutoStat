@@ -104,51 +104,34 @@ class GraphAnalyzer:
 
     def find_event_chains(self, start_node_id: str = None,
                           max_depth: int = 5) -> List[List[str]]:
-        """
-        事件链发现（基于时序和路径）
-
-        参数:
-        - start_node_id: 起始节点ID（可选）
-        - max_depth: 最大深度
-
-        返回: [[node_id1, node_id2, ...], ...]
-        """
+        """事件链发现 - 简化版（不使用时间比较）"""
         try:
             # 只考虑事件节点
             event_nodes = [n for n, d in self.graph.nodes(data=True) if d.get("type") == "EVENT"]
 
-            if not event_nodes:
+            if len(event_nodes) < 2:
                 return []
 
-            # 构建时序边（基于时间戳）
-            temporal_edges = []
-            for node in event_nodes:
-                ts = self.graph.nodes[node].get("timestamp")
-                if ts:
-                    temporal_edges.append((node, ts))
+            # 按名称排序（简单方案）
+            event_nodes.sort()
 
-            # 按时间排序
-            temporal_edges.sort(key=lambda x: x[1])
-
-            # 构建简单的时间链
+            # 分成多个链
             chains = []
-            current_chain = [temporal_edges[0][0]] if temporal_edges else []
-            prev_ts = temporal_edges[0][1] if temporal_edges else None
+            current_chain = [event_nodes[0]]
 
-            for i in range(1, len(temporal_edges)):
-                node, ts = temporal_edges[i]
-                if ts and prev_ts and (ts - prev_ts).days <= 7:  # 7天内视为同一链
+            for node in event_nodes[1:]:
+                if len(current_chain) < max_depth:
                     current_chain.append(node)
                 else:
                     if len(current_chain) >= 2:
                         chains.append(current_chain)
                     current_chain = [node]
-                prev_ts = ts
 
             if len(current_chain) >= 2:
                 chains.append(current_chain)
 
             return chains[:10]
+
         except Exception as e:
             print(f"⚠️ 事件链发现失败: {e}")
             return []
