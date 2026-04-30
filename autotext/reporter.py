@@ -137,59 +137,176 @@ class TextReporter:
 
         return md
 
-    def _build_event_description(self, event_type: str, args: Dict, fallback_desc: str) -> str:
-        """构建更好的事件描述"""
+    def _build_event_description(self, event_type: str, args: Dict, fallback_desc: str, trigger: str = "",
+                                 timestamp: str = "") -> str:
+        """
+        构建更好的事件描述
+
+        参数:
+        - event_type: 事件类型
+        - args: 事件论元
+        - fallback_desc: 降级描述（来自 DuEE 或原文片段）
+        - trigger: 触发词
+        - timestamp: 时间
+        """
         company = args.get("公司", "")
         person = args.get("人物", "")
         money = args.get("金额", "")
         percent = args.get("比例", "")
 
+        # 优先使用 DuEE 返回的原始描述（如果有且质量好）
+        if fallback_desc and len(fallback_desc) > 15 and not fallback_desc.startswith(event_type):
+            # 如果已有完整描述（长度>15且不只是事件类型），直接使用
+            if timestamp:
+                return f"{timestamp} {fallback_desc}"
+            return fallback_desc
+
+        # 根据事件类型构建描述
         if event_type == "发布财报":
             if company and money:
-                return f"{company}发布财报，{money}"
+                # 判断是营收还是净利润
+                if "净利润" in str(args) or "净利" in str(args):
+                    desc = f"{company}发布财报，净利润{money}"
+                else:
+                    desc = f"{company}发布财报，营收{money}"
             elif company and percent:
-                return f"{company}发布财报，同比增长{percent}"
+                desc = f"{company}发布财报，同比增长{percent}"
             elif company:
-                return f"{company}发布财报"
+                desc = f"{company}发布财报"
+            elif trigger:
+                desc = f"{trigger}财报"
             else:
-                return fallback_desc[:50] if fallback_desc else "发布财报"
+                return "发布财报"
+
+        elif event_type == "业绩预告":
+            if company and percent:
+                desc = f"{company}业绩预告，预计{percent}"
+            elif company:
+                desc = f"{company}发布业绩预告"
+            else:
+                return "业绩预告"
+
         elif event_type == "收购":
-            if company and money:
-                return f"{company}收购，交易金额{money}"
+            target = args.get("目标", "") or args.get("标的", "")
+            if company and target and money:
+                desc = f"{company}以{money}收购{target}"
+            elif company and money:
+                desc = f"{company}出资{money}进行收购"
+            elif company and target:
+                desc = f"{company}收购{target}"
             elif company:
-                return f"{company}收购"
+                desc = f"{company}收购"
             else:
-                return fallback_desc[:50] if fallback_desc else "收购"
+                return "收购"
+
         elif event_type == "投资":
+            target = args.get("目标", "") or args.get("领域", "")
+            if company and target and money:
+                desc = f"{company}投资{money}布局{target}"
+            elif company and money:
+                desc = f"{company}投资{money}"
+            elif company and target:
+                desc = f"{company}投资{target}"
+            elif company:
+                desc = f"{company}投资"
+            else:
+                return "投资"
+
+        elif event_type == "上市":
+            if company:
+                desc = f"{company}上市"
+            else:
+                return "上市"
+
+        elif event_type == "分红":
+            if company:
+                desc = f"{company}实施分红"
+            else:
+                return "分红"
+
+        elif event_type == "回购":
             if company and money:
-                return f"{company}投资{money}"
+                desc = f"{company}回购{money}"
             elif company:
-                return f"{company}投资"
+                desc = f"{company}股份回购"
             else:
-                return fallback_desc[:50] if fallback_desc else "投资"
+                return "回购"
+
         elif event_type == "高管任命":
-            if company and person:
-                return f"{company}任命{person}"
+            position = args.get("职位", "") or args.get("职务", "")
+            if company and person and position:
+                desc = f"{company}任命{person}为{position}"
+            elif company and person:
+                desc = f"{company}任命{person}"
             elif company:
-                return f"{company}高管任命"
+                desc = f"{company}高管任命"
             else:
-                return fallback_desc[:50] if fallback_desc else "高管任命"
+                return "高管任命"
+
         elif event_type == "高管离职":
             if company and person:
-                return f"{company}{person}离职"
+                desc = f"{company}{person}离职"
             elif company:
-                return f"{company}高管离职"
+                desc = f"{company}高管离职"
             else:
-                return fallback_desc[:50] if fallback_desc else "高管离职"
+                return "高管离职"
+
         elif event_type in ["涨价", "降价"]:
-            if company and percent:
-                return f"{company}{event_type}{percent}"
+            product = args.get("产品", "") or args.get("商品", "")
+            if company and product and percent:
+                desc = f"{company}{product}{event_type}{percent}"
+            elif company and product:
+                desc = f"{company}{product}{event_type}"
+            elif company and percent:
+                desc = f"{company}{event_type}{percent}"
             elif company:
-                return f"{company}{event_type}"
+                desc = f"{company}{event_type}"
+            else:
+                return event_type
+
+        elif event_type == "合作":
+            partner = args.get("合作方", "") or args.get("伙伴", "")
+            if company and partner:
+                desc = f"{company}与{partner}达成合作"
+            elif company:
+                desc = f"{company}达成合作"
+            else:
+                return "合作"
+
+        elif event_type == "中标":
+            project = args.get("项目", "")
+            if company and project and money:
+                desc = f"{company}中标{project}，金额{money}"
+            elif company and project:
+                desc = f"{company}中标{project}"
+            elif company and money:
+                desc = f"{company}中标，金额{money}"
+            elif company:
+                desc = f"{company}中标"
+            else:
+                return "中标"
+
+        elif event_type == "融资":
+            if company and money:
+                desc = f"{company}完成{money}融资"
+            elif company:
+                desc = f"{company}融资"
+            else:
+                return "融资"
+
+        else:
+            # 未知事件类型
+            if company and trigger:
+                desc = f"{company}{trigger}"
+            elif company:
+                desc = company
             else:
                 return fallback_desc[:50] if fallback_desc else event_type
-        else:
-            return fallback_desc[:60] if fallback_desc else event_type
+
+        # 添加时间前缀
+        if timestamp and timestamp not in desc:
+            return f"{timestamp} {desc}"
+        return desc
 
     def _build_json_data(self) -> Dict[str, Any]:
         """构建完整的 JSON 数据"""
@@ -309,7 +426,11 @@ class TextReporter:
                                     break
 
                         if is_related:
-                            desc = self._build_event_description(event_type, args, event_desc)
+                            desc = self._build_event_description(
+                                event_type, args, event_desc,
+                                trigger=event.get("trigger", ""),
+                                timestamp=event.get("timestamp", "")
+                            )
                             events_list.append({
                                 "type": event_type,
                                 "description": desc,
