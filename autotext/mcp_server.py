@@ -138,7 +138,7 @@ def extract_keywords(text: str, top_n: int = 20) -> str:
     """
     try:
         from autotext.core.preprocessor import TextPreprocessor
-        from autotext.core.keyword import KeywordExtractor
+        from autotext.core.keyword_extractor import KeywordExtractor
 
         preprocessor = TextPreprocessor()
         processed = preprocessor.process(text)

@@ -4,7 +4,7 @@ from autotext.core.detector import FieldDetector
 from autotext.core.preprocessor import TextPreprocessor
 from autotext.core.stats import TextStats
 from autotext.core.quality import TextQuality
-from autotext.core.keyword import KeywordExtractor
+from autotext.core.keyword_extractor import KeywordExtractor
 from autotext.core.sentiment import SentimentAnalyzer
 from autotext.core.topic_model import TopicModeler
 from autotext.core.relation import RelationDiscoverer

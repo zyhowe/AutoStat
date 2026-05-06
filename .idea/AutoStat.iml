@@ -7,5 +7,6 @@
     <orderEntry type="module" module-name="myapp" />
     <orderEntry type="module" module-name="dify-official-plugins" />
     <orderEntry type="module" module-name="demo" />
+    <orderEntry type="module" module-name="myapp310" />
   </component>
 </module>

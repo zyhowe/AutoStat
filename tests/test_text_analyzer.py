@@ -11,7 +11,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from autotext.core.preprocessor import TextPreprocessor
 from autotext.core.sentiment import SentimentAnalyzer
 from autotext.core.entity import EntityRecognizer
-from autotext.core.keyword import KeywordExtractor
+from autotext.core.keyword_extractor import KeywordExtractor
 
 
 class TestTextPreprocessor(unittest.TestCase):

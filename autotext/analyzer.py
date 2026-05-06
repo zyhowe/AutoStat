@@ -12,7 +12,7 @@ from autotext.checker import TextChecker
 from autotext.core.preprocessor import TextPreprocessor
 from autotext.core.stats import TextStats
 from autotext.core.quality import TextQuality
-from autotext.core.keyword import KeywordExtractor
+from autotext.core.keyword_extractor import KeywordExtractor
 from autotext.core.sentiment import SentimentAnalyzer
 from autotext.reporter import TextReporter
 from autotext.core.summarizer import TextRankSummarizer, LLMSummarizer
@@ -461,7 +461,7 @@ class TextAnalyzer:
         try:
             if EventExtractor is None:
                 raise ImportError("EventExtractor 未导入")
-            self.event_extractor = EventExtractor(use_model=False)
+            self.event_extractor = EventExtractor(use_model=True)
             events_results = self.event_extractor.extract(valid_texts)
             self.events = []
             for idx, events in enumerate(events_results):
