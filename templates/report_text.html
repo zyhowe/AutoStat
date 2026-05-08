@@ -92,25 +92,16 @@
             margin: 10px 0;
             font-size: 13px;
         }
-        .sample-text {
-            background: #f0f0f0;
-            padding: 8px 12px;
-            border-radius: 8px;
-            font-size: 12px;
-            margin: 6px 0;
-            line-height: 1.4;
-        }
 
         .event-card {
             background: #fff8e1;
             border-left: 4px solid #ff9f43;
             padding: 8px 10px;
-            margin-bottom: 8px;
+            margin-bottom: 6px;
             border-radius: 6px;
         }
-        .event-desc { font-size: 13px; color: #333; font-weight: 500; margin-bottom: 4px; }
-        .event-meta { font-size: 10px; color: #888; display: flex; flex-wrap: wrap; gap: 12px; }
-        .event-topic { color: #2ed573; }
+        .event-desc { font-size: 13px; color: #333; font-weight: 500; }
+        .event-meta { font-size: 10px; color: #888; margin-top: 4px; }
 
         .entity-tag-org { background: #e3f2fd; color: #1565c0; padding: 2px 10px; border-radius: 16px; font-size: 12px; display: inline-block; }
         .entity-tag-per { background: #ffebee; color: #c62828; padding: 2px 10px; border-radius: 16px; font-size: 12px; display: inline-block; }
@@ -352,103 +343,49 @@
     </div>
 
     <!-- 6. 实体识别 -->
-    <!-- 6. 实体识别 -->
-    {% if entity_stats_with_details %}
+    {% if entity_stats %}
     <div class="card">
         <h2>🏷️ 实体识别</h2>
         <div class="grid-3">
             <!-- 组织名 -->
-            {% if entity_stats_with_details.org and entity_stats_with_details.org.get('items') %}
+            {% if entity_stats.org and entity_stats.org.top %}
             <div class="info-box">
-                <strong>🏢 组织名 ({{ entity_stats_with_details.org.unique }})</strong>
+                <strong>🏢 组织名 ({{ entity_stats.org.unique }})</strong>
                 <div style="margin-top: 12px;">
-                    {% for entity in entity_stats_with_details.org.get('items', []) %}
-                    {% if entity.has_details %}
-                    <details style="margin-bottom: 8px;">
-                        <summary style="cursor: pointer; font-size: 13px; color: #1a73e8;">
-                            <span class="entity-tag-org">{{ entity.name }}</span>
-                            <span class="badge-count">{{ entity.count }}次</span>
-                        </summary>
-                        <div style="margin-top: 8px; margin-left: 16px; border-left: 2px solid #4facfe; padding-left: 10px;">
-                            {% if entity.events %}
-                            <div><strong>📅 相关事件:</strong></div>
-                            {% for event in entity.events[:3] %}
-                            <div class="event-card" style="margin: 6px 0;">
-                                <div class="event-desc" style="font-size: 12px;">{{ event.description }}</div>
-                                {% if event.topic_name %}
-                                <div class="event-meta">🏷️ {{ event.topic_name }}</div>
-                                {% endif %}
-                            </div>
-                            {% endfor %}
-                            {% endif %}
-                            {% if entity.related_entities %}
-                            <div><strong>🔗 关联实体:</strong> <span style="font-size: 12px;">{{ entity.related_entities[:5]|join(', ') }}</span></div>
-                            {% endif %}
-                            {% if entity.topics %}
-                            <div><strong>🏷️ 所属主题:</strong> <span style="font-size: 12px;">{{ entity.topics[:3]|join(', ') }}</span></div>
-                            {% endif %}
-                        </div>
-                    </details>
-                    {% else %}
+                    {% for name, count in entity_stats.org.top[:15] %}
                     <div style="margin-bottom: 6px;">
-                        <span class="entity-tag-org">{{ entity.name }}</span>
-                        <span class="badge-count">{{ entity.count }}次</span>
+                        <span class="entity-tag-org">{{ name }}</span>
+                        <span class="badge-count">{{ count }}次</span>
                     </div>
-                    {% endif %}
                     {% endfor %}
                 </div>
             </div>
             {% endif %}
 
             <!-- 人名 -->
-            {% if entity_stats_with_details.per and entity_stats_with_details.per.get('items') %}
+            {% if entity_stats.per and entity_stats.per.top %}
             <div class="info-box">
-                <strong>👤 人名 ({{ entity_stats_with_details.per.unique }})</strong>
+                <strong>👤 人名 ({{ entity_stats.per.unique }})</strong>
                 <div style="margin-top: 12px;">
-                    {% for entity in entity_stats_with_details.per.get('items', []) %}
-                    {% if entity.has_details %}
-                    <details style="margin-bottom: 8px;">
-                        <summary style="cursor: pointer; font-size: 13px; color: #c62828;">
-                            <span class="entity-tag-per">{{ entity.name }}</span>
-                            <span class="badge-count">{{ entity.count }}次</span>
-                        </summary>
-                        <div style="margin-top: 8px; margin-left: 16px; border-left: 2px solid #ff9f43; padding-left: 10px;">
-                            {% if entity.events %}
-                            <div><strong>📅 相关事件:</strong></div>
-                            {% for event in entity.events[:3] %}
-                            <div class="event-card" style="margin: 6px 0;">
-                                <div class="event-desc" style="font-size: 12px;">{{ event.description }}</div>
-                            </div>
-                            {% endfor %}
-                            {% endif %}
-                            {% if entity.related_entities %}
-                            <div><strong>🔗 关联实体:</strong> {{ entity.related_entities[:5]|join(', ') }}</div>
-                            {% endif %}
-                            {% if entity.topics %}
-                            <div><strong>🏷️ 所属主题:</strong> {{ entity.topics[:3]|join(', ') }}</div>
-                            {% endif %}
-                        </div>
-                    </details>
-                    {% else %}
+                    {% for name, count in entity_stats.per.top[:15] %}
                     <div style="margin-bottom: 6px;">
-                        <span class="entity-tag-per">{{ entity.name }}</span>
-                        <span class="badge-count">{{ entity.count }}次</span>
+                        <span class="entity-tag-per">{{ name }}</span>
+                        <span class="badge-count">{{ count }}次</span>
                     </div>
-                    {% endif %}
                     {% endfor %}
                 </div>
             </div>
             {% endif %}
 
             <!-- 地名 -->
-            {% if entity_stats_with_details.loc and entity_stats_with_details.loc.get('items') %}
+            {% if entity_stats.loc and entity_stats.loc.top %}
             <div class="info-box">
-                <strong>📍 地名 ({{ entity_stats_with_details.loc.unique }})</strong>
+                <strong>📍 地名 ({{ entity_stats.loc.unique }})</strong>
                 <div style="margin-top: 12px;">
-                    {% for entity in entity_stats_with_details.loc.get('items', []) %}
+                    {% for name, count in entity_stats.loc.top[:15] %}
                     <div style="margin-bottom: 6px;">
-                        <span class="entity-tag-loc">{{ entity.name }}</span>
-                        <span class="badge-count">{{ entity.count }}次</span>
+                        <span class="entity-tag-loc">{{ name }}</span>
+                        <span class="badge-count">{{ count }}次</span>
                     </div>
                     {% endfor %}
                 </div>
@@ -458,7 +395,7 @@
     </div>
     {% endif %}
 
-    <!-- 7. 事件详情 -->
+    <!-- 7. 事件详情（按事件类型分组） -->
     {% if events_by_type %}
     <div class="card">
         <h2>📰 事件详情</h2>
@@ -481,20 +418,9 @@
                                     {{ event.event_type }}
                                 {% endif %}
                             </div>
-                            <div class="event-meta">
-                                {% if event.args.get("公司") %}
-                                <span>🏢 {{ event.args.get("公司")[:20] }}</span>
-                                {% endif %}
-                                {% if event.args.get("人物") %}
-                                <span>👤 {{ event.args.get("人物")[:12] }}</span>
-                                {% endif %}
-                                {% if event.args.get("金额") %}
-                                <span>💰 {{ event.args.get("金额") }}</span>
-                                {% endif %}
-                                {% if event.topic_name %}
-                                <span class="event-topic">🏷️ {{ event.topic_name }}</span>
-                                {% endif %}
-                            </div>
+                            {% if event.timestamp %}
+                            <div class="event-meta">📅 {{ event.timestamp }}</div>
+                            {% endif %}
                         </div>
                         {% endfor %}
                         {% if type_events|length > 10 %}
@@ -509,11 +435,11 @@
     {% endif %}
 
     <!-- 8. 主题建模 -->
-    {% if topics_enhanced %}
+    {% if topics %}
     <div class="card">
         <h2>📚 主题建模</h2>
         <div class="grid-2">
-            {% for topic in topics_enhanced %}
+            {% for topic in topics %}
             <div class="topic-card">
                 <div class="topic-title">
                     主题 {{ topic.topic_id }}
@@ -531,13 +457,11 @@
                     <span class="keyword-item" style="font-size: 12px;">{{ word }}</span>
                     {% endfor %}
                 </div>
-                {% if topic.sample_texts %}
+                {% if topic.textrank_sentences %}
                 <details>
-                    <summary>📄 样本文本 ({{ topic.sample_texts|length }})</summary>
-                    {% for sample in topic.sample_texts %}
-                    <div class="sample-text">
-                        [{{ sample.index }}] {{ sample.text }}
-                    </div>
+                    <summary>📄 原文摘要</summary>
+                    {% for sent in topic.textrank_sentences %}
+                    <div class="issue-card"><div style="font-size: 11px;">“{{ sent[:150] }}{% if sent|length > 150 %}...{% endif %}”</div></div>
                     {% endfor %}
                 </details>
                 {% endif %}
