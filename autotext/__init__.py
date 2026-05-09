@@ -13,6 +13,7 @@ from autotext.core.summarizer import TextRankSummarizer, LLMSummarizer
 from autotext.core.relation_mining import RelationMiner
 from autotext.core.trend_detector import TrendDetector
 from autotext.core.info_extractor import InfoExtractor
+from autotext.core.llm_graph_extractor import LLMGraphExtractor, GlobalKnowledgeGraph
 
 __all__ = [
     "TextAnalyzer",
@@ -24,4 +25,6 @@ __all__ = [
     "RelationMiner",
     "TrendDetector",
     "InfoExtractor",
+    "LLMGraphExtractor",
+    "GlobalKnowledgeGraph",
 ]
