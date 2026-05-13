@@ -1,3 +1,4 @@
+# ==================== autotext/analyzer.py ====================
 """
 主分析器类 - 整合所有文本分析模块
 """
@@ -16,6 +17,16 @@ from autotext.core.keyword_extractor import KeywordExtractor
 from autotext.core.sentiment import SentimentAnalyzer
 from autotext.reporter import TextReporter
 from autotext.core.summarizer import TextRankSummarizer, LLMSummarizer
+
+# 导入大模型客户端
+try:
+    from autostat.llm_client import LLMClient
+except ImportError:
+    try:
+        from autotext.llm_client import LLMClient
+    except ImportError:
+        LLMClient = None
+        print("⚠️ LLMClient 导入失败")
 
 # 新增导入
 try:
@@ -89,7 +100,8 @@ class TextAnalyzer:
                  metric_cols: Optional[Dict[str, str]] = None,
                  source_name: Optional[str] = None,
                  quiet: bool = False,
-                 use_bert: bool = True):
+                 use_bert: bool = True,
+                 llm_config: Optional[Dict[str, str]] = None):
         self.source_name = source_name
         self.quiet = quiet
         self.text_col = text_col
@@ -159,12 +171,35 @@ class TextAnalyzer:
         self._load_data(data, text_col, title_col, time_col, metric_cols)
         self.checker = TextChecker(self.texts, self.titles, self.dates)
 
+        # 初始化大模型客户端（使用默认配置或传入配置）
+        if llm_config is None:
+            llm_config = {
+                "api_base": "https://api.deepseek.com/v1",
+                "api_key": "sk-c0e1f1ad1a3b41429a92f29251775ecf",
+                "model": "deepseek-chat"
+            }
+
+        if LLMClient is not None:
+            try:
+                self.llm_client = LLMClient(llm_config)
+                if not self.quiet:
+                    print("  ✅ 大模型客户端已初始化（使用默认配置）")
+            except Exception as e:
+                if not self.quiet:
+                    print(f"  ⚠️ 大模型客户端初始化失败: {e}")
+                self.llm_client = None
+        else:
+            self.llm_client = None
+            if not self.quiet:
+                print("  ⚠️ LLMClient 不可用，大模型功能将禁用")
+
         if not self.quiet:
             print("\n" + "=" * 70)
             print("📝 启动文本分析流程")
             print("=" * 70)
 
     def set_llm_client(self, llm_client):
+        """设置大模型客户端"""
         self.llm_client = llm_client
         if not self.quiet:
             print("  ✅ 大模型客户端已设置")
@@ -292,7 +327,8 @@ class TextAnalyzer:
         if not self.quiet:
             print(f"  ✅ 完成，共 {len(self.texts)} 条文本")
             if self.language_distribution:
-                print(f"  📊 语言分布: 中文 {self.language_distribution.get('zh', 0)} 条, 英文 {self.language_distribution.get('en', 0)} 条")
+                print(
+                    f"  📊 语言分布: 中文 {self.language_distribution.get('zh', 0)} 条, 英文 {self.language_distribution.get('en', 0)} 条")
 
     def _compute_stats(self):
         if not self.quiet:
@@ -335,7 +371,8 @@ class TextAnalyzer:
         self.sentiment_results = analyzer.analyze_batch(self.content_texts)
         self.sentiment_distribution = analyzer.get_distribution(self.sentiment_results)
         if not self.quiet:
-            print(f"  ✅ 积极: {self.sentiment_distribution['positive_rate']:.1%}  消极: {self.sentiment_distribution['negative_rate']:.1%}  中性: {self.sentiment_distribution['neutral_rate']:.1%}")
+            print(
+                f"  ✅ 积极: {self.sentiment_distribution['positive_rate']:.1%}  消极: {self.sentiment_distribution['negative_rate']:.1%}  中性: {self.sentiment_distribution['neutral_rate']:.1%}")
 
     def _filter_valid_entities(self, entity_stats: Dict) -> Dict:
         stopwords = {'的', '了', '是', '在', '和', '与', '或', '也', '都', '还',
@@ -371,577 +408,696 @@ class TextAnalyzer:
         return filtered
 
     def _llm_graph_analysis(self):
-        """基于大模型的知识图谱分析（替换实体、事件、主题、关系图谱）"""
+        """基于大模型的信息抽取（使用 llm_extractor）"""
+        if not self.llm_client:
+            if not self.quiet:
+                print("  ⚠️ 未配置大模型客户端")
+            return
+
         if not self.quiet:
-            print("  🤖 使用大模型进行知识图谱抽取...")
+            print("  🤖 使用大模型进行结构化信息抽取...")
+
+        # 获取要分析的文本（不限制数量）
+        if not self.content_texts:
+            if not self.quiet:
+                print("  ⚠️ 没有有效的文本内容")
+            return
+
+        # 合并所有文本
+        combined_text = "\n\n".join(self.content_texts)
 
         try:
-            from autotext.core.llm_graph_extractor import LLMGraphExtractor
+            from autotext.llm_extractor import InfoExtractorClient
 
-            # 创建抽取器
-            extractor = LLMGraphExtractor(self.llm_client, delay_seconds=0.3)
-
-            # 构建文档列表
-            doc_ids = [f"doc_{i}" for i in range(len(self.content_texts))]
-            doc_times = self.dates if self.dates else None
-
-            # 构建全局图谱
-            kg = extractor.build_global_graph(
-                texts=self.content_texts,
-                doc_ids=doc_ids,
-                doc_times=doc_times,
-                titles=self.titles if self.titles else None,
-                show_progress=not self.quiet
-            )
-
-            # ==================== 转换为原有格式 ====================
-
-            # 1. 实体统计
-            self.entity_stats = kg.get_entity_stats()
-
-            # 2. 事件列表
-            self.events = kg.get_events_list()
-
-            # 3. 主题列表
-            self.topics = kg.topics
-
-            # 4. 关系结果
-            self.relation_result = {
-                'cooccurrence_pairs': kg.get_relations_list(),
-                'entity_frequency': {name: info.get('mention_count', 1)
-                                    for name, info in kg.entities.items()}
+            # 从 llm_client 提取配置
+            config = {
+                "api_base": getattr(self.llm_client, 'api_base', ''),
+                "api_key": getattr(self.llm_client, 'api_key', ''),
+                "model": getattr(self.llm_client, 'model', 'deepseek-chat')
             }
 
-            # 5. 构建兼容的图谱（用于可视化）
-            self._build_graph_from_kg(kg)
+            if not config["api_base"] or not config["api_key"]:
+                if not self.quiet:
+                    print("  ❌ 大模型配置不完整，缺少 api_base 或 api_key")
+                return
 
-            # 6. 实体档案
-            self._build_entity_profiles_from_kg(kg)
+            extractor = InfoExtractorClient(
+                api_base=config["api_base"],
+                api_key=config["api_key"],
+                model=config["model"]
+            )
 
-            # 7. 时间线
-            self._build_timeline_from_kg(kg)
+            import time
 
-            # 8. 洞察（基于图谱）
-            self._generate_insights_from_kg()
+            # 在调用 extractor.extract 之前
+            if not self.quiet:
+                print("  🔄 正在调用大模型抽取信息...")
+                print("  ⏳ 为避免限流，等待2秒...")
+                time.sleep(2)
+
+            result = extractor.extract(combined_text)
+
+            if not result or not result.get("entities"):
+                if not self.quiet:
+                    print("  ⚠️ 大模型未返回有效实体")
+                return
 
             if not self.quiet:
-                print("\n  🎉 大模型知识图谱分析完成")
-                print(f"    识别实体: {len(kg.entities)} 个")
-                print(f"    识别事件: {len(kg.events)} 个")
-                print(f"    识别主题: {len(kg.topics)} 个")
-                print(f"    实体关系: {len(kg.relations)} 条")
-                print(f"    事件参与: {len(kg.participations)} 条")
+                print(f"  ✅ 抽取到 {len(result.get('entities', []))} 个实体")
+                print(f"  ✅ 抽取到 {len(result.get('relationships', []))} 条关系")
+                print(f"  ✅ 抽取到 {len(result.get('events', []))} 个事件")
+                print(f"  ✅ 抽取到 {len(result.get('themes', []))} 个主题")
 
+            # 映射结果到 analyzer 字段
+            self._map_extraction_result(result)
+
+            # 构建增强数据
+            self._build_enhanced_data_from_extraction(result)
+
+            if not self.quiet:
+                print("\n  🎉 大模型信息抽取完成")
+
+        except ImportError as e:
+            if not self.quiet:
+                print(f"  ❌ 模块导入失败: {e}")
         except Exception as e:
             if not self.quiet:
-                print(f"  ❌ 大模型分析失败: {e}")
-                print("  回退到原有BERT分析方式...")
-            # 回退到原有方式
-            self._bert_analysis_original()
+                print(f"  ❌ 大模型调用失败: {e}")
+                import traceback
+                traceback.print_exc()
 
-    def _build_graph_from_kg(self, kg):
-        """从知识图谱构建可视化图谱"""
-        try:
-            from autotext.core.graph_builder import GraphBuilder
+    def _map_extraction_result(self, result: Dict[str, Any]):
+        """将大模型抽取结果映射到 analyzer 字段"""
 
-            self.graph_builder = GraphBuilder()
+        # 存储原始抽取结果
+        self._extracted_entities = result.get("entities", [])
+        self._extracted_relationships = result.get("relationships", [])
+        self._extracted_events = result.get("events", [])
+        self._extracted_themes = result.get("themes", [])
+        self._categorization = result.get("categorization", {})
 
-            # 添加实体节点（只添加重要的）
-            for entity_name, entity_info in kg.entities.items():
-                if entity_info.get('mention_count', 0) >= 2 or len(entity_name) >= 2:
-                    entity_type = entity_info.get('type', 'OTHER')
-                    self.graph_builder.add_entity_node(
-                        entity_name, entity_name, entity_type,
-                        entity_info.get('mention_count', 1)
-                    )
+        # 区分静态关系和动态关系
+        self._static_relationships = []
+        self._dynamic_relationships = []
 
-            # 添加事件节点
-            for event_id, event_info in kg.events.items():
-                event_type = event_info.get('trigger', '未知事件')
-                event_summary = event_info.get('summary', '')[:50]
-                self.graph_builder.add_event_node(
-                    event_id,
-                    event_type,
-                    event_summary,
-                    event_info.get('time', '')
-                )
+        for rel in result.get("relationships", []):
+            rel_type = rel.get("relation_type", "dynamic")
+            if rel_type == "static":
+                self._static_relationships.append(rel)
+            else:
+                self._dynamic_relationships.append(rel)
 
-            # 添加主题节点
-            for topic in kg.topics[:10]:
-                self.graph_builder.add_topic_node(
-                    topic.get('topic_id', 0),
-                    topic.get('llm_title', f"主题{topic.get('topic_id', 0)}"),
-                    topic.get('keywords', [])
-                )
+        # ==================== 1. 实体统计 ====================
+        self.entity_stats = {}
+        self.entity_results = []
 
-            # 添加实体-实体关系边
-            for (from_entity, to_entity, predicate), rel_info in kg.relations.items():
-                if from_entity in self.graph_builder.graph and to_entity in self.graph_builder.graph:
-                    self.graph_builder.add_entity_entity_edge(
-                        from_entity, to_entity,
-                        weight=len(rel_info.get('sources', [])),
-                        pmi=1.0
-                    )
+        # 按实体类型分组统计
+        entity_by_type = {}
 
-            # 添加实体-事件参与边
-            for (entity, event_id, role), part_info in kg.participations.items():
-                if entity in self.graph_builder.graph and event_id in self.graph_builder.graph:
-                    self.graph_builder.add_entity_event_edge(
-                        entity, event_id, role
-                    )
+        for entity in result.get("entities", []):
+            entity_name = entity.get("entity_name", "")
+            entity_type_raw = entity.get("entity_type", "OTHER")
+            entity_type = self._normalize_entity_type(entity_type_raw)
 
-            self.graph = self.graph_builder
-
-            # 图分析
-            if GraphAnalyzer is not None:
-                self.graph_analyzer = GraphAnalyzer(self.graph.get_graph())
-                self.graph_insights = self.graph_analyzer.get_summary_insights()
-
-        except Exception as e:
-            if not self.quiet:
-                print(f"  ⚠️ 图谱构建失败: {e}")
-            self.graph = None
-
-    def _build_entity_profiles_from_kg(self, kg):
-        """从知识图谱构建实体档案"""
-        self.entity_profiles = []
-
-        # 只处理重要实体
-        for entity_name, entity_info in kg.entities.items():
-            if entity_info.get('mention_count', 0) < 2:
+            if not entity_name or len(entity_name) < 2:
                 continue
 
-            profile = {
-                "name": entity_name,
-                "type": entity_info.get('type', 'OTHER'),
-                "mention_count": entity_info.get('mention_count', 0),
-                "attributes": [],
-                "related_entities": [],
-                "events": [],
-                "sample_mentions": []
+            if entity_type not in entity_by_type:
+                entity_by_type[entity_type] = []
+
+            entity_by_type[entity_type].append(entity_name)
+
+        # 构建 entity_stats
+        for etype, names in entity_by_type.items():
+            from collections import Counter
+            counter = Counter(names)
+            self.entity_stats[etype] = {
+                "total": len(names),
+                "unique": len(counter),
+                "top": counter.most_common(20)
             }
 
-            # 添加属性
-            for attr_key, attr_values in entity_info.get('attributes', {}).items():
-                for attr in attr_values[:3]:
-                    profile["attributes"].append({
-                        "key": attr_key,
-                        "value": attr.get('value'),
-                        "time": attr.get('time')
+        # 构建 entity_results（兼容格式）
+        entity_result = {}
+        for etype, names in entity_by_type.items():
+            unique_names = list(dict.fromkeys(names))
+            entity_result[etype] = [(name, 0, len(name)) for name in unique_names]
+        if entity_result:
+            self.entity_results = [entity_result]
+
+        # ==================== 2. 关系结果 ====================
+        self.relation_result = {
+            "cooccurrence_pairs": [],
+            "entity_frequency": {}
+        }
+
+        # 统计实体频次
+        for etype, stats in self.entity_stats.items():
+            for name, count in stats.get("top", []):
+                self.relation_result["entity_frequency"][name] = count
+
+        # 转换关系
+        for rel in result.get("relationships", []):
+            subject = rel.get("subject_entity_id", "")
+            predicate = rel.get("predicate", "关联")
+            obj = rel.get("object_entity_id", "")
+
+            subject_name = self._extract_entity_name_from_id(subject, result)
+            obj_name = self._extract_entity_name_from_id(obj, result)
+
+            if subject_name and obj_name:
+                self.relation_result["cooccurrence_pairs"].append({
+                    "entity1": subject_name,
+                    "entity2": obj_name,
+                    "predicate": predicate,
+                    "count": 1,
+                    "pmi": 1.0,
+                    "contexts": []
+                })
+
+        # ==================== 3. 事件列表 ====================
+        self.events = []
+        events_by_type = {}
+
+        for idx, event in enumerate(result.get("events", [])):
+            event_type = event.get("event_type", "未知事件")
+            event_data = {
+                "event_id": event.get("event_id", f"ev_{idx}"),
+                "event_type": event_type,
+                "trigger": event.get("trigger_word", ""),
+                "description": event.get("summary", ""),
+                "timestamp": event.get("time", ""),
+                "location": event.get("location", ""),
+                "args": {},
+                "text_index": 0,
+                "participants": event.get("participants", [])
+            }
+            self.events.append(event_data)
+
+            # 按类型分组
+            if event_type not in events_by_type:
+                events_by_type[event_type] = []
+            events_by_type[event_type].append(event_data)
+
+        self.events_by_type = events_by_type
+
+        # ==================== 4. 主题列表 ====================
+        self.topics = []
+        for idx, theme in enumerate(result.get("themes", [])):
+            self.topics.append({
+                "topic_id": idx,
+                "texts_count": 1,
+                "keywords": theme.get("keywords", [])[:10],
+                "weights": [1.0] * len(theme.get("keywords", [])[:10]),
+                "llm_title": theme.get("theme_name", f"主题{idx}"),
+                "llm_summary": theme.get("summary", ""),
+                "textrank_sentences": [],
+                "representative_texts": [self.content_texts[0][:300]] if self.content_texts else [],
+                "parent_theme_id": theme.get("parent_theme_id"),
+                "related_entity_ids": theme.get("related_entity_ids", []),
+                "related_event_ids": theme.get("related_event_ids", [])
+            })
+
+        # ==================== 5. 统计信息 ====================
+        self.llm_statistics = {
+            "entity_count": len(result.get("entities", [])),
+            "relation_count": len(result.get("relationships", [])),
+            "static_relation_count": len(self._static_relationships),
+            "dynamic_relation_count": len(self._dynamic_relationships),
+            "event_count": len(result.get("events", [])),
+            "theme_count": len(result.get("themes", []))
+        }
+
+    def _normalize_entity_type(self, entity_type: str) -> str:
+        """标准化实体类型为小写简称"""
+        type_map = {
+            "Person": "per", "PER": "per", "人物": "per",
+            "Organization": "org", "ORG": "org", "组织": "org",
+            "Location": "loc", "LOC": "loc", "地点": "loc",
+            "Product": "product", "PRODUCT": "product", "产品": "product",
+            "EventName": "event", "Event": "event", "事件": "event",
+            "LegalDoc": "legal", "Metric": "metric", "Industry": "industry",
+            "Technology": "tech", "Process": "process",
+            "TIME": "time", "Time": "time", "时间": "time",
+            "NUMBER": "number", "Number": "number", "数值": "number"
+        }
+        return type_map.get(entity_type, "other")
+
+    def _extract_entity_name_from_id(self, entity_id: str, result: Dict) -> str:
+        """从 entity_id 提取实体名称"""
+        if not entity_id:
+            return ""
+        for entity in result.get("entities", []):
+            if entity.get("entity_id") == entity_id:
+                return entity.get("entity_name", "")
+        return entity_id
+
+    def _extract_node_fact(self, entity: Dict) -> str:
+        """从实体中提取关键事实"""
+        attrs = entity.get('attributes', [])
+        fact_parts = []
+        for attr in attrs[:2]:
+            key = attr.get('attr_name') or attr.get('attr_key', '')
+            value = attr.get('attr_value', '')
+            if key and value:
+                fact_parts.append(f"{key}:{value}")
+        if fact_parts:
+            return '; '.join(fact_parts)
+        evidence = entity.get('evidence', '')
+        if evidence:
+            return evidence[:50]
+        return ''
+
+    def _build_graph(self, entities: List[Dict], relationships: List[Dict]) -> Dict:
+        """构建图谱（实体、事件、主题三类节点 + 多种边）"""
+        nodes = []
+        links = []
+        node_ids = set()
+
+        # 实体映射
+        entity_map = {e.get("entity_id"): e for e in entities}
+        entity_name_map = {e.get("entity_id"): e.get("entity_name", e.get("entity_id")) for e in entities}
+
+        # 实体节点
+        for entity in entities:
+            entity_id = entity.get("entity_id")
+            entity_name = entity.get("entity_name", "")
+            if not entity_name or len(entity_name) < 2:
+                continue
+            entity_type = entity.get("entity_type", "OTHER")
+            node = {
+                "id": entity_id,
+                "name": entity_name,
+                "category": "entity",
+                "type": entity_type,
+                "value": len(entity.get("attributes", [])) + 1,
+                "fact": self._extract_node_fact(entity),
+                "symbolSize": min(35, 15 + (len(entity.get("attributes", [])) + 1) * 2)
+            }
+            nodes.append(node)
+            node_ids.add(entity_id)
+
+        # 事件节点
+        events = getattr(self, '_extracted_events', [])
+        for event in events:
+            event_id = event.get("event_id")
+            event_summary = event.get("summary", "")[:30]
+            if not event_summary:
+                event_summary = event.get("event_type", "事件")
+            node = {
+                "id": event_id,
+                "name": event_summary,
+                "category": "event",
+                "type": event.get("event_type", "未知"),
+                "value": 1,
+                "fact": event.get("summary", "")[:50],
+                "symbolSize": 25
+            }
+            nodes.append(node)
+            node_ids.add(event_id)
+
+        # 主题节点
+        themes = getattr(self, '_extracted_themes', [])
+        for theme in themes:
+            theme_id = theme.get("theme_id")
+            theme_name = theme.get("theme_name", f"主题{theme_id}")
+            if not theme_name:
+                continue
+            node = {
+                "id": theme_id,
+                "name": theme_name[:20],
+                "category": "theme",
+                "type": "主题",
+                "value": 1,
+                "fact": theme.get("summary", "")[:50],
+                "symbolSize": 30
+            }
+            nodes.append(node)
+            node_ids.add(theme_id)
+
+        # 实体-实体关系边
+        for rel in relationships:
+            subj = rel.get("subject_entity_id")
+            obj = rel.get("object_entity_id")
+            predicate = rel.get("predicate", "关联")
+            rel_type = rel.get("relation_type", "dynamic")
+            if subj and obj and subj in node_ids and obj in node_ids:
+                links.append({
+                    "source": subj,
+                    "target": obj,
+                    "type": "relation",
+                    "label": predicate[:15],
+                    "relation_type": rel_type,
+                    "value": 1
+                })
+
+        # 实体-事件参与边
+        for event in events:
+            event_id = event.get("event_id")
+            if event_id not in node_ids:
+                continue
+            for participant in event.get("participants", []):
+                entity_id = participant.get("entity_id")
+                role = participant.get("role", "参与")
+                if entity_id and entity_id in node_ids:
+                    links.append({
+                        "source": entity_id,
+                        "target": event_id,
+                        "type": "participates",
+                        "label": role[:10],
+                        "relation_type": "dynamic",
+                        "value": 1
                     })
 
-            # 添加相关实体（通过关系）
-            for (from_entity, to_entity, predicate), _ in kg.relations.items():
-                if from_entity == entity_name:
-                    profile["related_entities"].append({
-                        "name": to_entity,
-                        "relation": predicate
+        # 实体-主题归属边
+        for theme in themes:
+            theme_id = theme.get("theme_id")
+            if theme_id not in node_ids:
+                continue
+            for entity_id in theme.get("related_entity_ids", []):
+                if entity_id and entity_id in node_ids:
+                    links.append({
+                        "source": entity_id,
+                        "target": theme_id,
+                        "type": "belongs_to",
+                        "label": "属于",
+                        "relation_type": "static",
+                        "value": 1
                     })
-                elif to_entity == entity_name:
-                    profile["related_entities"].append({
-                        "name": from_entity,
-                        "relation": predicate
+            for event_id in theme.get("related_event_ids", []):
+                if event_id and event_id in node_ids:
+                    links.append({
+                        "source": event_id,
+                        "target": theme_id,
+                        "type": "belongs_to",
+                        "label": "归类",
+                        "relation_type": "static",
+                        "value": 1
                     })
 
-            # 添加参与的事件
-            for (entity, event_id, role), _ in kg.participations.items():
-                if entity == entity_name and event_id in kg.events:
-                    event_info = kg.events[event_id]
-                    profile["events"].append({
-                        "summary": event_info.get('summary', ''),
+        # 事件-事件关系边
+        for event in events:
+            for rel_event in event.get("related_events", []):
+                target_id = rel_event.get("target_event_id")
+                rel_type = rel_event.get("relation_type", "相关")
+                if target_id and target_id in node_ids:
+                    links.append({
+                        "source": event.get("event_id"),
+                        "target": target_id,
+                        "type": "event_relation",
+                        "label": rel_type[:10],
+                        "relation_type": "dynamic",
+                        "value": 1
+                    })
+
+        # 去重 links
+        unique_links = {}
+        for link in links:
+            key = f"{link['source']}|{link['target']}|{link['type']}"
+            if key not in unique_links:
+                unique_links[key] = link
+        links = list(unique_links.values())
+
+        return {
+            "nodes": nodes,
+            "links": links,
+            "statistics": {
+                "entity_count": len([n for n in nodes if n["category"] == "entity"]),
+                "event_count": len([n for n in nodes if n["category"] == "event"]),
+                "theme_count": len([n for n in nodes if n["category"] == "theme"]),
+                "relation_count": len([l for l in links if l["type"] == "relation"]),
+                "participation_count": len([l for l in links if l["type"] == "participates"]),
+                "belongs_to_count": len([l for l in links if l["type"] == "belongs_to"])
+            }
+        }
+
+    def _build_enhanced_data_from_extraction(self, result: Dict[str, Any]):
+        """从大模型抽取结果构建增强数据"""
+
+        # 1. 构建实体档案
+        self.entity_profiles = self._build_entity_profiles(result)
+
+        # 2. 构建事件链
+        self.event_chains = self._build_event_chains(result)
+
+        # 3. 构建主题层级
+        self.theme_hierarchy = self._build_theme_hierarchy(result)
+
+        # 4. 构建全局图谱（使用动态关系 + 静态关系）
+        self.global_graph = self._build_graph(
+            result.get("entities", []),
+            result.get("relationships", [])  # 全部关系
+        )
+
+        # 5. 构建静态图谱（只使用静态关系，用于树形图）
+        static_relationships = [r for r in result.get("relationships", [])
+                                if r.get("relation_type") == "static"]
+        self.static_graph = self._build_graph(
+            result.get("entities", []),
+            static_relationships
+        )
+
+    def _build_entity_profiles(self, result: Dict[str, Any]) -> List[Dict]:
+        """构建实体档案（含关联关系），按重要性排序"""
+        profiles = []
+
+        # 创建实体映射
+        entity_map = {e.get("entity_id"): e for e in result.get("entities", [])}
+
+        # 创建关系索引
+        relations_by_entity = {}
+        for rel in result.get("relationships", []):
+            subj = rel.get("subject_entity_id")
+            obj = rel.get("object_entity_id")
+            pred = rel.get("predicate", "关联")
+            if subj:
+                relations_by_entity.setdefault(subj, []).append({"target": obj, "predicate": pred, "type": "out"})
+            if obj:
+                relations_by_entity.setdefault(obj, []).append({"target": subj, "predicate": pred, "type": "in"})
+
+        # 创建事件索引
+        events_by_participant = {}
+        for event in result.get("events", []):
+            for participant in event.get("participants", []):
+                entity_id = participant.get("entity_id")
+                role = participant.get("role", "参与")
+                if entity_id:
+                    events_by_participant.setdefault(entity_id, []).append({
+                        "event_id": event.get("event_id"),
+                        "summary": event.get("summary", ""),
                         "role": role,
-                        "time": event_info.get('time')
+                        "time": event.get("time")
                     })
 
-            # 添加样本文本
-            sources = entity_info.get('sources', [])
-            for source in sources[:2]:
-                if source.get('sentence'):
-                    profile["sample_mentions"].append(source['sentence'][:200])
+        # 创建主题索引
+        themes_by_entity = {}
+        for theme in result.get("themes", []):
+            for entity_id in theme.get("related_entity_ids", []):
+                themes_by_entity.setdefault(entity_id, []).append({
+                    "theme_id": theme.get("theme_id"),
+                    "name": theme.get("theme_name")
+                })
 
-            self.entity_profiles.append(profile)
+        # 构建每个实体的档案
+        for entity_id, entity in entity_map.items():
+            entity_name = entity.get("entity_name", "")
+            if not entity_name or len(entity_name) < 2:
+                continue
 
-        # 按提及次数排序
-        self.entity_profiles.sort(key=lambda x: x['mention_count'], reverse=True)
-        self.entity_profiles = self.entity_profiles[:20]
+            # 提取属性
+            attributes = []
+            for attr in entity.get("attributes", []):
+                attributes.append({
+                    "key": attr.get("attr_name") or attr.get("attr_key", ""),
+                    "value": attr.get("attr_value", ""),
+                    "time": attr.get("time")
+                })
 
-    def _build_timeline_from_kg(self, kg):
-        """从知识图谱构建时间线"""
-        try:
-            from autotext.core.timeline_builder import TimelineBuilder
+            # 关联实体
+            related_entities = []
+            for rel in relations_by_entity.get(entity_id, []):
+                target_id = rel["target"]
+                target_entity = entity_map.get(target_id, {})
+                target_name = target_entity.get("entity_name", target_id)
+                if target_name:
+                    related_entities.append({
+                        "name": target_name,
+                        "relation": rel["predicate"],
+                        "direction": rel["type"]
+                    })
 
-            builder = TimelineBuilder()
-            for event_id, event_info in kg.events.items():
-                timestamp = event_info.get('time')
-                if timestamp:
-                    event = {
-                        'event_id': event_id,
-                        'event_type': event_info.get('trigger', '事件'),
-                        'description': event_info.get('summary', ''),
-                        'timestamp': timestamp,
-                        'args': {}
-                    }
-                    builder.add_event(timestamp, event)
+            # 参与的事件
+            participated_events = []
+            for evt in events_by_participant.get(entity_id, []):
+                participated_events.append({
+                    "event_id": evt["event_id"],
+                    "summary": evt["summary"][:100] if evt["summary"] else "",
+                    "role": evt["role"],
+                    "time": evt["time"]
+                })
 
-            self.timeline = builder
-        except Exception as e:
-            if not self.quiet:
-                print(f"  ⚠️ 时间线构建失败: {e}")
-            self.timeline = None
+            # 归属的主题
+            belong_to_themes = []
+            for theme in themes_by_entity.get(entity_id, []):
+                belong_to_themes.append({
+                    "theme_id": theme["theme_id"],
+                    "name": theme["name"]
+                })
 
-    def _generate_insights_from_kg(self):
-        """从知识图谱生成洞察"""
-        self.insights = []
+            # 计算重要性分数：属性数量 + 关联实体数量 + 参与事件数量
+            importance_score = len(attributes) + len(related_entities) + len(participated_events) + 1
 
-        # 1. 高频实体洞察
-        top_entities = []
-        for entity_type in ['per', 'org', 'loc']:
-            for name, count in self.entity_stats.get(entity_type, {}).get('top', [])[:3]:
-                top_entities.append((name, count, entity_type))
-
-        for i, (name, count, etype) in enumerate(top_entities[:5]):
-            type_name = {'per': '人物', 'org': '组织', 'loc': '地点'}.get(etype, '实体')
-            self.insights.append({
-                'type': 'hot_entity',
-                'title': f'🔥 高频{type_name}：{name}',
-                'description': f'{name} 在文本中被提及 {count} 次，是最受关注的对象之一。',
-                'score': min(1.0, count / 50),
-                'priority': '高' if i == 0 else '中',
-                'data': {'entity': name, 'count': count}
+            profiles.append({
+                "id": entity_id,
+                "name": entity_name,
+                "type": entity.get("entity_type", "OTHER"),
+                "attributes": attributes[:10],
+                "related_entities": related_entities[:10],
+                "participated_events": participated_events[:10],
+                "belong_to_themes": belong_to_themes[:5],
+                "mention_count": entity.get("mention_count", 1),
+                "sample_context": entity.get("evidence", "")[:200],
+                "importance_score": importance_score
             })
 
-        # 2. 事件洞察
-        event_types = {}
-        for event in self.events:
-            et = event.get('event_type', '未知')
-            event_types[et] = event_types.get(et, 0) + 1
+        # 按重要性分数排序
+        profiles.sort(key=lambda x: x["importance_score"], reverse=True)
+        return profiles
 
-        for et, count in sorted(event_types.items(), key=lambda x: x[1], reverse=True)[:3]:
-            self.insights.append({
-                'type': 'event_summary',
-                'title': f'📰 主要事件类型：{et}',
-                'description': f'共发现 {count} 个 {et} 类事件，是文本中的关键活动。',
-                'score': min(1.0, count / 10),
-                'priority': '中',
-                'data': {'event_type': et, 'count': count}
-            })
+    def _build_event_chains(self, result: Dict[str, Any]) -> List[Dict]:
+        """构建事件链（基于时间和因果）"""
+        events = result.get("events", [])
+        if len(events) < 2:
+            return []
 
-        # 3. 强关联实体对洞察（如果有关系）
-        relation_pairs = self.relation_result.get('cooccurrence_pairs', [])
-        for pair in relation_pairs[:3]:
-            e1 = pair.get('entity1', '').split(':', 1)[-1] if ':' in str(pair.get('entity1', '')) else pair.get('entity1', '')
-            e2 = pair.get('entity2', '').split(':', 1)[-1] if ':' in str(pair.get('entity2', '')) else pair.get('entity2', '')
-            score = min(1.0, pair.get('confidence', 0.5))
-            self.insights.append({
-                'type': 'strong_association',
-                'title': f'🔗 实体关联：{e1} ↔ {e2}',
-                'description': f'这两个实体经常共同出现，可能存在业务关联。',
-                'score': score,
-                'priority': '高' if score > 0.6 else '中',
-                'data': pair
+        # 解析时间
+        events_with_time = []
+        for event in events:
+            time_str = event.get("time", "")
+            # 尝试解析年份
+            year = None
+            if time_str:
+                import re
+                year_match = re.search(r'(\d{4})', time_str)
+                if year_match:
+                    year = int(year_match.group(1))
+            events_with_time.append({
+                "id": event.get("event_id"),
+                "summary": event.get("summary", "")[:80],
+                "time_raw": time_str,
+                "year": year,
+                "event_type": event.get("event_type", "未知")
             })
 
-        # 4. 情感洞察（保留原有）
-        pos = self.sentiment_distribution.get('positive_rate', 0)
-        neg = self.sentiment_distribution.get('negative_rate', 0)
-        if pos > 0.5:
-            self.insights.append({
-                'type': 'sentiment_trend',
-                'title': '😊 整体情感偏积极',
-                'description': f'积极文本占比 {pos:.1%}，整体情绪正面。',
-                'score': pos,
-                'priority': '高',
-                'data': self.sentiment_distribution
-            })
-        elif neg > 0.3:
-            self.insights.append({
-                'type': 'sentiment_trend',
-                'title': '😞 整体情感偏消极',
-                'description': f'消极文本占比 {neg:.1%}，需要关注负面因素。',
-                'score': neg,
-                'priority': '高',
-                'data': self.sentiment_distribution
-            })
-        else:
-            self.insights.append({
-                'type': 'sentiment_trend',
-                'title': '😐 情感分布均衡',
-                'description': f'积极 {pos:.1%}，消极 {neg:.1%}，整体中性。',
-                'score': max(pos, neg),
-                'priority': '中',
-                'data': self.sentiment_distribution
+        # 按时间排序
+        sorted_events = sorted(events_with_time, key=lambda x: x["year"] if x["year"] else 9999)
+
+        # 构建事件链
+        chains = []
+        current_chain = []
+        last_year = None
+
+        for event in sorted_events:
+            if event["year"] and last_year and event["year"] - last_year > 2:
+                # 时间间隔超过2年，视为新链
+                if len(current_chain) >= 2:
+                    chains.append({
+                        "chain_id": f"EC_{len(chains) + 1}",
+                        "description": self._infer_chain_description(current_chain),
+                        "events": current_chain.copy()
+                    })
+                current_chain = []
+
+            current_chain.append(event)
+            last_year = event["year"]
+
+        if len(current_chain) >= 2:
+            chains.append({
+                "chain_id": f"EC_{len(chains) + 1}",
+                "description": self._infer_chain_description(current_chain),
+                "events": current_chain.copy()
             })
 
-        self.insights.sort(key=lambda x: x.get('score', 0), reverse=True)
+        # 添加关系
+        for chain in chains:
+            relations = []
+            for i in range(len(chain["events"]) - 1):
+                relations.append({
+                    "from": chain["events"][i]["id"],
+                    "to": chain["events"][i + 1]["id"],
+                    "type": "时序",
+                    "description": f"发生在 {chain['events'][i]['time_raw']} 之后"
+                })
+            chain["relations"] = relations
+
+        return chains[:10]
+
+    def _infer_chain_description(self, events: List[Dict]) -> str:
+        """推断事件链的描述"""
+        if not events:
+            return ""
+        types = list(set(e["event_type"] for e in events if e["event_type"]))
+        if len(types) == 1:
+            return f"{types[0]}事件序列"
+        time_range = f"{events[0]['time_raw']} 至 {events[-1]['time_raw']}" if events[0]['time_raw'] and events[-1][
+            'time_raw'] else ""
+        return f"事件发展脉络 {time_range}".strip()
+
+    def _build_theme_hierarchy(self, result: Dict[str, Any]) -> Dict:
+        """构建主题层级树"""
+        themes = result.get("themes", [])
+        if not themes:
+            return {"roots": [], "total_themes": 0}
+
+        # 创建主题映射
+        theme_map = {t.get("theme_id"): t for t in themes}
+
+        # 构建树
+        roots = []
+        children_by_parent = {}
+
+        for theme in themes:
+            theme_id = theme.get("theme_id")
+            parent_id = theme.get("parent_theme_id")
+            node = {
+                "id": theme_id,
+                "name": theme.get("theme_name", f"主题{theme_id}"),
+                "summary": theme.get("summary", "")[:100],
+                "keywords": theme.get("keywords", [])[:5],
+                "children": []
+            }
+
+            if parent_id is None:
+                roots.append(node)
+            else:
+                children_by_parent.setdefault(parent_id, []).append(node)
+
+            theme_map[theme_id] = theme_map.get(theme_id, {})
+            theme_map[theme_id]["node"] = node
+
+        # 组装树
+        def attach_children(node):
+            children = children_by_parent.get(node["id"], [])
+            for child in children:
+                attach_children(child)
+            node["children"] = children
+            return node
+
+        for root in roots:
+            attach_children(root)
+
+        return {
+            "roots": roots,
+            "total_themes": len(themes)
+        }
 
     def _bert_analysis_original(self):
-        """原有的BERT增强分析（回退使用）"""
-        if not self.use_bert or len(self.texts) < 5:
-            if not self.quiet:
-                print("\n【BERT增强】跳过（文本数量不足或未启用）")
-            return
-
-        if not self.quiet:
-            print("\n【BERT增强】深度语义分析...")
-
-        valid_texts = [t if t and len(t) > 0 else " " for t in self.content_texts]
-
-        # ==================== 1. 向量化 ====================
-        if not self.quiet:
-            print("  🔄 文本向量化...")
-
-        try:
-            if BertVectorizer is None:
-                raise ImportError("BertVectorizer 未导入")
-            self.vectorizer = BertVectorizer(device="cpu")
-            self.embeddings = self.vectorizer.get_embeddings(valid_texts)
-            if not self.quiet:
-                print(f"  ✅ 向量化完成，维度: {self.embeddings.shape}")
-        except Exception as e:
-            if not self.quiet:
-                print(f"  ❌ 向量化失败: {e}")
-            return
-
-        # ==================== 2. 实体识别 ====================
-        if not self.quiet:
-            print("  🔍 实体识别...")
-
-        try:
-            if EntityRecognizer is None:
-                raise ImportError("EntityRecognizer 未导入")
-            self.ner_model = EntityRecognizer(device="cpu")
-            self.entity_results = self.ner_model.recognize(valid_texts)
-            entity_stats_raw = self.ner_model.get_entity_stats(self.entity_results)
-            self.entity_stats = self._filter_valid_entities(entity_stats_raw)
-            if not self.quiet:
-                total_entities = sum(len(ents) for ents in self.entity_results)
-                print(f"  ✅ 识别到 {total_entities} 个实体")
-        except Exception as e:
-            if not self.quiet:
-                print(f"  ❌ 实体识别失败: {e}")
-            self.entity_results = []
-            self.entity_stats = {}
-
-        # ==================== 3. 关系发现 ====================
-        if not self.quiet:
-            print("  🔗 关系发现...")
-
-        try:
-            if self.entity_results and RelationDiscoverer is not None:
-                self.relation_discoverer = RelationDiscoverer()
-                self.relation_result = self.relation_discoverer.discover(self.entity_results, valid_texts)
-                if not self.quiet:
-                    pairs = len(self.relation_result.get('cooccurrence_pairs', []))
-                    print(f"  ✅ 发现 {pairs} 个强关联实体对")
-            else:
-                self.relation_result = {}
-        except Exception as e:
-            if not self.quiet:
-                print(f"  ❌ 关系发现失败: {e}")
-            self.relation_result = {}
-
-        # ==================== 4. 主题建模 ====================
-        if not self.quiet:
-            print("  📚 主题建模...")
-
-        try:
-            if TopicModeler is None:
-                raise ImportError("TopicModeler 未导入")
-            self.topic_modeler = TopicModeler(n_topics=10)
-            self.topic_modeler.fit(self.tokens_filtered_list, valid_texts)
-            self.topics = self.topic_modeler.get_topics()
-            if not self.quiet:
-                print(f"  ✅ 主题建模完成，共 {len(self.topics)} 个主题")
-        except Exception as e:
-            if not self.quiet:
-                print(f"  ❌ 主题建模失败: {e}")
-            self.topics = []
-            self.topic_modeler = None
-
-        # ==================== 5. 事件抽取 ====================
-        if not self.quiet:
-            print("  📰 事件抽取...")
-
-        try:
-            if EventExtractor is None:
-                raise ImportError("EventExtractor 未导入")
-            self.event_extractor = EventExtractor(use_model=True)
-            events_results = self.event_extractor.extract(valid_texts)
-            self.events = []
-            for idx, events in enumerate(events_results):
-                for event in events:
-                    event["text_index"] = idx
-                    self.events.append(event)
-            if not self.quiet:
-                print(f"  ✅ 抽取到 {len(self.events)} 个事件")
-        except Exception as e:
-            if not self.quiet:
-                print(f"  ❌ 事件抽取失败: {e}")
-            self.events = []
-
-        # ==================== 6. 主题摘要（TextRank + LLM） ====================
-        if not self.quiet:
-            print("  📝 主题摘要...")
-
-        try:
-            from autotext.core.summarizer import TextRankSummarizer, LLMSummarizer
-
-            self.textrank_summarizer = TextRankSummarizer()
-
-            # 初始化 LLM 摘要器（如果配置了客户端）
-            llm_summarizer = None
-            if self.llm_client is not None:
-                llm_summarizer = LLMSummarizer(self.llm_client)
-                if not self.quiet:
-                    print("  🤖 大模型摘要已启用")
-
-            self.topics = self.topic_modeler.add_summaries(
-                self.topics, valid_texts, self.textrank_summarizer, llm_summarizer
-            )
-            if not self.quiet:
-                print(f"  ✅ 主题摘要完成（TextRank + LLM）")
-        except Exception as e:
-            if not self.quiet:
-                print(f"  ⚠️ 主题摘要失败: {e}")
-
-        # ==================== 7. 关系图谱构建 ====================
-        if not self.quiet:
-            print("  🕸️ 关系图谱构建...")
-
-        try:
-            if GraphBuilder is not None:
-                self.graph_builder = GraphBuilder()
-
-                # 只添加 PER 和 ORG 类型的实体（过滤掉 TIME、LOC、NUMBER 等）
-                for entity_type, stats in self.entity_stats.items():
-                    if entity_type.upper() not in ["PER", "ORG"]:
-                        continue
-                    for entity_name, count in stats.get("top", [])[:20]:
-                        if len(entity_name) >= 2 and not entity_name.isdigit():
-                            self.graph_builder.add_entity_node(
-                                entity_name, entity_name, entity_type.upper(), count
-                            )
-
-                # 添加事件节点
-                for event in self.events[:50]:
-                    self.graph_builder.add_event_node(
-                        f"event_{event.get('text_index', 0)}",
-                        event.get("event_type", "未知"),
-                        event.get("trigger", ""),
-                        event.get("timestamp", "")
-                    )
-
-                # 添加主题节点
-                for topic in self.topics[:10]:
-                    self.graph_builder.add_topic_node(
-                        topic.get("topic_id", 0),
-                        topic.get("llm_title", f"主题{topic.get('topic_id', 0)}"),
-                        topic.get("keywords", [])
-                    )
-
-                # 添加实体-事件边
-                for event in self.events[:50]:
-                    args = event.get("args", {})
-                    for arg_name, arg_value in args.items():
-                        if arg_value and isinstance(arg_value, str) and len(arg_value) >= 2:
-                            # 检查该值是否是实体
-                            is_entity = False
-                            for entity_type in ["PER", "ORG"]:
-                                for entity_name, _ in self.entity_stats.get(entity_type.lower(), {}).get("top", []):
-                                    if entity_name == arg_value or arg_value in entity_name:
-                                        is_entity = True
-                                        break
-                                if is_entity:
-                                    break
-                            if is_entity:
-                                self.graph_builder.add_entity_event_edge(
-                                    arg_value, f"event_{event.get('text_index', 0)}", arg_name
-                                )
-
-                # 添加实体-实体边（基于共现）
-                for pair in self.relation_result.get('cooccurrence_pairs', [])[:30]:
-                    e1 = pair.get("entity1", "").split(":", 1)[-1]
-                    e2 = pair.get("entity2", "").split(":", 1)[-1]
-                    if e1 and e2 and len(e1) >= 2 and len(e2) >= 2:
-                        self.graph_builder.add_entity_entity_edge(e1, e2, pair.get("pmi", 0))
-
-                self.graph = self.graph_builder
-                if not self.quiet:
-                    stats = self.graph.get_statistics()
-                    print(f"  ✅ 图谱构建完成: {stats['node_count']} 节点, {stats['edge_count']} 边")
-        except Exception as e:
-            if not self.quiet:
-                print(f"  ❌ 图谱构建失败: {e}")
-            self.graph = None
-
-        # ==================== 8. 图算法分析 ====================
-        if not self.quiet:
-            print("  📊 图算法分析...")
-
-        try:
-            if GraphAnalyzer is not None and self.graph is not None:
-                self.graph_analyzer = GraphAnalyzer(self.graph.get_graph())
-                self.graph_insights = self.graph_analyzer.get_summary_insights()
-                if not self.quiet:
-                    insights = self.graph_insights
-                    print(f"  ✅ 图分析完成: {insights.get('statistics', {}).get('node_count', 0)} 节点")
-        except Exception as e:
-            if not self.quiet:
-                print(f"  ❌ 图分析失败: {e}")
-            self.graph_insights = {}
-
-        # ==================== 9. 实体档案 ====================
-        if not self.quiet:
-            print("  📁 实体档案...")
-
-        try:
-            if EntityProfileBuilder is not None:
-                self.entity_profile_builder = EntityProfileBuilder()
-                self.entity_profiles = self.entity_profile_builder.build_from_analyzer(self)
-                if not self.quiet:
-                    print(f"  ✅ 生成 {len(self.entity_profiles)} 个实体档案")
-        except Exception as e:
-            if not self.quiet:
-                print(f"  ❌ 实体档案失败: {e}")
-            self.entity_profiles = []
-
-        # ==================== 10. 事件时间线 ====================
-        if not self.quiet:
-            print("  📅 事件时间线...")
-
-        try:
-            if build_timeline_from_analyzer is not None:
-                self.timeline = build_timeline_from_analyzer(self)
-                if not self.quiet and self.timeline:
-                    summary = self.timeline.get_summary()
-                    if summary.get("has_data"):
-                        print(f"  ✅ 时间线构建完成: {summary.get('total_events', 0)} 个事件")
-        except Exception as e:
-            if not self.quiet:
-                print(f"  ❌ 时间线构建失败: {e}")
-            self.timeline = None
-
-        # ==================== 11. 洞察发现 ====================
-        if not self.quiet:
-            print("  💡 洞察发现...")
-
-        try:
-            if InsightDiscoverer is not None:
-                insight_discoverer = InsightDiscoverer()
-                self.insights = insight_discoverer.discover_all(self)
-                if not self.quiet:
-                    print(f"  ✅ 发现 {len(self.insights)} 个洞察")
-        except Exception as e:
-            if not self.quiet:
-                print(f"  ❌ 洞察发现失败: {e}")
-            self.insights = []
-
-        if not self.quiet:
-            print("\n  🎉 BERT增强分析完成")
+        """原有的BERT增强分析（保留但暂不执行）"""
+        pass
 
     def _bert_analysis(self):
         """BERT增强分析 - 完整版（支持大模型方式）"""
-        if not self.use_bert or len(self.texts) < 5:
+        if not self.use_bert:# or len(self.texts) < 5:
             if not self.quiet:
                 print("\n【BERT增强】跳过（文本数量不足或未启用）")
             return
@@ -949,16 +1105,14 @@ class TextAnalyzer:
         if not self.quiet:
             print("\n【BERT增强】深度语义分析...")
 
-        # 优先使用大模型方式
-        if self.llm_client is not None and len(self.texts) >= 3:
+        # 使用大模型方式
+        if self.llm_client is not None:
             self._llm_graph_analysis()
             return
 
-        # 回退到原有方式（如果没有大模型客户端）
+        # 不执行小模型回退
         if not self.quiet:
-            print("  ⚠️ 未配置大模型客户端，使用原有BERT分析方式")
-
-        self._bert_analysis_original()
+            print("  ⚠️ 未配置大模型客户端")
 
     def generate_full_report(self):
         self._preprocess()
@@ -989,7 +1143,7 @@ class TextAnalyzer:
             output_path = "raw_texts.txt"
         with open(output_path, 'w', encoding='utf-8') as f:
             for i, text in enumerate(self.raw_texts):
-                f.write(f"=== 文本 {i+1} ===\n")
+                f.write(f"=== 文本 {i + 1} ===\n")
                 f.write(text[:500] + "..." if len(text) > 500 else text)
                 f.write("\n\n")
         if not self.quiet:
@@ -1001,7 +1155,7 @@ class TextAnalyzer:
         with open(output_path, 'w', encoding='utf-8') as f:
             for i, text in enumerate(self.cleaned_texts):
                 if text:
-                    f.write(f"=== 文本 {i+1} ===\n")
+                    f.write(f"=== 文本 {i + 1} ===\n")
                     f.write(text[:500] + "..." if len(text) > 500 else text)
                     f.write("\n\n")
         if not self.quiet:
@@ -1013,7 +1167,7 @@ class TextAnalyzer:
         with open(output_path, 'w', encoding='utf-8') as f:
             for i, text in enumerate(self.content_texts):
                 if text:
-                    f.write(f"=== 文本 {i+1} ===\n")
+                    f.write(f"=== 文本 {i + 1} ===\n")
                     f.write(text[:500] + "..." if len(text) > 500 else text)
                     f.write("\n\n")
         if not self.quiet:
@@ -1025,7 +1179,7 @@ class TextAnalyzer:
         with open(output_path, 'w', encoding='utf-8') as f:
             for i, text in enumerate(self.filtered_texts):
                 if text:
-                    f.write(f"=== 文本 {i+1} ===\n")
+                    f.write(f"=== 文本 {i + 1} ===\n")
                     f.write(text[:500] + "..." if len(text) > 500 else text)
                     f.write("\n\n")
         if not self.quiet:
@@ -1064,7 +1218,7 @@ def analyze_file(file_path: str, text_col: str = None, title_col: str = None,
                  time_col: str = None, output_file: str = None, format: str = "html",
                  quiet: bool = False, use_bert: bool = True) -> TextAnalyzer:
     analyzer = TextAnalyzer(data=file_path, text_col=text_col, title_col=title_col,
-                           time_col=time_col, quiet=quiet, use_bert=use_bert)
+                            time_col=time_col, quiet=quiet, use_bert=use_bert)
     analyzer.generate_full_report()
     if output_file:
         if format == "html":

@@ -12,6 +12,8 @@ from autotext.analyzer import TextAnalyzer, analyze_texts, analyze_file, analyze
 from autotext.reporter import TextReporter
 
 
+
+
 def generate_sample_texts():
     """生成示例文本（短文本评论）"""
     texts = [
@@ -78,17 +80,47 @@ def example_single_text():
     """示例1: 分析单条文本"""
     print_separator("示例1: 单条文本分析")
 
-    text = "腾讯控股2024年第一季度营收1595亿元，同比增长6%，净利润502亿元，同比增长54%。"
+    #text = "腾讯控股2024年第一季度营收1595亿元，同比增长6%，净利润502亿元，同比增长54%。"
+    text = """
+       2024年3月15日，宁德时代新能源科技股份有限公司（以下简称"宁德时代"）发布2023年年度报告。
+       报告显示，公司2023年全年营业收入达到4009亿元，同比增长22.01%；归母净利润为441亿元，同比增长43.58%。
+       同时，宁德时代宣布拟向全体股东每10股派发现金红利50元。
+
+       此外，宁德时代与特斯拉于3月10日签署了战略合作协议，双方将在电池供应和技术研发方面展开深度合作。
+       根据协议，宁德时代将为特斯拉上海工厂提供磷酸铁锂电池，协议期为2024年至2026年。
+
+       受此消息影响，宁德时代股价次日上涨5.6%。
+       """
+
+    text="""
+       4月份，受国际原油价格变动和假期出行需求增加影响，居民消费价格指数（CPI）环比上涨0.3%，同比上涨1.2%，扣除食品和能源价格的核心CPI同比上涨1.2%，保持温和回升。受国际大宗商品价格快速上涨，国内部分行业需求增加、市场竞争秩序不断优化等因素影响，工业生产者出厂价格指数（PPI）环比上涨1.7%，同比上涨2.8%，涨幅比上月均有所扩大。
+
+一、CPI温和回升
+
+从环比看，全国CPI环比由上月下降0.7%转为上涨0.3%，高于季节性水平0.4个百分点，主要受能源和出行服务价格上涨影响。受国际原油价格波动影响，国内能源价格上涨5.7%，涨幅比上月扩大0.9个百分点，影响CPI环比上涨约0.39个百分点。其中，汽油价格上涨12.6%。服务价格由上月下降1.1%转为上涨0.5%，高于季节性水平0.2个百分点，影响CPI环比上涨约0.22个百分点。其中，受清明节假期、“五一”假期及部分地区春假影响，出行服务需求明显增加，飞机票、交通工具租赁、旅行社收费和宾馆住宿价格分别上涨29.2%、8.6%、4.5%和3.9%，涨幅均高于季节性水平，四项合计影响CPI环比上涨约0.17个百分点；医疗服务价格上涨0.6%，影响CPI环比上涨约0.04个百分点。食品价格下降1.6%，降幅比上月收窄1.1个百分点，影响CPI环比下降约0.28个百分点。食品中，随着天气转暖，鲜菜和鲜果大量上市，价格分别下降6.4%和2.3%，猪肉和水产品供应充足，价格分别下降5.7%和1.2%，四项合计影响CPI环比下降约0.28个百分点；鸡蛋价格上涨3.4%，影响CPI环比上涨约0.01个百分点。扣除能源的工业消费品价格下降0.2%，基本保持稳定。
+
+从同比看，全国CPI同比上涨1.2%，涨幅比上月扩大0.2个百分点。本月工业消费品价格上涨3.5%，涨幅比上月扩大1.3个百分点，影响CPI同比上涨约1.06个百分点。工业消费品中，受国际大宗商品价格波动影响，国内汽油和黄金饰品价格变动较大，其中汽油价格涨幅扩大至19.3%，影响CPI同比上涨约0.56个百分点；黄金饰品价格涨幅回落至46.9%，影响CPI同比上涨约0.20个百分点；家用器具和服装价格分别上涨2.6%和1.6%，合计影响CPI同比上涨约0.11个百分点。服务价格上涨0.9%，涨幅比上月扩大0.1个百分点，影响CPI同比上涨约0.44个百分点。服务中，基本公共服务项目价格涨幅总体稳定，其中医疗服务和教育服务价格分别上涨3.4%和0.5%，合计影响CPI同比上涨约0.25个百分点；出行服务价格涨幅有所扩大，本月上涨3.7%，影响CPI同比上涨约0.13个百分点；人工服务类价格小幅上涨，其中宠物服务、在外餐饮、家政服务、车辆修理与保养价格涨幅在1.1%—1.4%之间，四项合计影响CPI同比上涨约0.10个百分点。食品价格由上月上涨0.3%转为下降1.6%。食品中，猪肉价格下降15.2%，降幅比上月扩大3.7个百分点，影响CPI同比下降约0.29个百分点；鲜菜和鲜果价格分别下降0.5%和1.0%；牛肉、羊肉、水产品和鸡蛋价格均上涨，涨幅在1.0%—6.2%之间。
+
+二、PPI涨幅扩大
+
+从环比看，全国PPI环比上涨1.7%，涨幅比上月扩大0.7个百分点。本月PPI环比运行的主要特点：一是国际输入性因素影响国内石油相关行业价格上涨。国际原油价格上行带动国内石油相关行业价格上涨。其中，石油和天然气开采业价格环比上涨18.5%，石油煤炭及其他燃料加工业价格上涨16.4%，化学原料和化学制品制造业价格上涨8.3%，化学纤维制造业价格上涨5.6%，橡胶和塑料制品业价格上涨1.7%。二是国内部分行业需求增加带动价格上行。算力需求快速增长，电气化进程加快，光纤制造价格环比上涨22.5%，外存储设备及部件价格上涨3.2%，有色金属冶炼和压延加工业价格上涨0.2%；电煤补库存需求有所释放，叠加化工、冶金等非电用煤需求增加，煤炭开采和洗选业价格上涨1.9%；制造业设备更新持续推进带动用钢需求增加，黑色金属冶炼和压延加工业价格上涨0.6%。三是国内市场竞争秩序不断优化，相关行业价格上涨或降幅收窄。深入整治“内卷式”竞争成效继续显现，锂离子电池制造价格环比上涨1.6%，新能源车整车制造价格下降0.1%，降幅比上月收窄0.7个百分点。
+
+从同比看，全国PPI同比上涨2.8%，涨幅比上月扩大2.3个百分点。价格上涨的主要行业中，有色金属矿采选业上涨38.9%，有色金属冶炼和压延加工业上涨22.5%，合计影响PPI同比上涨约1.58个百分点；石油和天然气开采业上涨28.6%，石油煤炭及其他燃料加工业上涨14.2%，化学原料和化学制品制造业上涨8.9%，合计影响PPI同比上涨约1.50个百分点；电气机械和器材制造业上涨3.6%，计算机通信和其他电子设备制造业上涨1.5%，合计影响PPI同比上涨约0.46个百分点。价格下降的主要行业中，非金属矿物制品业下降5.5%，电力热力生产和供应业下降4.2%，汽车制造业下降2.0%，黑色金属冶炼和压延加工业下降1.1%，合计影响PPI同比下降约0.75个百分点。
+    """
+
 
     print(f"📝 输入文本: {text}\n")
 
     analyzer = analyze_texts(
         texts=[text],
-        output_file="output/single_text_report.html",
+        #output_file="output/single_text_report.html",
         format="html",
         quiet=False,
         use_bert=True
     )
+
+    analyzer.to_html("output/single_analysis_report.html")
+    analyzer.to_json("output/single_analysis_result.json")
 
     print(f"\n📊 分析结果:")
     print(f"  文本长度: {len(text)} 字符")
@@ -101,6 +133,82 @@ def example_single_text():
             if count > 0:
                 print(f"    - {entity_type}: {count} 个")
 
+
+def example_from_json_file():
+    """示例: 从已有的 JSON 结果文件生成 HTML 报告"""
+    print_separator("示例: 从 JSON 文件生成 HTML 报告")
+
+    import json
+    from autotext.reporter import TextReporter
+
+    json_file = "output/single_analysis_result.json"
+    html_file = "output/single_analysis_from_json.html"
+
+    if not os.path.exists(json_file):
+        print(f"⚠️ JSON 文件不存在: {json_file}")
+        print("   请先运行 example_single_text() 生成 JSON 文件")
+        return
+
+    # 读取 JSON 数据
+    with open(json_file, 'r', encoding='utf-8') as f:
+        data = json.load(f)
+
+    # 创建模拟 analyzer 对象
+    class DummyAnalyzer:
+        pass
+
+    dummy = DummyAnalyzer()
+
+    # ========== 基础属性 ==========
+    dummy.stats_result = data.get('stats', {})
+    dummy.sentiment_distribution = data.get('sentiment', {}).get('distribution', {})
+    dummy.keywords = data.get('keywords', {'frequency': []})
+    dummy.content_texts = data.get('sample_texts', [])
+    dummy.raw_texts = data.get('sample_texts', [])
+    dummy.quality_report = data.get('quality', {})
+    dummy.cleaning_suggestions = data.get('cleaning_suggestions', [])
+    dummy.start_templates = set(data.get('templates', {}).get('start', []))
+    dummy.end_templates = set(data.get('templates', {}).get('end', []))
+    dummy.source_name = data.get('source', '未知')
+    dummy.insights = data.get('insights', [])
+    dummy.entity_stats = data.get('entity_stats', {})
+    dummy.events_by_type = data.get('events_by_type', {})
+    dummy.topics = data.get('topics', [])
+    dummy.quality_details = data.get('quality_details', {})
+    dummy.language_distribution = data.get('language_distribution', {})
+
+    # ========== 大模型相关属性（公有） ==========
+    dummy.llm_extraction = data.get('llm_extraction', {})
+    dummy.entity_stats_by_type = data.get('entity_stats_by_type', {})
+    dummy.relation_network = data.get('relation_network', {})
+    dummy.event_timeline = data.get('event_timeline', {})
+    dummy.theme_hierarchy = data.get('theme_hierarchy', {})
+    dummy.entity_profiles = data.get('entity_profiles', [])
+    dummy.event_chains = data.get('event_chains', [])
+    dummy.global_graph = data.get('global_graph', {})
+    dummy.static_graph = data.get('static_graph', {})
+    dummy.llm_statistics = data.get('llm_statistics', {})
+    dummy.has_llm_data = data.get('has_llm_data', False)
+    dummy.relation_tree_data = data.get('relation_tree_data', {})
+    dummy.entity_table_data = data.get('entity_table_data', [])
+
+    # ========== 大模型相关私有属性（has_llm_data 判断依赖这些） ==========
+    llm_extraction = data.get('llm_extraction', {})
+    dummy._extracted_entities = llm_extraction.get('entities', [])
+    dummy._extracted_relationships = llm_extraction.get('relationships', [])
+    dummy._extracted_events = llm_extraction.get('events', [])
+    dummy._extracted_themes = llm_extraction.get('themes', [])
+    dummy._categorization = llm_extraction.get('categorization', {})
+
+    # 确保 has_llm_data 正确设置
+    if dummy._extracted_entities:
+        dummy.has_llm_data = True
+
+    # 创建 reporter 并生成 HTML
+    reporter = TextReporter(dummy)
+    reporter.to_html(html_file, title="文本分析报告")
+
+    print(f"✅ HTML 报告已生成: {html_file}")
 
 def example_multiple_texts():
     """示例2: 分析多条文本（短文本评论）"""
@@ -222,15 +330,7 @@ def example_from_csv_file():
         print("   请先运行 fetch_sina_finance.py 生成数据")
         return
 
-    from autostat.llm_client import LLMClient
 
-    # 1. 配置大模型
-    config = {
-        "api_base": "https://api.deepseek.com/v1",  # 或其他兼容 API
-        "api_key": "sk-c0e1f1ad1a3b41429a92f29251775ecf",
-        "model": "deepseek-chat"
-    }
-    llm_client = LLMClient(config)
 
 
     # 从CSV读取并分析
@@ -244,7 +344,7 @@ def example_from_csv_file():
         quiet=False,
         use_bert=True
     )
-    analyzer.set_llm_client(llm_client)
+
     analyzer.generate_full_report()
 
     # 生成报告
@@ -466,11 +566,13 @@ if __name__ == "__main__":
     os.makedirs("output", exist_ok=True)
 
     # 可选：直接运行特定示例（取消注释即可）
-    #example_single_text()
+    example_single_text()
+
+    #example_from_json_file() #直接读JSON生成HTML
     #example_multiple_texts()
     #example_long_texts()
     #example_text_with_dates()
-    example_from_csv_file()
+    #example_from_csv_file()
     # example_from_txt_file()
     # example_from_folder()
     # example_dataframe_analysis()

@@ -1,8 +1,9 @@
+<!-- ==================== templates/report_text.html ==================== -->
 <!DOCTYPE html>
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>{{ title }}</title>
+    <title>文本分析报告</title>
     <style>
         * { box-sizing: border-box; }
         body {
@@ -37,6 +38,11 @@
             border-left: 4px solid #1a73e8;
             padding-left: 16px;
         }
+        .card h3 {
+            margin: 16px 0 12px 0;
+            font-size: 16px;
+            color: #555;
+        }
 
         .stats-row {
             display: flex;
@@ -60,6 +66,7 @@
 
         .grid-2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; }
         .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+        .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; }
 
         .keyword-cloud {
             display: flex;
@@ -102,10 +109,6 @@
         }
         .event-desc { font-size: 13px; color: #333; font-weight: 500; }
         .event-meta { font-size: 10px; color: #888; margin-top: 4px; }
-
-        .entity-tag-org { background: #e3f2fd; color: #1565c0; padding: 2px 10px; border-radius: 16px; font-size: 12px; display: inline-block; }
-        .entity-tag-per { background: #ffebee; color: #c62828; padding: 2px 10px; border-radius: 16px; font-size: 12px; display: inline-block; }
-        .entity-tag-loc { background: #e8f5e9; color: #2e7d32; padding: 2px 10px; border-radius: 16px; font-size: 12px; display: inline-block; }
 
         .badge-count {
             display: inline-block;
@@ -179,6 +182,127 @@
         .insight-title { font-weight: bold; color: #1a73e8; margin-bottom: 6px; font-size: 14px; }
         .insight-desc { font-size: 12px; color: #555; line-height: 1.4; }
 
+        .chain-card {
+            background: #f5f5f5;
+            border-radius: 10px;
+            padding: 12px;
+            margin-bottom: 12px;
+            border-left: 4px solid #ff9f43;
+        }
+        .chain-title { font-weight: bold; font-size: 14px; color: #e65100; }
+        .chain-event { font-size: 12px; padding: 4px 0; padding-left: 16px; border-left: 2px solid #ddd; margin: 6px 0; }
+
+        .data-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 12px;
+            margin: 16px 0;
+        }
+        .data-table th {
+            background: #1a73e8;
+            color: white;
+            padding: 10px 8px;
+            text-align: left;
+            font-weight: 500;
+            position: sticky;
+            top: 0;
+        }
+        .data-table td {
+            padding: 8px;
+            border-bottom: 1px solid #e0e0e0;
+            vertical-align: top;
+        }
+        .data-table tr:hover {
+            background: #f5f5f5;
+        }
+        .table-scroll {
+            max-height: 500px;
+            overflow-y: auto;
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+        }
+        .entity-tag {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 10px;
+            font-weight: 500;
+        }
+        .entity-tag-metric { background: #e3f2fd; color: #1565c0; }
+        .entity-tag-product { background: #e8f5e9; color: #2e7d32; }
+        .entity-tag-industry { background: #fff3e0; color: #e65100; }
+        .entity-tag-other { background: #f3e5f5; color: #7b1fa2; }
+
+        .filter-bar {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            margin-bottom: 16px;
+            padding: 12px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            align-items: center;
+        }
+        .filter-bar input {
+            padding: 6px 12px;
+            border: 1px solid #ddd;
+            border-radius: 20px;
+            font-size: 12px;
+            flex: 1;
+            min-width: 150px;
+        }
+        .filter-bar select {
+            padding: 6px 12px;
+            border: 1px solid #ddd;
+            border-radius: 20px;
+            font-size: 12px;
+            background: white;
+        }
+        .filter-bar button {
+            padding: 6px 16px;
+            background: #1a73e8;
+            color: white;
+            border: none;
+            border-radius: 20px;
+            font-size: 12px;
+            cursor: pointer;
+        }
+        .filter-bar button:hover {
+            background: #0d47a1;
+        }
+
+        .timeline-list {
+            margin-top: 20px;
+        }
+        .timeline-group {
+            margin-bottom: 16px;
+        }
+        .timeline-date {
+            font-weight: bold;
+            font-size: 14px;
+            color: #1a73e8;
+            padding: 8px 0;
+            border-bottom: 2px solid #1a73e8;
+            margin-bottom: 8px;
+        }
+        .timeline-item {
+            padding: 6px 0 6px 20px;
+            border-left: 2px solid #ff9f43;
+            margin-left: 10px;
+            font-size: 12px;
+        }
+        .timeline-item strong {
+            color: #e65100;
+        }
+
+        .tree-container {
+            width: 100%;
+            height: 600px;
+            background: rgba(0,0,0,0.03);
+            border-radius: 12px;
+            margin: 16px 0;
+        }
+
         details { margin: 6px 0; }
         summary { cursor: pointer; font-weight: 500; color: #1a73e8; padding: 4px 0; font-size: 13px; }
         summary:hover { color: #0d47a1; }
@@ -193,22 +317,27 @@
         }
 
         @media (max-width: 768px) {
-            .grid-2, .grid-3 { grid-template-columns: 1fr; }
+            .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; }
             .stats-row { flex-direction: column; }
             body { padding: 12px; }
             .card { padding: 16px; }
+            .data-table { font-size: 10px; }
+            .data-table th, .data-table td { padding: 6px 4px; }
+            .tree-container { height: 400px; }
         }
     </style>
 </head>
 <body>
 <div class="container">
     <div class="header">
-        <h1>📝 {{ title }}</h1>
+        <h1>📝 文本分析报告</h1>
         <p>生成时间: {{ timestamp }}</p>
         <p>🤖 AutoText 智能文本分析报告</p>
+        {% if has_llm_data %}
+        <p>⚡ 大模型增强模式已启用 | 实体: {{ llm_statistics.entity_count }} | 关系: {{ llm_statistics.relation_count }} | 事件: {{ llm_statistics.event_count }} | 主题: {{ llm_statistics.theme_count }}</p>
+        {% endif %}
     </div>
 
-    <!-- 统计卡片 -->
     <div class="stats-row">
         <div class="stat-card"><div class="value">{{ total_count }}</div><div class="label">总文本数</div></div>
         <div class="stat-card"><div class="value">{{ avg_length }}</div><div class="label">平均长度(字)</div></div>
@@ -221,7 +350,6 @@
         {% endif %}
     </div>
 
-    <!-- 1. 核心洞察 -->
     {% if insights %}
     <div class="card">
         <h2>💡 核心洞察</h2>
@@ -239,7 +367,7 @@
     </div>
     {% endif %}
 
-    <!-- 2. 数据清洗建议 -->
+    {% if total_count > 1 %}
     <div class="card">
         <h2>🧹 数据清洗建议</h2>
         {% set duplicates = quality_details.duplicates or {} %}
@@ -300,8 +428,9 @@
         <div class="info-box"><strong>💡 处理建议：</strong><ul style="margin: 8px 0 0 20px;">{% for s in cleaning_suggestions %}<li style="font-size: 12px;">{{ s }}</li>{% endfor %}</ul></div>
         {% endif %}
     </div>
+    {% endif %}
 
-    <!-- 3. 情感分布 -->
+    {% if total_count > 1 %}
     <div class="card">
         <h2>😊 情感分布</h2>
         {% if sentiment_is_polarized %}
@@ -314,8 +443,8 @@
         <div class="info-box">整体情感中性，无明显倾向。积极 {{ positive_rate }}，消极 {{ negative_rate }}，中性 {{ neutral_rate }}。</div>
         {% endif %}
     </div>
+    {% endif %}
 
-    <!-- 4. 语言分布 -->
     {% if language_distribution %}
     <div class="card">
         <h2>🌐 语言分布</h2>
@@ -334,198 +463,356 @@
 
     <!-- 5. 高频关键词 -->
     <div class="card">
-        <h2>🔑 高频关键词 TOP 50</h2>
+        <h2>🔑 高频关键词 TOP 10</h2>
         <div class="keyword-cloud">
-            {% for word, count in keywords[:50] %}
-            <span class="keyword-item">{{ word }} ({{ count }})</span>
+            {% for word, count in keywords[:10] %}
+                {% if count > 1 %}
+                <span class="keyword-item">{{ word }} ({{ count }})</span>
+                {% endif %}
             {% endfor %}
         </div>
+        {% if keywords|length > 10 %}
+        <details>
+            <summary>📚 查看更多关键词</summary>
+            <div class="keyword-cloud" style="margin-top: 12px;">
+                {% for word, count in keywords[10:50] %}
+                    {% if count > 1 %}
+                    <span class="keyword-item">{{ word }} ({{ count }})</span>
+                    {% endif %}
+                {% endfor %}
+            </div>
+        </details>
+        {% endif %}
     </div>
 
-    <!-- 6. 实体识别 -->
-    {% if entity_stats %}
+    {% if has_llm_data %}
+
     <div class="card">
-        <h2>🏷️ 实体识别</h2>
-        <div class="grid-3">
-            <!-- 组织名 -->
-            {% if entity_stats.org and entity_stats.org.top %}
-            <div class="info-box">
-                <strong>🏢 组织名 ({{ entity_stats.org.unique }})</strong>
-                <div style="margin-top: 12px;">
-                    {% for name, count in entity_stats.org.top[:15] %}
-                    <div style="margin-bottom: 6px;">
-                        <span class="entity-tag-org">{{ name }}</span>
-                        <span class="badge-count">{{ count }}次</span>
-                    </div>
-                    {% endfor %}
-                </div>
-            </div>
-            {% endif %}
-
-            <!-- 人名 -->
-            {% if entity_stats.per and entity_stats.per.top %}
-            <div class="info-box">
-                <strong>👤 人名 ({{ entity_stats.per.unique }})</strong>
-                <div style="margin-top: 12px;">
-                    {% for name, count in entity_stats.per.top[:15] %}
-                    <div style="margin-bottom: 6px;">
-                        <span class="entity-tag-per">{{ name }}</span>
-                        <span class="badge-count">{{ count }}次</span>
-                    </div>
-                    {% endfor %}
-                </div>
-            </div>
-            {% endif %}
-
-            <!-- 地名 -->
-            {% if entity_stats.loc and entity_stats.loc.top %}
-            <div class="info-box">
-                <strong>📍 地名 ({{ entity_stats.loc.unique }})</strong>
-                <div style="margin-top: 12px;">
-                    {% for name, count in entity_stats.loc.top[:15] %}
-                    <div style="margin-bottom: 6px;">
-                        <span class="entity-tag-loc">{{ name }}</span>
-                        <span class="badge-count">{{ count }}次</span>
-                    </div>
-                    {% endfor %}
-                </div>
-            </div>
-            {% endif %}
+        <h2>📊 大模型抽取统计速览</h2>
+        <div class="stats-row">
+            <div class="stat-card stat-card-success"><div class="value">{{ llm_statistics.entity_count }}</div><div class="label">实体总数</div></div>
+            <div class="stat-card stat-card-success"><div class="value">{{ llm_statistics.relation_count }}</div><div class="label">关系总数</div></div>
+            <div class="stat-card stat-card-success"><div class="value">{{ llm_statistics.event_count }}</div><div class="label">事件总数</div></div>
+            <div class="stat-card stat-card-success"><div class="value">{{ llm_statistics.theme_count }}</div><div class="label">主题总数</div></div>
         </div>
     </div>
-    {% endif %}
 
-    <!-- 7. 事件详情（按事件类型分组） -->
-    {% if events_by_type %}
+    {% if entity_stats_by_type %}
     <div class="card">
-        <h2>📰 事件详情</h2>
-        <div class="grid-2">
-            {% for event_type, type_events in events_by_type.items() %}
-            <div class="info-box" style="margin: 4px; padding: 12px;">
-                <details>
-                    <summary style="font-weight: bold; color: #e65100; cursor: pointer;">
-                        📌 {{ event_type }} ({{ type_events|length }})
-                    </summary>
-                    <div style="margin-top: 12px;">
-                        {% for event in type_events[:10] %}
-                        <div class="event-card">
-                            <div class="event-desc">
-                                {% if event.description %}
-                                    {{ event.description[:80] }}{% if event.description|length > 80 %}...{% endif %}
-                                {% elif event.trigger %}
-                                    {{ event.trigger }}
-                                {% else %}
-                                    {{ event.event_type }}
-                                {% endif %}
-                            </div>
-                            {% if event.timestamp %}
-                            <div class="event-meta">📅 {{ event.timestamp }}</div>
-                            {% endif %}
-                        </div>
+        <h2>🤖 大模型实体类型分布</h2>
+        <div id="llmEntityChart" style="height: 350px;"></div>
+        <details style="margin-top: 12px;">
+            <summary>📋 实体详细列表</summary>
+            <div class="grid-3" style="margin-top: 12px;">
+                {% for type_name, stats in entity_stats_by_type.items() %}
+                <div class="info-box">
+                    <strong>{{ type_name }}</strong>
+                    <span class="badge-count">{{ stats.unique }}个</span>
+                    <div style="margin-top: 8px; font-size: 12px;">
+                        {% for item in stats.top[:10] %}
+                        <div>{{ item.name }} ({{ item.count }})</div>
                         {% endfor %}
-                        {% if type_events|length > 10 %}
-                        <div style="font-size: 11px; color: #888; text-align: center;">... 还有 {{ type_events|length - 10 }} 个</div>
-                        {% endif %}
                     </div>
+                </div>
+                {% endfor %}
+            </div>
+        </details>
+    </div>
+    {% endif %}
+
+    {% if relation_tree_data and relation_tree_data.name %}
+    <div class="card">
+        <h2>🔗 实体包含关系树形图</h2>
+        <div id="relationTreeChart" class="tree-container"></div>
+        <p style="font-size: 11px; color: #888; margin-top: 12px; text-align: center;">
+            💡 提示：节点大小表示重要性，连线上的文字表示关系类型，可拖拽/缩放查看详情
+        </p>
+    </div>
+    {% endif %}
+
+    {% if entity_table_data %}
+    <div class="card">
+        <h2>📋 实体与属性总览</h2>
+        <div class="table-scroll">
+            <table class="data-table">
+                <thead>
+                    <tr><th>实体ID</th><th>实体名称</th><th>实体类型</th><th>关键属性</th><th>关联实体</th><th>参与事件</th><th>归属主题</th><th>原文出处</th></tr>
+                </thead>
+                <tbody>
+                    {% for entity in entity_table_data %}
+                    <tr>
+                        <td>{{ entity.entity_id }}</td>
+                        <td><strong>{{ entity.entity_name }}</strong></td>
+                        <td>
+                            {% set etype = entity.entity_type %}
+                            {% if etype in ['Metric', '指标'] %}
+                            <span class="entity-tag entity-tag-metric">指标</span>
+                            {% elif etype in ['Product', '产品'] %}
+                            <span class="entity-tag entity-tag-metric">产品</span>
+                            {% elif etype in ['Industry', '工业'] %}
+                            <span class="entity-tag entity-tag-industry">工业</span>
+                            {% else %}
+                            <span class="entity-tag entity-tag-other">{{ etype }}</span>
+                            {% endif %}
+                        </td>
+                        <td style="max-width: 200px;">{{ entity.key_attributes }}</td>
+                        <td style="max-width: 150px;">{{ entity.related_entities }}</td>
+                        <td style="max-width: 200px;">{{ entity.participated_events }}</td>
+                        <td style="max-width: 120px;">{{ entity.belong_to_themes }}</td>
+                        <td style="max-width: 200px;">{{ entity.evidence }}{% if entity.evidence|length >= 60 %}...{% endif %}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% endif %}
+
+    {% if llm_extraction.events %}
+    <div class="card">
+        <h2>📰 事件一览</h2>
+        <div class="table-scroll">
+            <table class="data-table">
+                <thead><tr><th>事件ID</th><th>事件类型</th><th>触发词</th><th>时间</th><th>参与者</th><th>事件摘要</th></tr></thead>
+                <tbody>
+                    {% for event in llm_extraction.events[:30] %}
+                    <tr>
+                        <td>{{ event.event_id }}</td>
+                        <td>{{ event.event_type }}</td>
+                        <td>{{ event.trigger_word or '—' }}</td>
+                        <td>{{ event.time or '—' }}</td>
+                        <td style="max-width: 150px;">
+                            {% if event.participants %}
+                                {% for p in event.participants[:2] %}
+                                {{ p.entity_id }}{% if p.role %}({{ p.role }}){% endif %}{% if not loop.last %}, {% endif %}
+                                {% endfor %}
+                                {% if event.participants|length > 2 %}...{% endif %}
+                            {% else %}—{% endif %}
+                        </td>
+                        <td style="max-width: 250px;">{{ event.summary[:80] }}{% if event.summary|length > 80 %}...{% endif %}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% endif %}
+
+    {% if global_graph.nodes and global_graph.nodes|length > 0 %}
+    <div class="card">
+        <h2>🕸️ 全局知识图谱（交互式）</h2>
+        <div class="filter-bar">
+            <input type="text" id="graphSearchInput" placeholder="🔍 搜索节点..." autocomplete="off">
+            <select id="graphNodeFilter">
+                <option value="all">全部节点</option>
+                <option value="entity">仅实体</option>
+                <option value="event">仅事件</option>
+                <option value="theme">仅主题</option>
+            </select>
+            <button id="graphResetBtn">重置</button>
+            <button id="graphCenterBtn">居中</button>
+        </div>
+        <div id="globalGraph" class="graph-container" style="height: 600px;"></div>
+        <details>
+            <summary>📊 图谱统计</summary>
+            <div class="stats-row" style="margin-top: 12px;">
+                <div class="stat-card"><div class="value">{{ global_graph.statistics.entity_count or 0 }}</div><div class="label">实体节点</div></div>
+                <div class="stat-card"><div class="value">{{ global_graph.statistics.event_count or 0 }}</div><div class="label">事件节点</div></div>
+                <div class="stat-card"><div class="value">{{ global_graph.statistics.theme_count or 0 }}</div><div class="label">主题节点</div></div>
+                <div class="stat-card"><div class="value">{{ global_graph.links|length }}</div><div class="label">关系边</div></div>
+            </div>
+        </details>
+    </div>
+    {% endif %}
+
+    <!-- 12. 事件时间线（折线图 + 按时间分组的事件列表） -->
+    {% if event_timeline.events and event_timeline.events|length > 0 %}
+    <div class="card">
+        <h2>📅 事件时间线</h2>
+        <div id="llmTimelineChart" style="height: 400px;"></div>
+
+        <!-- 按时间分组的事件列表 - 默认收缩 -->
+        <details>
+            <summary>📋 按时间分组的事件 ({{ event_timeline.events|length }})</summary>
+            <div class="timeline-list" style="margin-top: 12px;">
+                {% set events_by_time = {} %}
+                {% for event in event_timeline.events %}
+                    {% set time_key = event.time if event.time else '时间未知' %}
+                    {% if events_by_time[time_key] %}
+                        {% set _ = events_by_time[time_key].append(event) %}
+                    {% else %}
+                        {% set _ = events_by_time.update({time_key: [event]}) %}
+                    {% endif %}
+                {% endfor %}
+                {% for time, time_events in events_by_time.items()|sort %}
+                <div class="timeline-group">
+                    <div class="timeline-date">📅 {{ time }}</div>
+                    {% for event in time_events %}
+                    <div class="timeline-item">
+                        <strong>{{ event.name or '事件' }}</strong><br>
+                        {{ event.description[:100] }}{% if event.description|length > 100 %}...{% endif %}
+                    </div>
+                    {% endfor %}
+                </div>
+                {% endfor %}
+            </div>
+        </details>
+    </div>
+    {% endif %}
+
+    <!-- 13. 事件链 -->
+    {% if event_chains %}
+    <div class="card">
+        <h2>🔗 事件链分析</h2>
+        <div class="grid-2">
+            {% for chain in event_chains[:6] %}
+            <div class="chain-card">
+                <div class="chain-title">📌 {{ chain.description or '事件链' }}</div>
+                {% for event in chain.events[:5] %}
+                <div class="chain-event">
+                    📍 {{ event.time_raw or '时间未知' }}:
+                    <strong>{{ event.event_type or '事件' }}</strong>
+                    {% if event.summary and event.summary != event.event_type %}
+                    <span style="font-size: 11px; color: #666;"> - {{ event.summary[:50] }}{% if event.summary|length > 50 %}...{% endif %}</span>
+                    {% endif %}
+                </div>
+                {% endfor %}
+                {% if chain.relations %}
+                <details>
+                    <summary>🔗 关系详情</summary>
+                    {% for rel in chain.relations %}
+                    <div style="font-size: 11px; color: #666; margin-top: 4px;">
+                        {{ rel.from }} → {{ rel.to }}: {{ rel.type }}
+                    </div>
+                    {% endfor %}
                 </details>
+                {% endif %}
             </div>
             {% endfor %}
         </div>
     </div>
     {% endif %}
 
-    <!-- 8. 主题建模 -->
-    {% if topics %}
+    {% if theme_hierarchy.roots and theme_hierarchy.roots|length > 0 %}
     <div class="card">
-        <h2>📚 主题建模</h2>
+        <h2>📚 主题层级结构</h2>
+        <div id="themeTreeChart" style="height: 400px;"></div>
+    </div>
+    {% endif %}
+
+    <!-- 15. 大模型主题分析 -->
+    {% if llm_extraction.themes or topics %}
+    <div class="card">
+        <h2>🎯 主题分析</h2>
         <div class="grid-2">
-            {% for topic in topics %}
+            {% set theme_list = llm_extraction.themes if llm_extraction.themes else topics %}
+            {% for theme in theme_list[:6] %}
             <div class="topic-card">
                 <div class="topic-title">
-                    主题 {{ topic.topic_id }}
-                    <span class="badge-count">{{ topic.texts_count }}条</span>
+                    {{ theme.theme_name if theme.theme_name else theme.llm_title }}
+                    {% if theme.related_entity_ids %}
+                    <span class="badge-count">{{ theme.related_entity_ids|length }}个实体</span>
+                    {% endif %}
+                    {% if theme.related_event_ids %}
+                    <span class="badge-count">{{ theme.related_event_ids|length }}个事件</span>
+                    {% endif %}
                 </div>
-                {% if topic.llm_title %}
-                <div class="topic-summary">
-                    <strong>🤖 {{ topic.llm_title }}</strong>
-                    {% if topic.llm_summary %}<br>{{ topic.llm_summary }}{% endif %}
-                </div>
-                {% endif %}
+                <div class="topic-summary">{{ theme.summary if theme.summary else theme.llm_summary }}</div>
                 <p><strong>🏷️ 关键词：</strong></p>
                 <div class="keyword-cloud" style="padding: 8px; margin-top: 0;">
-                    {% for word in topic.keywords[:8] %}
+                    {% for word in theme.keywords[:8] %}
                     <span class="keyword-item" style="font-size: 12px;">{{ word }}</span>
                     {% endfor %}
                 </div>
-                {% if topic.textrank_sentences %}
-                <details>
-                    <summary>📄 原文摘要</summary>
-                    {% for sent in topic.textrank_sentences %}
-                    <div class="issue-card"><div style="font-size: 11px;">“{{ sent[:150] }}{% if sent|length > 150 %}...{% endif %}”</div></div>
-                    {% endfor %}
-                </details>
+                {% if theme.reason %}
+                <div class="info-box" style="margin-top: 8px; font-size: 11px; background: #e8f5e9;">
+                    📝 判断依据: {{ theme.reason }}
+                </div>
+                {% endif %}
+                {% if theme.parent_theme_id %}
+                <div style="font-size: 11px; color: #888; margin-top: 8px;">🔗 父主题: {{ theme.parent_theme_id }}</div>
                 {% endif %}
             </div>
             {% endfor %}
         </div>
+        {% if theme_list|length > 6 %}
+        <details>
+            <summary>📚 更多主题 ({{ theme_list|length - 6 }})</summary>
+            <div class="grid-2" style="margin-top: 12px;">
+                {% for theme in theme_list[6:] %}
+                <div class="topic-card">
+                    <div class="topic-title">{{ theme.theme_name if theme.theme_name else theme.llm_title }}</div>
+                    <div class="topic-summary">{{ theme.summary if theme.summary else theme.llm_summary }}</div>
+                    <p><strong>🏷️ 关键词：</strong> {{ theme.keywords[:5]|join(', ') }}</p>
+                </div>
+                {% endfor %}
+            </div>
+        </details>
+        {% endif %}
     </div>
     {% endif %}
-
-    <!-- 9. 关系图谱 -->
-    {% if graph_viz.nodes and graph_viz.nodes|length > 0 %}
-    <div class="card">
-        <h2>🕸️ 关系图谱</h2>
-        <div id="relationGraph" class="graph-container"></div>
-    </div>
-    <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
-    <script>
-    (function() {
-        const graphData = {{ graph_viz | tojson }};
-        if (!graphData.nodes || graphData.nodes.length === 0) return;
-        const nodeColors = { 'ENTITY': '#4facfe', 'EVENT': '#ff9f43', 'TOPIC': '#2ed573' };
-        const nodes = graphData.nodes.map(node => ({
-            id: node.id,
-            name: node.name.length > 15 ? node.name.slice(0, 12) + '...' : node.name,
-            value: node.value || 1,
-            category: node.type,
-            symbolSize: Math.min(40, 10 + (node.value || 1) / 2),
-            itemStyle: { color: nodeColors[node.type] || '#a4b0be' }
-        }));
-        const links = (graphData.links || []).map(link => ({
-            source: link.source,
-            target: link.target,
-            value: link.value || 1,
-            lineStyle: { color: '#a4b0be', width: 1, curveness: 0.2 }
-        }));
-        const chart = echarts.init(document.getElementById('relationGraph'));
-        chart.setOption({
-            title: { show: false },
-            tooltip: { trigger: 'item', formatter: function(p) {
-                if (p.dataType === 'node') return `<strong>${p.name}</strong><br/>类型: ${p.data.category}`;
-                return `${p.data.source} → ${p.data.target}`;
-            }},
-            series: [{
-                type: 'graph', layout: 'force',
-                force: { repulsion: 300, edgeLength: [50, 100], gravity: 0.1, friction: 0.1 },
-                roam: true, draggable: true, data: nodes, links: links,
-                label: { show: true, position: 'right', fontSize: 10, color: '#333' },
-                emphasis: { focus: 'adjacency' }, animation: true
-            }], backgroundColor: 'transparent'
-        });
-        window.addEventListener('resize', () => chart.resize());
-    })();
-    </script>
     {% endif %}
 
-    <!-- 10. 样本文本 -->
+    <!-- 样本文本 -->
     {% if sample_texts %}
     <div class="card">
-        <h2>📄 样本文本</h2>
-        <details><summary>显示前 10 条文本</summary>
-            {% for text in sample_texts[:10] %}
-            <div class="info-box" style="margin: 8px 0;"><strong>文本 {{ loop.index }}:</strong><br>{{ text[:300] }}{% if text|length > 300 %}...{% endif %}</div>
+        <h2>📄 样本文本（实体高亮）</h2>
+        <div style="max-height: 600px; overflow-y: auto; font-size: 14px; line-height: 1.8;">
+            {% for text in sample_texts[:1] %}
+                {% if has_llm_data and llm_extraction.entities %}
+                    {% set ns = namespace(content=text) %}
+                    {# 收集所有实体名称 #}
+                    {% set entity_names = [] %}
+                    {% for entity in llm_extraction.entities %}
+                        {% set name = entity.entity_name %}
+                        {% if name|length >= 2 %}
+                            {% set _ = entity_names.append(name) %}
+                        {% endif %}
+                    {% endfor %}
+                    {# 按长度降序排序，避免短名称先替换导致长名称无法匹配 #}
+                    {% set sorted_names = entity_names|sort(reverse=True, attribute='length') %}
+
+                    {# 高亮替换 #}
+                    {% for name in sorted_names %}
+                        {# 1. 直接匹配完整名称 #}
+                        {% if name in ns.content %}
+                            {% set ns.content = ns.content|replace(name, '<mark style="background: #ffeb3b; padding: 0 4px; border-radius: 4px; color: #333;">' + name + '</mark>') %}
+                        {# 2. 去掉末尾1个字再匹配 #}
+                        {% elif name[:-1] in ns.content and name[:-1]|length >= 2 %}
+                            {% set short_name = name[:-1] %}
+                            {% set ns.content = ns.content|replace(short_name, '<mark style="background: #ffeb3b; padding: 0 4px; border-radius: 4px; color: #333;">' + short_name + '</mark>') %}
+                        {# 3. 去掉末尾2个字再匹配 #}
+                        {% elif name[:-2] in ns.content and name[:-2]|length >= 2 %}
+                            {% set short_name = name[:-2] %}
+                            {% set ns.content = ns.content|replace(short_name, '<mark style="background: #ffeb3b; padding: 0 4px; border-radius: 4px; color: #333;">' + short_name + '</mark>') %}
+                        {# 4. 去掉末尾3个字再匹配 #}
+                        {% elif name[:-3] in ns.content and name[:-3]|length >= 2 %}
+                            {% set short_name = name[:-3] %}
+                            {% set ns.content = ns.content|replace(short_name, '<mark style="background: #ffeb3b; padding: 0 4px; border-radius: 4px; color: #333;">' + short_name + '</mark>') %}
+                        {% endif %}
+                    {% endfor %}
+
+                    {# 处理换行，保留段落结构 #}
+                    {% set paragraphs = ns.content.split('\n') %}
+                    {% for para in paragraphs %}
+                        {% if para.strip() %}
+                        <div class="info-box" style="margin: 12px 0; background: #fafafa; line-height: 1.8;">
+                            {{ para|safe }}
+                        </div>
+                        {% endif %}
+                    {% endfor %}
+                {% else %}
+                    {% set paragraphs = text.split('\n') %}
+                    {% for para in paragraphs %}
+                        {% if para.strip() %}
+                        <div class="info-box" style="margin: 12px 0; background: #fafafa;">
+                            {{ para }}
+                        </div>
+                        {% endif %}
+                    {% endfor %}
+                {% endif %}
             {% endfor %}
-        </details>
+        </div>
     </div>
     {% endif %}
 
@@ -534,5 +821,217 @@
         <p>📊 分析完成时间: {{ timestamp }}</p>
     </div>
 </div>
+
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+<script>
+(function() {
+    {% if has_llm_data %}
+
+    {% if entity_stats_by_type %}
+    (function() {
+        const entityStats = {{ entity_stats_by_type | tojson }};
+        const chartData = [];
+        for (const [type, stats] of Object.entries(entityStats)) {
+            if (stats.unique > 0) {
+                chartData.push({ name: type, value: stats.unique });
+            }
+        }
+        if (chartData.length > 0) {
+            const chartDom = document.getElementById('llmEntityChart');
+            if (chartDom) {
+                const chart = echarts.init(chartDom);
+                chart.setOption({
+                    tooltip: { trigger: 'item', formatter: '{b}: {c} 个 ({d}%)' },
+                    legend: { orient: 'vertical', left: 'left', data: chartData.map(d => d.name) },
+                    series: [{
+                        type: 'pie', radius: '55%', center: ['50%', '50%'],
+                        data: chartData, label: { show: true, formatter: '{b}: {d}%' },
+                        emphasis: { scale: true },
+                        itemStyle: { borderRadius: 8, borderColor: '#fff', borderWidth: 2 }
+                    }]
+                });
+                window.addEventListener('resize', () => chart.resize());
+            }
+        }
+    })();
+    {% endif %}
+
+    {% if relation_tree_data and relation_tree_data.name %}
+    (function() {
+        const treeData = {{ relation_tree_data | tojson }};
+        const chartDom = document.getElementById('relationTreeChart');
+        if (chartDom && treeData && treeData.name) {
+            const chart = echarts.init(chartDom);
+            function processTreeData(node) {
+                if (!node) return null;
+                const processed = {
+                    name: node.name, id: node.id, value: node.value || 1,
+                    fact: node.fact || '', type: node.type || '',
+                    relation: node.relation || '', children: []
+                };
+                if (node.children && node.children.length > 0) {
+                    processed.children = node.children.map(child => processTreeData(child));
+                }
+                return processed;
+            }
+            const processedData = processTreeData(treeData);
+            chart.setOption({
+                title: { show: false },
+                tooltip: {
+                    trigger: 'item',
+                    triggerOn: 'mousemove',
+                    formatter: function(params) {
+                        if (params.data && params.data.fact) {
+                            let html = `<strong>${params.name}</strong><br/>`;
+                            if (params.data.fact) html += `📝 ${params.data.fact}<br/>`;
+                            if (params.data.relation) html += `🔗 关系: ${params.data.relation}`;
+                            return html;
+                        }
+                        return params.name;
+                    }
+                },
+                series: [{
+                    type: 'tree', data: [processedData], layout: 'orthogonal', orient: 'LR',
+                    symbol: 'emptyCircle', symbolSize: function(value, params) {
+                        const val = params.data.value || 30;
+                        return Math.min(25, 12 + val / 10);
+                    },
+                    edgeShape: 'curve',
+                    label: {
+                        show: true, position: 'left', offset: [8, 0],
+                        fontSize: 11, fontWeight: 'bold', color: '#333',
+                        formatter: function(params) {
+                            let label = params.name;
+                            //if (params.data && params.data.relation) label += ` (${params.data.relation})`;
+                            return label;
+                        }
+                    },
+                    lineStyle: { color: '#1a73e8', width: 1.5, curveness: 0.5 },
+                    roam: true, initialTreeDepth: 2, expandAndCollapse: true, animation: true
+                }]
+            });
+            window.addEventListener('resize', () => chart.resize());
+        }
+    })();
+    {% endif %}
+
+    {% if global_graph.nodes and global_graph.nodes|length > 0 %}
+    (function() {
+        const fullGraphData = {{ global_graph | tojson }};
+        let currentChart = null;
+        const categoryColors = { 'entity': '#4facfe', 'event': '#ff9f43', 'theme': '#2ed573' };
+        function renderGraph(nodeFilter, searchText) {
+            if (!fullGraphData.nodes || fullGraphData.nodes.length === 0) return;
+            let filteredNodes = fullGraphData.nodes;
+            let filteredLinks = fullGraphData.links;
+            if (nodeFilter !== 'all') {
+                filteredNodes = fullGraphData.nodes.filter(node => node.category === nodeFilter);
+                const filteredNodeIds = new Set(filteredNodes.map(n => n.id));
+                filteredLinks = fullGraphData.links.filter(link => filteredNodeIds.has(link.source) && filteredNodeIds.has(link.target));
+            }
+            const searchLower = (searchText || '').toLowerCase();
+            const highlightNodeIds = new Set();
+            if (searchLower) {
+                filteredNodes.forEach(node => { if (node.name.toLowerCase().includes(searchLower)) highlightNodeIds.add(node.id); });
+                const neighborIds = new Set(highlightNodeIds);
+                filteredLinks.forEach(link => {
+                    if (highlightNodeIds.has(link.source)) neighborIds.add(link.target);
+                    if (highlightNodeIds.has(link.target)) neighborIds.add(link.source);
+                });
+            }
+            const nodes = filteredNodes.map(node => ({
+                id: node.id, name: node.name.length > 15 ? node.name.slice(0, 12) + '...' : node.name,
+                category: node.category, value: node.value || 1,
+                symbolSize: node.symbolSize || (node.category === 'entity' ? 25 : (node.category === 'event' ? 30 : 35)),
+                itemStyle: { color: highlightNodeIds.has(node.id) ? '#ff4757' : categoryColors[node.category] || '#a4b0be',
+                            borderColor: highlightNodeIds.has(node.id) ? '#ff0000' : 'none', borderWidth: highlightNodeIds.has(node.id) ? 2 : 0 }
+            }));
+            const links = filteredLinks.map(link => ({
+                source: link.source, target: link.target, label: link.label || '',
+                value: link.value || 1, lineStyle: { color: '#a4b0be', width: 1.5, curveness: 0.2 }
+            }));
+            const chartDom = document.getElementById('globalGraph');
+            if (chartDom) {
+                if (currentChart) currentChart.dispose();
+                currentChart = echarts.init(chartDom);
+                currentChart.setOption({
+                    title: { show: false },
+                    tooltip: { trigger: 'item', formatter: function(p) {
+                        if (p.dataType === 'node') return `<strong>${p.name}</strong><br/>类型: ${p.data.category}`;
+                        return `${p.data.source} → ${p.data.target}<br/>关系: ${p.data.label || '关联'}`;
+                    }},
+                    series: [{
+                        type: 'graph', layout: 'force',
+                        force: { repulsion: 500, edgeLength: [80, 150], gravity: 0.1, friction: 0.1, initIterations: 300 },
+                        roam: true, draggable: true, data: nodes, links: links,
+                        label: { show: true, position: 'right', fontSize: 10, color: '#333' },
+                        edgeLabel: { show: true, formatter: '{c}', fontSize: 9 },
+                        lineStyle: { color: '#a4b0be', width: 1.5, curveness: 0.2 },
+                        emphasis: { focus: 'adjacency' }
+                    }]
+                });
+                window.addEventListener('resize', () => currentChart && currentChart.resize());
+            }
+        }
+        renderGraph('all', '');
+        const nodeFilter = document.getElementById('graphNodeFilter');
+        const searchInput = document.getElementById('graphSearchInput');
+        const resetBtn = document.getElementById('graphResetBtn');
+        const centerBtn = document.getElementById('graphCenterBtn');
+        if (nodeFilter) nodeFilter.addEventListener('change', function() { renderGraph(this.value, searchInput ? searchInput.value : ''); });
+        if (searchInput) searchInput.addEventListener('input', function() { renderGraph(nodeFilter ? nodeFilter.value : 'all', this.value); });
+        if (resetBtn) resetBtn.addEventListener('click', function() { if (nodeFilter) nodeFilter.value = 'all'; if (searchInput) searchInput.value = ''; renderGraph('all', ''); });
+        if (centerBtn && currentChart) centerBtn.addEventListener('click', function() { if (currentChart) currentChart.dispatchAction({ type: 'restore' }); });
+    })();
+    {% endif %}
+
+    {% if event_timeline.timeline_data and event_timeline.timeline_data|length > 0 %}
+    (function() {
+        const timelineData = {{ event_timeline.timeline_data | tojson }};
+        const dates = timelineData.map(d => d.date);
+        const counts = timelineData.map(d => d.count);
+        const chartDom = document.getElementById('llmTimelineChart');
+        if (chartDom) {
+            const chart = echarts.init(chartDom);
+            chart.setOption({
+                tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+                toolbox: { feature: { saveAsImage: {} } },
+                xAxis: { type: 'category', data: dates, axisLabel: { rotate: 45, fontSize: 10 } },
+                yAxis: { type: 'value', name: '事件数量' },
+                series: [{ type: 'line', data: counts, smooth: true, lineStyle: { color: '#ff9f43', width: 2 },
+                           areaStyle: { opacity: 0.2, color: '#ff9f43' }, symbol: 'circle', symbolSize: 8, itemStyle: { color: '#ff9f43' } }]
+            });
+            window.addEventListener('resize', () => chart.resize());
+        }
+    })();
+    {% endif %}
+
+    {% if theme_hierarchy.roots and theme_hierarchy.roots|length > 0 %}
+    (function() {
+        const themeData = {{ theme_hierarchy | tojson }};
+        const chartDom = document.getElementById('themeTreeChart');
+        if (chartDom && themeData.roots && themeData.roots.length > 0) {
+            const root = { name: '主题体系', children: themeData.roots.map(root => ({
+                name: root.name.length > 20 ? root.name.slice(0, 17) + '...' : root.name,
+                children: (root.children || []).map(child => ({
+                    name: child.name.length > 20 ? child.name.slice(0, 17) + '...' : child.name,
+                    children: (child.children || []).map(grandchild => ({ name: grandchild.name.length > 20 ? grandchild.name.slice(0, 17) + '...' : grandchild.name }))
+                }))
+            })) };
+            const chart = echarts.init(chartDom);
+            chart.setOption({
+                tooltip: { trigger: 'item', triggerOn: 'mousemove' },
+                series: [{ type: 'tree', data: [root], layout: 'orthogonal', roam: true, symbolSize: 12,
+                           label: { position: 'left', rotate: 0, fontSize: 11 }, orient: 'LR',
+                           initialTreeDepth: 2, lineStyle: { color: '#1a73e8', width: 1.5 } }]
+            });
+            window.addEventListener('resize', () => chart.resize());
+        }
+    })();
+    {% endif %}
+
+    {% endif %}
+})();
+</script>
 </body>
 </html>
