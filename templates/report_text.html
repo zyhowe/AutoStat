@@ -338,6 +338,7 @@
         {% endif %}
     </div>
 
+    {% if total_count > 1 %}
     <div class="stats-row">
         <div class="stat-card"><div class="value">{{ total_count }}</div><div class="label">总文本数</div></div>
         <div class="stat-card"><div class="value">{{ avg_length }}</div><div class="label">平均长度(字)</div></div>
@@ -348,22 +349,6 @@
         {% else %}
         <div class="stat-card"><div class="value">{{ dup_count }}</div><div class="label">重复文本对</div></div>
         {% endif %}
-    </div>
-
-    {% if insights %}
-    <div class="card">
-        <h2>💡 核心洞察</h2>
-        <div class="grid-2">
-            {% for insight in insights[:8] %}
-            <div class="insight-card">
-                <div class="insight-title">
-                    {% set priority_icon = {'高': '🔴', '中': '🟠', '低': '🟢'}.get(insight.priority, '⚪') %}
-                    {{ priority_icon }} {{ insight.title }}
-                </div>
-                <div class="insight-desc">{{ insight.description[:120] }}{% if insight.description|length > 120 %}...{% endif %}</div>
-            </div>
-            {% endfor %}
-        </div>
     </div>
     {% endif %}
 
@@ -428,9 +413,7 @@
         <div class="info-box"><strong>💡 处理建议：</strong><ul style="margin: 8px 0 0 20px;">{% for s in cleaning_suggestions %}<li style="font-size: 12px;">{{ s }}</li>{% endfor %}</ul></div>
         {% endif %}
     </div>
-    {% endif %}
 
-    {% if total_count > 1 %}
     <div class="card">
         <h2>😊 情感分布</h2>
         {% if sentiment_is_polarized %}
@@ -461,22 +444,29 @@
     </div>
     {% endif %}
 
-    <!-- 5. 高频关键词 -->
     <div class="card">
         <h2>🔑 高频关键词 TOP 10</h2>
         <div class="keyword-cloud">
-            {% for word, count in keywords[:10] %}
-                {% if count > 1 %}
+            {% set shown = 0 %}
+            {% for word, count in keywords %}
+                {% if count > 1 and shown < 10 %}
                 <span class="keyword-item">{{ word }} ({{ count }})</span>
+                {% set shown = shown + 1 %}
                 {% endif %}
             {% endfor %}
         </div>
-        {% if keywords|length > 10 %}
+        {% set more_count = 0 %}
+        {% for word, count in keywords %}
+            {% if count > 1 and loop.index0 >= 10 %}
+                {% set more_count = more_count + 1 %}
+            {% endif %}
+        {% endfor %}
+        {% if more_count > 0 %}
         <details>
-            <summary>📚 查看更多关键词</summary>
+            <summary>📚 查看更多关键词 ({{ more_count }})</summary>
             <div class="keyword-cloud" style="margin-top: 12px;">
-                {% for word, count in keywords[10:50] %}
-                    {% if count > 1 %}
+                {% for word, count in keywords %}
+                    {% if count > 1 and loop.index0 >= 10 %}
                     <span class="keyword-item">{{ word }} ({{ count }})</span>
                     {% endif %}
                 {% endfor %}
@@ -625,13 +615,10 @@
     </div>
     {% endif %}
 
-    <!-- 12. 事件时间线（折线图 + 按时间分组的事件列表） -->
     {% if event_timeline.events and event_timeline.events|length > 0 %}
     <div class="card">
         <h2>📅 事件时间线</h2>
         <div id="llmTimelineChart" style="height: 400px;"></div>
-
-        <!-- 按时间分组的事件列表 - 默认收缩 -->
         <details>
             <summary>📋 按时间分组的事件 ({{ event_timeline.events|length }})</summary>
             <div class="timeline-list" style="margin-top: 12px;">
@@ -660,7 +647,6 @@
     </div>
     {% endif %}
 
-    <!-- 13. 事件链 -->
     {% if event_chains %}
     <div class="card">
         <h2>🔗 事件链分析</h2>
@@ -700,7 +686,6 @@
     </div>
     {% endif %}
 
-    <!-- 15. 大模型主题分析 -->
     {% if llm_extraction.themes or topics %}
     <div class="card">
         <h2>🎯 主题分析</h2>
@@ -729,9 +714,6 @@
                     📝 判断依据: {{ theme.reason }}
                 </div>
                 {% endif %}
-                {% if theme.parent_theme_id %}
-                <div style="font-size: 11px; color: #888; margin-top: 8px;">🔗 父主题: {{ theme.parent_theme_id }}</div>
-                {% endif %}
             </div>
             {% endfor %}
         </div>
@@ -751,48 +733,80 @@
         {% endif %}
     </div>
     {% endif %}
+
     {% endif %}
 
-    <!-- 样本文本 -->
     {% if sample_texts %}
     <div class="card">
         <h2>📄 样本文本（实体高亮）</h2>
         <div style="max-height: 600px; overflow-y: auto; font-size: 14px; line-height: 1.8;">
             {% for text in sample_texts[:1] %}
-                {% if has_llm_data and llm_extraction.entities %}
+                {% if has_llm_data and highlight_data %}
                     {% set ns = namespace(content=text) %}
-                    {# 收集所有实体名称 #}
-                    {% set entity_names = [] %}
+                    {% for item in highlight_data %}
+                        {% set target = item.text %}
+                        {% set entity_type = item.entity_type %}
+                        {% if target and target|length >= 2 and target in ns.content %}
+                            {% if entity_type == 'Metric' %}
+                                {% set color = '#ffeb3b' %}
+                                {% set border_color = '#f9a825' %}
+                            {% elif entity_type == 'Product' %}
+                                {% set color = '#c8e6c9' %}
+                                {% set border_color = '#388e3c' %}
+                            {% elif entity_type == 'Industry' %}
+                                {% set color = '#ffccbc' %}
+                                {% set border_color = '#e65100' %}
+                            {% elif entity_type == 'EventName' %}
+                                {% set color = '#b3e5fc' %}
+                                {% set border_color = '#0288d1' %}
+                            {% elif entity_type == 'Organization' %}
+                                {% set color = '#e1bee7' %}
+                                {% set border_color = '#7b1fa2' %}
+                            {% elif entity_type == 'Location' %}
+                                {% set color = '#ffe0b2' %}
+                                {% set border_color = '#ef6c00' %}
+                            {% elif entity_type == 'Person' %}
+                                {% set color = '#f8bbd0' %}
+                                {% set border_color = '#c2185b' %}
+                            {% else %}
+                                {% set color = '#e0e0e0' %}
+                                {% set border_color = '#757575' %}
+                            {% endif %}
+                            {% set ns.content = ns.content|replace(target, '<mark style="background: ' + color + '; border-left: 3px solid ' + border_color + '; padding: 0 4px; border-radius: 4px; color: #333;">' + target + '</mark>') %}
+                         {% endif %}
+                    {% endfor %}
+                    {% set paragraphs = ns.content.split('\n') %}
+                    {% for para in paragraphs %}
+                        {% if para.strip() %}
+                        <div class="info-box" style="margin: 12px 0; background: #fafafa; line-height: 1.8;">
+                            {{ para|safe }}
+                        </div>
+                        {% endif %}
+                    {% endfor %}
+                {% elif has_llm_data and llm_extraction.entities %}
+                    {% set ns = namespace(content=text) %}
+                    {% set evidence_list = [] %}
                     {% for entity in llm_extraction.entities %}
-                        {% set name = entity.entity_name %}
-                        {% if name|length >= 2 %}
-                            {% set _ = entity_names.append(name) %}
+                        {% set evidence = entity.evidence %}
+                        {% if evidence and evidence|length >= 2 %}
+                            {% set _ = evidence_list.append(evidence) %}
                         {% endif %}
                     {% endfor %}
-                    {# 按长度降序排序，避免短名称先替换导致长名称无法匹配 #}
-                    {% set sorted_names = entity_names|sort(reverse=True, attribute='length') %}
-
-                    {# 高亮替换 #}
-                    {% for name in sorted_names %}
-                        {# 1. 直接匹配完整名称 #}
-                        {% if name in ns.content %}
-                            {% set ns.content = ns.content|replace(name, '<mark style="background: #ffeb3b; padding: 0 4px; border-radius: 4px; color: #333;">' + name + '</mark>') %}
-                        {# 2. 去掉末尾1个字再匹配 #}
-                        {% elif name[:-1] in ns.content and name[:-1]|length >= 2 %}
-                            {% set short_name = name[:-1] %}
-                            {% set ns.content = ns.content|replace(short_name, '<mark style="background: #ffeb3b; padding: 0 4px; border-radius: 4px; color: #333;">' + short_name + '</mark>') %}
-                        {# 3. 去掉末尾2个字再匹配 #}
-                        {% elif name[:-2] in ns.content and name[:-2]|length >= 2 %}
-                            {% set short_name = name[:-2] %}
-                            {% set ns.content = ns.content|replace(short_name, '<mark style="background: #ffeb3b; padding: 0 4px; border-radius: 4px; color: #333;">' + short_name + '</mark>') %}
-                        {# 4. 去掉末尾3个字再匹配 #}
-                        {% elif name[:-3] in ns.content and name[:-3]|length >= 2 %}
-                            {% set short_name = name[:-3] %}
-                            {% set ns.content = ns.content|replace(short_name, '<mark style="background: #ffeb3b; padding: 0 4px; border-radius: 4px; color: #333;">' + short_name + '</mark>') %}
+                    {% for evidence in evidence_list %}
+                        {% set target = '' %}
+                        {% if evidence in ns.content %}
+                            {% set target = evidence %}
+                        {% elif evidence[:-1] in ns.content and evidence[:-1]|length >= 2 %}
+                            {% set target = evidence[:-1] %}
+                        {% elif evidence[:-2] in ns.content and evidence[:-2]|length >= 2 %}
+                            {% set target = evidence[:-2] %}
+                        {% elif evidence[:-3] in ns.content and evidence[:-3]|length >= 2 %}
+                            {% set target = evidence[:-3] %}
+                        {% endif %}
+                        {% if target %}
+                            {% set ns.content = ns.content|replace(target, '<mark style="background: #ffeb3b; padding: 0 4px; border-radius: 4px; color: #333;">' + target + '</mark>') %}
                         {% endif %}
                     {% endfor %}
-
-                    {# 处理换行，保留段落结构 #}
                     {% set paragraphs = ns.content.split('\n') %}
                     {% for para in paragraphs %}
                         {% if para.strip() %}
@@ -878,8 +892,7 @@
             chart.setOption({
                 title: { show: false },
                 tooltip: {
-                    trigger: 'item',
-                    triggerOn: 'mousemove',
+                    trigger: 'item', triggerOn: 'mousemove',
                     formatter: function(params) {
                         if (params.data && params.data.fact) {
                             let html = `<strong>${params.name}</strong><br/>`;
@@ -902,7 +915,7 @@
                         fontSize: 11, fontWeight: 'bold', color: '#333',
                         formatter: function(params) {
                             let label = params.name;
-                            //if (params.data && params.data.relation) label += ` (${params.data.relation})`;
+                            if (params.data && params.data.relation) label += ` (${params.data.relation})`;
                             return label;
                         }
                     },

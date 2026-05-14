@@ -1,6 +1,5 @@
-"""
-标签页组件 - 主要标签页按钮
-"""
+# webtext/components/tabs.py
+"""标签页组件"""
 
 import streamlit as st
 
@@ -11,13 +10,13 @@ def render_tabs():
     st.markdown('<div id="top-anchor"></div>', unsafe_allow_html=True)
     st.markdown("<style>div.block-container {padding-top: 1rem;}</style>", unsafe_allow_html=True)
 
-    tab_names = ["📁 数据准备", "📄 分析报告", "🤖 文本分类", "🧠 AI 解读"]
+    tab_names = ["📝 数据准备", "📄 报告预览", "🧠 大模型解读"]
 
     cols = st.columns(len(tab_names))
 
     for i, (col, name) in enumerate(zip(cols, tab_names)):
         with col:
-            is_active = (st.session_state.current_tab == i)
+            is_active = (st.session_state.text_current_tab == i)
 
             if is_active:
                 st.markdown(f"""
@@ -32,13 +31,13 @@ def render_tabs():
                 ">{name}</div>
                 """, unsafe_allow_html=True)
             else:
-                if st.button(name, key=f"tab_{i}", use_container_width=True):
-                    st.session_state.current_tab = i
+                if st.button(name, key=f"text_tab_{i}", use_container_width=True):
+                    st.session_state.text_current_tab = i
                     st.rerun()
 
     st.divider()
 
-    return st.session_state.current_tab
+    return st.session_state.text_current_tab
 
 
 def scroll_to_top():

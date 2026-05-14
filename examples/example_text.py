@@ -191,6 +191,7 @@ def example_from_json_file():
     dummy.has_llm_data = data.get('has_llm_data', False)
     dummy.relation_tree_data = data.get('relation_tree_data', {})
     dummy.entity_table_data = data.get('entity_table_data', [])
+    dummy.highlight_data = data.get('highlight_data', [])
 
     # ========== 大模型相关私有属性（has_llm_data 判断依赖这些） ==========
     llm_extraction = data.get('llm_extraction', {})

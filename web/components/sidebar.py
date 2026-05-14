@@ -492,6 +492,14 @@ def render_sidebar():
 
     st.sidebar.markdown("---")
 
+    # 切换到文本分析按钮
+    if st.sidebar.button("📝 切换到文本分析", use_container_width=True):
+        st.switch_page("webtext/app.py")
+
+    st.sidebar.markdown("---")
+
+    st.sidebar.markdown("---")
+
     # 数据库配置下拉框
     render_db_selector()
 

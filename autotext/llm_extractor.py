@@ -19,6 +19,18 @@ class InfoExtractorClient:
         self.model = model
 
     def extract(self, text: str, max_retries: int = 3) -> Dict[str, Any]:
+        """
+        从文本中抽取结构化信息
+
+        返回格式:
+        {
+            "entities": [...],
+            "relationships": [...],
+            "events": [...],
+            "themes": [...],
+            "categorization": {...}
+        }
+        """
         prompt = self._build_prompt(text)
 
         headers = {
@@ -33,10 +45,19 @@ class InfoExtractorClient:
                  "content": "你是一个专业的信息抽取与分析系统。你必须只输出合法的完整JSON，不要有任何其他文字。先思考分析，再输出结果。"},
                 {"role": "user", "content": prompt}
             ],
-            "temperature": 0,
+            "temperature": 0,#贪婪解码，永远选概率最高的 token，消除采样随机性，关闭随机采样
             "seed": 42,
-            "max_tokens": 80000
+            "max_tokens": 80000,
+            "top_p": 1.0,  #禁用核采样，使用完整概率分布
+            "top_k": 0,  # 禁用 top-k 采样
+            "frequency_penalty": 0, #关闭频率惩罚
+            "presence_penalty": 0,#关闭存在惩罚
+            "repetition_penalty": 1.0 #关闭重复惩罚
         }
+        # 如果使用 DeepSeek 或其他不支持 response_format 的模型，添加 fallback
+        if self.model.startswith("deepseek"):
+            # DeepSeek 使用 json_object 模式
+            payload["response_format"] = {"type": "json_object"}
 
         for attempt in range(max_retries):
             try:
@@ -93,6 +114,7 @@ class InfoExtractorClient:
         return self._empty_result()
 
     def extract_batch(self, texts: List[str]) -> List[Dict[str, Any]]:
+        """批量抽取"""
         results = []
         for idx, text in enumerate(texts):
             if text and len(text) > 50:
@@ -104,20 +126,23 @@ class InfoExtractorClient:
         return results
 
     def _build_prompt(self, text: str) -> str:
+        """构建提示词（使用全角标点）"""
         return f"""从以下文本中抽取结构化信息，输出完整JSON。
 
 ================================================================================
-一、总体原则（先思考，后输出）
+一、重要格式要求
+================================================================================
+【标点符号要求】
+- evidence 中的引号必须使用全角：“ ” 和 ‘ ’
+- 逗号、句号、括号等其他标点保持原样（半角即可）
+- 原因：避免 JSON 解析时引号冲突
+
+================================================================================
+二、总体原则（先思考，后输出）
 ================================================================================
 1. 不要猜测或编造信息。如果文本中没有明确的内容，输出空数组或null。
 2. 一步步思考：先识别文本结构，再抽取实体，最后建立关系。
 3. 每个判断都要有依据，在reason字段中说明。
-
-================================================================================
-二、引号使用规则
-================================================================================
-- JSON结构中的双引号（如"entities"、"entity_id"等字段名）使用英文双引号"
-- 所有字段值（如实体名称、证据原文、属性值等）内部的双引号，使用中文全角双引号“和”
 
 ================================================================================
 三、实体抽取规则（思考步骤）
@@ -131,7 +156,7 @@ class InfoExtractorClient:
 根据实体在文中的实际含义选择：Metric、Product、Industry、EventName、Organization、Location、Person、Other
 
 【实体名称】
-- 直接使用原文中的表述，完全保持原样
+- 直接使用原文中的表述，完全保持原样，包括标点符号
 - 不要添加、删减或修改任何字词
 - 如果原文中实体出现多次，使用第一次出现时的完整名称
 
@@ -142,7 +167,7 @@ class InfoExtractorClient:
 
 【证据】
 - 摘录最能证明该实体存在的原文片段，不超过30字
-- 如果找不到明确的原文证据，不要创建该实体
+- 必须保留原文中的全角标点符号
 
 【原因】
 - 说明为什么将这段文本识别为实体，不超过15字
@@ -266,7 +291,7 @@ class InfoExtractorClient:
       "attributes": [
         {{"attr_name": "属性名", "attr_value": "属性值"}}
       ],
-      "evidence": "原文证据片段",
+      "evidence": "原文证据片段（保留全角标点）",
       "reason": "判断依据"
     }}
   ],
@@ -331,6 +356,7 @@ class InfoExtractorClient:
 输出JSON："""
 
     def _parse_json(self, content: str) -> Dict:
+        """解析 JSON 响应"""
         # 移除 markdown 代码块标记
         content = re.sub(r'^```(?:json)?\s*', '', content.strip())
         content = re.sub(r'\s*```$', '', content)
@@ -355,6 +381,7 @@ class InfoExtractorClient:
         return self._empty_result()
 
     def _empty_result(self) -> Dict:
+        """空结果"""
         return {
             "entities": [],
             "relationships": [],
@@ -364,11 +391,14 @@ class InfoExtractorClient:
         }
 
 
+# ==================== 便捷函数 ====================
+
 def extract_info_from_texts(
         texts: List[str],
         api_base: str,
         api_key: str,
         model: str = "deepseek-chat"
 ) -> List[Dict]:
+    """从文本列表抽取信息"""
     client = InfoExtractorClient(api_base, api_key, model)
     return client.extract_batch(texts)

@@ -198,6 +198,15 @@ class TextAnalyzer:
             print("📝 启动文本分析流程")
             print("=" * 70)
 
+
+    def _to_fullwidth_punctuation(self, text: str) -> str:
+        """将引号转换为全角，其他标点保持不变"""
+        # 双引号转换
+        text = text.replace('"', '“')
+        # 单引号转换
+        text = text.replace("'", '‘')
+        return text
+
     def set_llm_client(self, llm_client):
         """设置大模型客户端"""
         self.llm_client = llm_client
@@ -264,7 +273,10 @@ class TextAnalyzer:
 
         if not self.texts:
             raise ValueError("没有加载到有效的文本数据")
-        self.raw_texts = self.texts.copy()
+
+        # 将原始文本转换为全角标点
+        self.raw_texts = [self._to_fullwidth_punctuation(t) for t in self.texts]
+        self.texts = self.raw_texts.copy()
 
     def _preprocess(self):
         if not self.texts:
@@ -424,7 +436,7 @@ class TextAnalyzer:
             return
 
         # 合并所有文本
-        combined_text = "\n\n".join(self.content_texts)
+        combined_text = "\n\n".join(self.raw_texts)
 
         try:
             from autotext.llm_extractor import InfoExtractorClient
@@ -447,13 +459,8 @@ class TextAnalyzer:
                 model=config["model"]
             )
 
-            import time
-
-            # 在调用 extractor.extract 之前
             if not self.quiet:
                 print("  🔄 正在调用大模型抽取信息...")
-                print("  ⏳ 为避免限流，等待2秒...")
-                time.sleep(2)
 
             result = extractor.extract(combined_text)
 
@@ -652,22 +659,6 @@ class TextAnalyzer:
                 return entity.get("entity_name", "")
         return entity_id
 
-    def _extract_node_fact(self, entity: Dict) -> str:
-        """从实体中提取关键事实"""
-        attrs = entity.get('attributes', [])
-        fact_parts = []
-        for attr in attrs[:2]:
-            key = attr.get('attr_name') or attr.get('attr_key', '')
-            value = attr.get('attr_value', '')
-            if key and value:
-                fact_parts.append(f"{key}:{value}")
-        if fact_parts:
-            return '; '.join(fact_parts)
-        evidence = entity.get('evidence', '')
-        if evidence:
-            return evidence[:50]
-        return ''
-
     def _build_graph(self, entities: List[Dict], relationships: List[Dict]) -> Dict:
         """构建图谱（实体、事件、主题三类节点 + 多种边）"""
         nodes = []
@@ -831,8 +822,24 @@ class TextAnalyzer:
             }
         }
 
+    def _extract_node_fact(self, entity: Dict) -> str:
+        """从实体中提取关键事实"""
+        attrs = entity.get('attributes', [])
+        fact_parts = []
+        for attr in attrs[:2]:
+            key = attr.get('attr_name') or attr.get('attr_key', '')
+            value = attr.get('attr_value', '')
+            if key and value:
+                fact_parts.append(f"{key}:{value}")
+        if fact_parts:
+            return '; '.join(fact_parts)
+        evidence = entity.get('evidence', '')
+        if evidence:
+            return evidence[:50]
+        return ''
+
     def _build_enhanced_data_from_extraction(self, result: Dict[str, Any]):
-        """从大模型抽取结果构建增强数据"""
+        """从大模型抽取结果构建增强数据（实体档案、事件链、主题层级、图谱）"""
 
         # 1. 构建实体档案
         self.entity_profiles = self._build_entity_profiles(result)
@@ -843,18 +850,16 @@ class TextAnalyzer:
         # 3. 构建主题层级
         self.theme_hierarchy = self._build_theme_hierarchy(result)
 
-        # 4. 构建全局图谱（使用动态关系 + 静态关系）
+        # 4. 构建全局图谱（使用动态关系）
         self.global_graph = self._build_graph(
             result.get("entities", []),
-            result.get("relationships", [])  # 全部关系
+            self._dynamic_relationships
         )
 
-        # 5. 构建静态图谱（只使用静态关系，用于树形图）
-        static_relationships = [r for r in result.get("relationships", [])
-                                if r.get("relation_type") == "static"]
+        # 5. 构建静态图谱（使用静态关系，用于树形图）
         self.static_graph = self._build_graph(
             result.get("entities", []),
-            static_relationships
+            self._static_relationships
         )
 
     def _build_entity_profiles(self, result: Dict[str, Any]) -> List[Dict]:
@@ -1097,7 +1102,7 @@ class TextAnalyzer:
 
     def _bert_analysis(self):
         """BERT增强分析 - 完整版（支持大模型方式）"""
-        if not self.use_bert:# or len(self.texts) < 5:
+        if not self.use_bert: # or len(self.texts) < 5:
             if not self.quiet:
                 print("\n【BERT增强】跳过（文本数量不足或未启用）")
             return

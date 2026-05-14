@@ -5,6 +5,7 @@
 
 import json
 import os
+import re
 from datetime import datetime
 from typing import Dict, Any, Optional, List
 from jinja2 import Template
@@ -92,7 +93,7 @@ class TextReporter:
             md += "\n## 📋 实体与属性总览\n\n"
             md += "| 实体ID | 实体名称 | 实体类型 | 关键属性 | 关联实体 | 参与事件 | 归属主题 | 原文出处 |\n"
             md += "|--------|----------|----------|----------|----------|----------|----------|----------|\n"
-            for entity in entities:
+            for entity in entities[:30]:
                 entity_id = entity.get('entity_id', '')
                 entity_name = entity.get('entity_name', '')
                 entity_type = entity.get('entity_type', '')
@@ -111,7 +112,7 @@ class TextReporter:
             md += "\n## 📰 事件一览\n\n"
             md += "| 事件ID | 事件类型 | 触发词 | 时间 | 参与者 | 事件摘要 |\n"
             md += "|--------|----------|--------|------|--------|----------|\n"
-            for event in events:
+            for event in events[:30]:
                 event_id = event.get('event_id', '')
                 event_type = event.get('event_type', '')
                 trigger = event.get('trigger_word', '—')
@@ -157,50 +158,28 @@ class TextReporter:
         if not static_graph or not static_graph.get('nodes'):
             return {}
 
-        # ========== 调试：打印所有静态关系 ==========
-        print("\n" + "=" * 70)
-        print("🔍 调试：静态图谱中的实体-实体包含关系")
-        print("=" * 70)
-
-        all_edges = static_graph.get('links', [])
-        print(f"总边数: {len(all_edges)}")
-
-        # 筛选静态关系边
-        static_edges = [e for e in all_edges
-                        if e.get('relation_type') == 'static' and e.get('type') in ['relation', 'belongs_to']]
-
-        print(f"静态关系边数: {len(static_edges)}")
-        print("\n实体-实体静态关系（type=relation, relation_type=static）:")
-        for edge in static_edges:
-            source = edge.get('source')
-            target = edge.get('target')
-            label = edge.get('label', '')
-            rel_type = edge.get('type', '')
-            print(f"  {source} --[{label}]--> {target} (type={rel_type})")
-
-        print("=" * 70)
-
         # 获取实体节点
         entity_nodes = [n for n in static_graph['nodes'] if n.get('category') == 'entity']
         if not entity_nodes:
-            print("⚠️ 没有实体节点")
             return {}
 
         # 创建节点映射
         node_map = {n['id']: n for n in entity_nodes}
-        print(f"实体节点数: {len(entity_nodes)}")
 
-        # 构建邻接表（方向：source -> target 表示包含/属于）
+        # 使用所有实体-实体关系边
+        all_edges = static_graph.get('links', [])
+        relation_edges = [e for e in all_edges if e.get('type') == 'relation']
+
+        # 构建邻接表
         children_map = {}
         in_degree = {}
 
-        for edge in static_edges:
+        for edge in relation_edges:
             source = edge.get('source')
             target = edge.get('target')
-            label = edge.get('label', '属于')
+            label = edge.get('label', '关联')
 
             if source not in node_map or target not in node_map:
-                print(f"  ⚠️ 跳过边: {source} -> {target} (节点不在实体节点中)")
                 continue
 
             if source not in children_map:
@@ -211,30 +190,15 @@ class TextReporter:
             if source not in in_degree:
                 in_degree[source] = in_degree.get(source, 0)
 
-        print(f"\n邻接表（包含关系）:")
-        for parent, children in children_map.items():
-            print(f"  {parent} -> {[c[0] for c in children]}")
-
-        print(f"\n入度统计:")
-        for node, degree in in_degree.items():
-            print(f"  {node}: 入度={degree}")
-
         # 找出根节点（入度为0的节点）
         root_candidates = [node_id for node_id in node_map.keys() if in_degree.get(node_id, 0) == 0]
-        print(f"\n根节点候选（入度=0）: {root_candidates}")
 
         if not root_candidates:
-            # 如果没有根节点，选择出度最大的节点
-            out_degree = {parent: len(children) for parent, children in children_map.items()}
-            if out_degree:
-                root_candidates = [max(out_degree.items(), key=lambda x: x[1])[0]]
-                print(f"无根节点，选择出度最大的: {root_candidates}")
-            else:
-                return {}
+            return {}
 
         visited = set()
 
-        def build_tree_node(node_id: str, depth: int = 0, max_depth: int = 8, max_children: int = 100):
+        def build_tree_node(node_id: str, depth: int = 0, max_depth: int = 8, max_children: int = 50):
             """递归构建树节点"""
             if depth > max_depth:
                 return None
@@ -247,8 +211,8 @@ class TextReporter:
 
             node = node_map[node_id]
             node_name = node.get('name', node_id)
-            if len(node_name) > 25:
-                node_name = node_name[:22] + '...'
+            if len(node_name) > 30:
+                node_name = node_name[:27] + '...'
 
             tree_node = {
                 'id': node_id,
@@ -261,7 +225,6 @@ class TextReporter:
 
             # 获取子节点
             children = children_map.get(node_id, [])
-            children.sort(key=lambda x: node_map.get(x[0], {}).get('value', 0), reverse=True)
             children = children[:max_children]
 
             for child_id, relation_label in children:
@@ -269,26 +232,20 @@ class TextReporter:
                     continue
                 child_node = build_tree_node(child_id, depth + 1, max_depth, max_children)
                 if child_node:
-                    child_node['relation'] = relation_label[:10] + '...' if len(relation_label) > 10 else relation_label
+                    child_node['relation'] = relation_label[:15] + '...' if len(relation_label) > 15 else relation_label
                     tree_node['children'].append(child_node)
 
             return tree_node
 
-        # 构建森林（多个根节点）
+        # 构建森林
         forest = []
         for root_id in root_candidates:
-            print(f"\n构建根节点: {root_id}")
             visited.clear()
-            tree = build_tree_node(root_id, max_depth=8, max_children=100)
-            if tree:
-                print(f"  构建结果: 节点={tree['name']}, 子节点数={len(tree.get('children', []))}")
-                if tree.get('children'):
-                    forest.append(tree)
-                else:
-                    print(f"  跳过（无子节点）")
+            tree = build_tree_node(root_id, max_depth=6, max_children=50)
+            if tree and tree.get('children'):
+                forest.append(tree)
 
         if not forest:
-            print("\n⚠️ 没有构建出任何树")
             return {}
 
         # 创建虚拟根节点
@@ -296,14 +253,83 @@ class TextReporter:
             'id': 'ROOT',
             'name': '实体关系图',
             'value': 100,
-            'fact': f'共 {len(entity_nodes)} 个实体，{len(static_edges)} 条静态关系',
+            'fact': f'共 {len(entity_nodes)} 个实体',
             'children': forest
         }
 
-        print(f"\n✅ 树形图构建完成，根节点数={len(forest)}")
         return virtual_root
 
+    def _build_highlight_data(self, full_text: str, entities: List[Dict]) -> List[Dict]:
+        """
+        构建高亮数据：从 entity_name 中提取原文中的实际词汇，用 evidence 定位
+        """
+        highlight_items = []
+
+        for entity in entities:
+            entity_name = entity.get('entity_name', '')
+            evidence = entity.get('evidence', '')
+            entity_type = entity.get('entity_type', 'Other')
+
+            if not entity_name or not evidence:
+                continue
+
+            # 1. 从 entity_name 中提取实际出现在 evidence 中的文本
+            matched_text = ''
+            if entity_name in evidence:
+                matched_text = entity_name
+            elif len(entity_name) > 1 and entity_name[:-1] in evidence:
+                matched_text = entity_name[:-1]
+            elif len(entity_name) > 2 and entity_name[:-2] in evidence:
+                matched_text = entity_name[:-2]
+            elif len(entity_name) > 3 and entity_name[:-3] in evidence:
+                matched_text = entity_name[:-3]
+
+            if not matched_text:
+                continue
+
+            # 2. 用 evidence 在 full_text 中定位
+            search_evidence = evidence
+            pos = full_text.find(search_evidence)
+
+            # 如果找不到，去掉省略号及后面内容
+            if pos == -1 and '...' in search_evidence:
+                search_evidence = search_evidence.split('...')[0]
+                pos = full_text.find(search_evidence)
+
+            # 如果还找不到，逐次去掉末尾字符
+            if pos == -1:
+                for remove_len in range(1, 10):
+                    if len(search_evidence) > remove_len:
+                        test_text = search_evidence[:-remove_len]
+                        pos = full_text.find(test_text)
+                        if pos >= 0:
+                            search_evidence = test_text
+                            break
+
+            if pos >= 0:
+                highlight_items.append({
+                    'text': matched_text,
+                    'evidence': search_evidence,
+                    'position': pos,
+                    'entity_id': entity.get('entity_id'),
+                    'entity_name': entity_name,
+                    'entity_type': entity_type
+                })
+
+        # 去重并按位置排序
+        seen = set()
+        unique_items = []
+        for item in highlight_items:
+            key = f"{item['text']}_{item['position']}"
+            if key not in seen:
+                seen.add(key)
+                unique_items.append(item)
+
+        unique_items.sort(key=lambda x: x['position'])
+        return unique_items
+
     def _generate_entity_table_data(self, entities: List[Dict], entity_profiles: List[Dict]) -> List[Dict]:
+        """生成实体表格数据（合并实体档案详情）"""
         profile_map = {}
         for profile in entity_profiles:
             profile_map[profile.get('name')] = profile
@@ -311,7 +337,6 @@ class TextReporter:
         table_data = []
         for entity in entities:
             entity_name = entity.get('entity_name', '')
-            display_name = entity.get('display_name', entity_name)  # 使用 display_name
             profile = profile_map.get(entity_name, {})
 
             attrs = []
@@ -338,8 +363,7 @@ class TextReporter:
 
             table_data.append({
                 'entity_id': entity.get('entity_id', ''),
-                'entity_name': display_name,  # 表格显示用 display_name
-                'entity_name_raw': entity_name,  # 保留原始名称用于高亮
+                'entity_name': entity_name,
                 'entity_type': entity.get('entity_type', ''),
                 'key_attributes': attr_str,
                 'related_entities': related_str,
@@ -416,6 +440,7 @@ class TextReporter:
         static_graph = {"nodes": [], "links": [], "statistics": {}}
         llm_statistics = {"entity_count": 0, "relation_count": 0, "event_count": 0, "theme_count": 0}
         relation_tree_data = {}
+        highlight_data = []
 
         if has_llm:
             type_names = {
@@ -513,19 +538,19 @@ class TextReporter:
             if static_graph and static_graph.get('nodes'):
                 relation_tree_data = self._build_tree_from_global_graph(static_graph)
 
+            # 构建高亮数据
+            sample_texts = self.analyzer.raw_texts if hasattr(self.analyzer,
+                                                              'raw_texts') else self.analyzer.content_texts
+            if sample_texts:
+                full_text = sample_texts[0] if sample_texts else ''
+                highlight_data = self._build_highlight_data(full_text, llm_extraction.get('entities', []))
+
         entity_table_data = []
         if has_llm:
             entity_table_data = self._generate_entity_table_data(
                 llm_extraction.get('entities', []),
                 entity_profiles
             )
-
-        # 生成高亮映射（entity_name -> display_name 或 原始名称）
-        highlight_map = {}
-        for entity in llm_extraction.get('entities', []):
-            entity_name = entity.get('entity_name', '')
-            if entity_name:
-                highlight_map[entity_name] = entity_name
 
         data = {
             'stats': self.analyzer.stats_result,
@@ -543,7 +568,7 @@ class TextReporter:
                 'end': list(self.analyzer.end_templates)[:20]
             },
             'insights': getattr(self.analyzer, 'insights', [])[:15],
-            'sample_texts': self.analyzer.raw_texts[:10],
+            'sample_texts': getattr(self.analyzer, 'raw_texts', self.analyzer.content_texts)[:10],
             'quality_details': {
                 'duplicates': {
                     'count': duplicates_detail.get('count', 0),
@@ -574,7 +599,7 @@ class TextReporter:
             'has_llm_data': has_llm,
             'relation_tree_data': relation_tree_data,
             'entity_table_data': entity_table_data,
-            'highlight_map':highlight_map
+            'highlight_data': highlight_data
         }
 
         return data
@@ -640,6 +665,7 @@ class TextReporter:
             llm_extraction = data.get('llm_extraction', {})
             relation_tree_data = data.get('relation_tree_data', {})
             entity_table_data = data.get('entity_table_data', [])
+            highlight_data = data.get('highlight_data', [])
 
             return template.render(
                 title=title,
@@ -673,7 +699,8 @@ class TextReporter:
                 has_llm_data=has_llm_data,
                 llm_extraction=llm_extraction,
                 relation_tree_data=relation_tree_data,
-                entity_table_data=entity_table_data
+                entity_table_data=entity_table_data,
+                highlight_data=highlight_data
             )
         except Exception as e:
             import traceback
