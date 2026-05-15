@@ -177,7 +177,7 @@ def example_from_json_file():
     dummy.quality_details = data.get('quality_details', {})
     dummy.language_distribution = data.get('language_distribution', {})
 
-    # ========== 大模型相关属性（公有） ==========
+    # ========== 大模型相关属性（与 reporter.py 中的 _build_json_data 对应） ==========
     dummy.llm_extraction = data.get('llm_extraction', {})
     dummy.entity_stats_by_type = data.get('entity_stats_by_type', {})
     dummy.relation_network = data.get('relation_network', {})
@@ -567,9 +567,9 @@ if __name__ == "__main__":
     os.makedirs("output", exist_ok=True)
 
     # 可选：直接运行特定示例（取消注释即可）
-    example_single_text()
+    #example_single_text()
 
-    #example_from_json_file() #直接读JSON生成HTML
+    example_from_json_file() #直接读JSON生成HTML
     #example_multiple_texts()
     #example_long_texts()
     #example_text_with_dates()

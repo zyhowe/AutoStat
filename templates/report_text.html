@@ -338,137 +338,29 @@
         {% endif %}
     </div>
 
-    {% if total_count > 1 %}
-    <div class="stats-row">
-        <div class="stat-card"><div class="value">{{ total_count }}</div><div class="label">总文本数</div></div>
-        <div class="stat-card"><div class="value">{{ avg_length }}</div><div class="label">平均长度(字)</div></div>
-        <div class="stat-card"><div class="value">{{ empty_rate }}</div><div class="label">空文本率</div></div>
-        {% set dup_count = quality_details.duplicates.count if quality_details.duplicates else 0 %}
-        {% if dup_count > 0 %}
-        <div class="stat-card stat-card-warning"><div class="value">{{ dup_count }}</div><div class="label">⚠️ 重复文本对</div></div>
-        {% else %}
-        <div class="stat-card"><div class="value">{{ dup_count }}</div><div class="label">重复文本对</div></div>
-        {% endif %}
-    </div>
-    {% endif %}
-
-    {% if total_count > 1 %}
-    <div class="card">
-        <h2>🧹 数据清洗建议</h2>
-        {% set duplicates = quality_details.duplicates or {} %}
-        {% set similarity = quality_details.similarity or {} %}
-        {% set length_info = quality_details.length or {} %}
-        {% if duplicates.count > 0 or similarity.count > 0 or length_info.short_count > 0 or length_info.long_count > 0 %}
-            {% if duplicates.count > 0 %}
-            <div class="warning-box">
-                <strong>📋 重复文本 ({{ duplicates.count }} 对)</strong>
-                <details><summary>查看详情</summary>
-                {% for item in duplicates.duplicate_summary[:5] %}
-                <div class="issue-card"><div class="issue-text">{{ item.text[:200] }}...</div></div>
-                {% endfor %}</details>
-            </div>
-            {% endif %}
-            {% if similarity.count > 0 %}
-            <div class="warning-box">
-                <strong>📋 高相似文本 ({{ similarity.count }} 对)</strong>
-                <details><summary>查看详情</summary>
-                {% for item in similarity.similarity_summary[:5] %}
-                <div class="issue-card"><div class="issue-text">{{ item.text1[:150] }}...</div></div>
-                {% endfor %}</details>
-            </div>
-            {% endif %}
-            {% if length_info.short_count > 0 %}
-            <div class="warning-box">
-                <strong>📋 过短文本 ({{ length_info.short_count }} 条)</strong>
-                <details><summary>查看详情</summary>
-                {% for item in length_info.short_summary[:5] %}
-                <div class="issue-card"><div class="issue-text">{{ item.text_preview[:150] }}...</div></div>
-                {% endfor %}</details>
-            </div>
-            {% endif %}
-            {% if length_info.long_count > 0 %}
-            <div class="warning-box">
-                <strong>📋 过长文本 ({{ length_info.long_count }} 条)</strong>
-                <details><summary>查看详情</summary>
-                {% for item in length_info.long_summary[:5] %}
-                <div class="issue-card"><div class="issue-text">{{ item.text_preview[:200] }}...</div></div>
-                {% endfor %}</details>
-            </div>
-            {% endif %}
-        {% else %}
-        <div class="success-box">✅ 数据质量良好，无明显问题</div>
-        {% endif %}
-
-        {% if start_templates or end_templates %}
-        <details style="margin-top: 16px;">
-            <summary>🔧 已自动切除的模板词 ({{ (start_templates|length) + (end_templates|length) }}个)</summary>
-            <div style="margin-top: 12px;">
-                <div><strong>开头模板词:</strong> {{ start_templates[:15]|join(', ') }}</div>
-                <div style="margin-top: 8px;"><strong>结尾模板词:</strong> {{ end_templates[:15]|join(', ') }}</div>
-            </div>
-        </details>
-        {% endif %}
-
-        {% if cleaning_suggestions %}
-        <div class="info-box"><strong>💡 处理建议：</strong><ul style="margin: 8px 0 0 20px;">{% for s in cleaning_suggestions %}<li style="font-size: 12px;">{{ s }}</li>{% endfor %}</ul></div>
-        {% endif %}
-    </div>
-
-    <div class="card">
-        <h2>😊 情感分布</h2>
-        {% if sentiment_is_polarized %}
-        <div class="grid-3">
-            <div class="stat-card" style="background: #2ed573;"><div class="value">{{ positive_rate }}</div><div class="label">积极</div></div>
-            <div class="stat-card" style="background: #ff4757;"><div class="value">{{ negative_rate }}</div><div class="label">消极</div></div>
-            <div class="stat-card" style="background: #747d8c;"><div class="value">{{ neutral_rate }}</div><div class="label">中性</div></div>
-        </div>
-        {% else %}
-        <div class="info-box">整体情感中性，无明显倾向。积极 {{ positive_rate }}，消极 {{ negative_rate }}，中性 {{ neutral_rate }}。</div>
-        {% endif %}
-    </div>
-    {% endif %}
-
-    {% if language_distribution %}
-    <div class="card">
-        <h2>🌐 语言分布</h2>
-        <div class="grid-3">
-            {% for lang, count in language_distribution.items() %}
-            <div class="stat-card stat-card-success">
-                <div class="value">{{ count }}</div>
-                <div class="label">
-                    {% if lang == 'zh' %}中文{% elif lang == 'en' %}英文{% else %}{{ lang|upper }}{% endif %}
-                </div>
-            </div>
-            {% endfor %}
-        </div>
-    </div>
-    {% endif %}
-
     <div class="card">
         <h2>🔑 高频关键词 TOP 10</h2>
         <div class="keyword-cloud">
-            {% set shown = 0 %}
+            {% set display_keywords = [] %}
             {% for word, count in keywords %}
-                {% if count > 1 and shown < 10 %}
-                <span class="keyword-item">{{ word }} ({{ count }})</span>
-                {% set shown = shown + 1 %}
+                {% if count > 1 and display_keywords|length < 10 %}
+                    {% set _ = display_keywords.append((word, count)) %}
+                    <span class="keyword-item">{{ word }} ({{ count }})</span>
                 {% endif %}
             {% endfor %}
         </div>
-        {% set more_count = 0 %}
+        {% set more_keywords = [] %}
         {% for word, count in keywords %}
             {% if count > 1 and loop.index0 >= 10 %}
-                {% set more_count = more_count + 1 %}
+                {% set _ = more_keywords.append((word, count)) %}
             {% endif %}
         {% endfor %}
-        {% if more_count > 0 %}
+        {% if more_keywords|length > 0 %}
         <details>
-            <summary>📚 查看更多关键词 ({{ more_count }})</summary>
+            <summary>📚 查看更多关键词 ({{ more_keywords|length }})</summary>
             <div class="keyword-cloud" style="margin-top: 12px;">
-                {% for word, count in keywords %}
-                    {% if count > 1 and loop.index0 >= 10 %}
-                    <span class="keyword-item">{{ word }} ({{ count }})</span>
-                    {% endif %}
+                {% for word, count in more_keywords %}
+                <span class="keyword-item">{{ word }} ({{ count }})</span>
                 {% endfor %}
             </div>
         </details>

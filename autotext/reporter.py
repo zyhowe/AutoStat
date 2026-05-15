@@ -643,64 +643,57 @@ class TextReporter:
                 template_content = f.read()
             template = Template(template_content)
 
-            stats = data['stats']
-            sentiment = data['sentiment']
+            # 只提取模板实际使用的变量
             keywords = data['keywords']['frequency']
-            quality = data['quality']
-            cleaning_suggestions = data['cleaning_suggestions']
-            language_dist = data.get('language_distribution', {})
-            templates = data.get('templates', {})
-            insights = data.get('insights', [])
             sample_texts = data.get('sample_texts', [])
-            quality_details = data.get('quality_details', {})
-            entity_stats_by_type = data.get('entity_stats_by_type', {})
-            relation_network = data.get('relation_network', {})
-            event_timeline = data.get('event_timeline', {})
-            theme_hierarchy = data.get('theme_hierarchy', {})
-            entity_profiles = data.get('entity_profiles', [])
-            event_chains = data.get('event_chains', [])
-            global_graph = data.get('global_graph', {})
-            static_graph = data.get('static_graph', {})
-            llm_statistics = data.get('llm_statistics', {})
             has_llm_data = data.get('has_llm_data', False)
-            llm_extraction = data.get('llm_extraction', {})
+
+            # 大模型相关变量
+            llm_statistics = data.get('llm_statistics', {})
+            entity_stats_by_type = data.get('entity_stats_by_type', {})
             relation_tree_data = data.get('relation_tree_data', {})
             entity_table_data = data.get('entity_table_data', [])
+            llm_extraction = data.get('llm_extraction', {})
+            global_graph = data.get('global_graph', {})
+            event_timeline = data.get('event_timeline', {})
+            event_chains = data.get('event_chains', [])
+            theme_hierarchy = data.get('theme_hierarchy', {})
+            topics = data.get('topics', [])
             highlight_data = data.get('highlight_data', [])
 
             return template.render(
+                # 基础变量
                 title=title,
                 timestamp=datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                total_count=stats['total_count'],
-                empty_count=stats['empty_count'],
-                empty_rate=f"{stats['empty_rate']:.2%}",
-                avg_length=f"{stats['char_length']['mean']:.1f}",
-                positive_rate=f"{sentiment['distribution']['positive_rate']:.1%}",
-                negative_rate=f"{sentiment['distribution']['negative_rate']:.1%}",
-                neutral_rate=f"{sentiment['distribution']['neutral_rate']:.1%}",
-                sentiment_is_polarized=sentiment.get('is_polarized', False),
                 keywords=keywords,
-                duplicate_count=quality.get('duplicates', {}).get('count', 0),
-                cleaning_suggestions=cleaning_suggestions[:10],
-                language_distribution=language_dist,
-                start_templates=list(templates.get('start', []))[:20],
-                end_templates=list(templates.get('end', []))[:20],
-                insights=insights,
                 sample_texts=sample_texts,
-                quality_details=quality_details,
-                entity_stats_by_type=entity_stats_by_type,
-                relation_network=relation_network,
-                event_timeline=event_timeline,
-                theme_hierarchy=theme_hierarchy,
-                entity_profiles=entity_profiles,
-                event_chains=event_chains,
-                global_graph=global_graph,
-                static_graph=static_graph,
-                llm_statistics=llm_statistics,
+
+                # 大模型开关
                 has_llm_data=has_llm_data,
-                llm_extraction=llm_extraction,
-                relation_tree_data=relation_tree_data,
+
+                # 大模型统计
+                llm_statistics=llm_statistics,
+
+                # 实体相关
+                entity_stats_by_type=entity_stats_by_type,
                 entity_table_data=entity_table_data,
+
+                # 关系图
+                relation_tree_data=relation_tree_data,
+
+                # 事件相关
+                llm_extraction=llm_extraction,
+                event_timeline=event_timeline,
+                event_chains=event_chains,
+
+                # 主题相关
+                theme_hierarchy=theme_hierarchy,
+                topics=topics,
+
+                # 知识图谱
+                global_graph=global_graph,
+
+                # 高亮数据
                 highlight_data=highlight_data
             )
         except Exception as e:
