@@ -490,11 +490,7 @@ def render_sidebar():
 
     render_project_history()
 
-    st.sidebar.markdown("---")
 
-    # 切换到文本分析按钮
-    if st.sidebar.button("📝 切换到文本分析", use_container_width=True):
-        st.switch_page("webtext/app.py")
 
     st.sidebar.markdown("---")
 

@@ -129,7 +129,8 @@ class TextReporter:
         if topics:
             md += "\n## 📚 主题分析\n"
             for topic in topics:
-                md += f"\n### {topic.get('llm_title', f'主题{topic.get("topic_id", 0)}')}\n"
+                title = topic.get('llm_title', f'主题{topic.get("topic_id", 0)}')
+                md += f"\n### {title}\n"
                 if topic.get('llm_summary'):
                     md += f"{topic['llm_summary']}\n\n"
                 kw_list = ', '.join(topic.get('keywords', [])[:8])

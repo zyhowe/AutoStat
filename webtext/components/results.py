@@ -56,6 +56,8 @@ def render_results_tab():
     try:
         # 设置一个较高的高度以容纳图表
         st.components.v1.html(html_content, height=800, scrolling=True)
+        #st.html(html_content)
+
     except Exception as e:
         # 如果失败，回退到 st.html
         st.warning(f"图表渲染失败，使用简化视图: {str(e)}")

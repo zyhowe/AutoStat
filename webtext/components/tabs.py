@@ -10,7 +10,7 @@ def render_tabs():
     st.markdown('<div id="top-anchor"></div>', unsafe_allow_html=True)
     st.markdown("<style>div.block-container {padding-top: 1rem;}</style>", unsafe_allow_html=True)
 
-    tab_names = ["📝 数据准备", "📄 报告预览", "🧠 大模型解读"]
+    tab_names = ["📝 数据准备", "📄 报告预览", "🧠 大模型解读", "🔍 项目对比"]
 
     cols = st.columns(len(tab_names))
 
