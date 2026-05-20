@@ -827,3 +827,80 @@ class RecommendationAnalyzer:
             return "低"
         else:
             return "中"
+
+    # autostat/core/recommendation.py - 添加方法
+
+    def _get_audit_recommendations(self, audit_rules: Dict) -> List[Dict]:
+        """基于勾稽规则生成推荐"""
+        recommendations = []
+
+        # 数值规则推荐
+        for rule in audit_rules.get('arithmetic_rules', []):
+            if rule.get('violation_count', 0) > 0:
+                recommendations.append({
+                    "priority": rule.get('priority', '中'),
+                    "task_type": "数据质量优化",
+                    "title": f"修复勾稽关系违反记录",
+                    "description": f"发现 {rule['violation_count']} 条记录违反规则：{rule['rule']}",
+                    "target_column": None,
+                    "feature_columns": rule.get('fields', []),
+                    "traditional": "数据清洗",
+                    "ml": "异常检测",
+                    "dl": None,
+                    "llm": "生成修复建议",
+                    "reason": f"规则置信度 {rule['confidence']:.1%}，建议检查异常数据",
+                    "caution": "需确认业务逻辑后处理"
+                })
+            elif rule.get('confidence', 0) == 1.0:
+                recommendations.append({
+                    "priority": "中",
+                    "task_type": "数据质量监控",
+                    "title": f"添加数据质量监控规则",
+                    "description": f"勾稽规则 {rule['rule']} 100% 成立，建议定期校验",
+                    "target_column": None,
+                    "feature_columns": rule.get('fields', []),
+                    "traditional": "数据验证",
+                    "ml": "异常检测",
+                    "dl": None,
+                    "llm": "生成数据质量报告",
+                    "reason": f"规则 100% 成立，可作为数据质量监控规则",
+                    "caution": "业务逻辑变更时需要更新规则"
+                })
+
+        # 外键规则推荐
+        for fk in audit_rules.get('foreign_keys', []):
+            confidence = fk.get('confidence', 1.0)
+            if confidence < 1.0:
+                recommendations.append({
+                    "priority": "高",
+                    "task_type": "数据完整性检查",
+                    "title": f"修复外键约束违反",
+                    "description": f"外键 {fk.get('from_table')}.{fk.get('from_col')} → {fk.get('to_table')}.{fk.get('to_col')} 存在违反记录",
+                    "target_column": None,
+                    "feature_columns": [fk.get('from_col'), fk.get('to_col')],
+                    "traditional": "数据完整性检查",
+                    "ml": "异常检测",
+                    "dl": None,
+                    "llm": "分析缺失原因",
+                    "reason": f"外键置信度 {confidence:.1%}",
+                    "caution": "可能存在孤儿记录"
+                })
+
+        # 函数依赖推荐
+        for fd in audit_rules.get('functional_dependencies', []):
+            recommendations.append({
+                "priority": "低",
+                "task_type": "数据建模建议",
+                "title": f"利用函数依赖简化数据模型",
+                "description": f"发现函数依赖：{fd['rule']}，可考虑数据归一化",
+                "target_column": None,
+                "feature_columns": fd.get('fields', []),
+                "traditional": "数据规范化",
+                "ml": "特征工程",
+                "dl": None,
+                "llm": None,
+                "reason": f"函数依赖 100% 成立，可减少数据冗余",
+                "caution": "需确认业务语义"
+            })
+
+        return recommendations

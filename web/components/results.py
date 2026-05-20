@@ -200,7 +200,13 @@ def render_preview_tab():
         if FeatureFlags.is_enabled("term_tooltip"):
             html_content = apply_term_tooltips_to_html(html_content)
 
-        st.html(html_content)
+        # 使用 st.components.v1.html 替代 st.html，更好地支持 JavaScript 图表
+        try:
+            st.components.v1.html(html_content, height=800, scrolling=True)
+        except Exception as e:
+            # 降级方案
+            st.warning(f"图表渲染失败: {e}，使用简化视图")
+            st.html(html_content)
     else:
         st.info("暂无报告预览")
 

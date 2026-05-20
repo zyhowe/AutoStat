@@ -8,6 +8,7 @@ from scipy.stats import shapiro, normaltest
 from typing import Dict, List, Optional, Tuple
 import warnings
 
+
 warnings.filterwarnings('ignore')
 
 # ==================== 全局常量定义 ====================
@@ -355,15 +356,20 @@ class BaseAnalyzer:
                     pass
         return invalid
 
+    # 修改 _comprehensive_quality_check 方法
     def _comprehensive_quality_check(self) -> Dict:
-        """综合质量检查"""
-        return {
+        """综合质量检查（包含勾稽规则发现）"""
+
+        # 原有质量检查
+        quality_report = {
             'missing': self._check_missing_values(),
             'outliers': self._check_outliers_by_type(),
             'duplicates': self._check_duplicates_by_key(),
             'inconsistent_types': self._check_type_consistency(),
             'invalid_values': self._check_invalid_by_type()
         }
+
+        return quality_report
 
     def _generate_cleaning_suggestions(self) -> List[str]:
         """生成清洗建议"""

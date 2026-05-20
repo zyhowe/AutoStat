@@ -455,7 +455,8 @@ class Reporter:
                 next_actions=next_actions[:3],
                 plots=plots,
                 chart_insights=chart_insights,  # 新增：图表解读
-                time_series_diagnostics=time_series_diagnostics
+                time_series_diagnostics=time_series_diagnostics,
+                quality_report=quality
             )
         except Exception as e:
             return self._get_error_html(title, f"模板渲染失败: {str(e)}")

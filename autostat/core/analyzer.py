@@ -531,6 +531,90 @@ class AutoStatisticalAnalyzer:
                 n_unique = summary.get('n_unique', 'N/A')
                 print(f"唯一值数: {n_unique}")
 
+    # autostat/analyzer.py
+
+    # autostat/analyzer.py - _discover_audit_rules 方法
+
+    def _discover_audit_rules(self):
+        """勾稽关系发现"""
+        if not self.quiet:
+            print("\n【勾稽关系发现】")
+
+        try:
+            from autostat.core.audit import discover_audit_rules, verify_audit_rules
+
+            # 自动发现
+            audit_rules = discover_audit_rules(
+                data=self.data,
+                variable_types=self.variable_types,
+                foreign_keys=[],
+                debug=True,
+                precision=1e-6,
+                min_confidence=0.5,
+                corr_threshold=0.8,
+                min_nonnull_count=10,
+                min_nonnull_rate=0.01,
+                cooccur_ratio=0.9,
+                min_cooccurrence_rows=10,
+                max_numeric_fields=100,
+                ransac_iter=50,
+                ransac_sample_size=20,
+                inlier_ratio=0.7
+            )
+
+            # 强制测试已知规则（仅打印）
+            known_rules = [
+                (['companyfixasset17', 'companyfixasset4', 'companyfixasset5', 'companyfixasset11'], [1, -1, -1, 1]),
+                (['companyfixasset31', 'companyfixasset18', 'companyfixasset19', 'companyfixasset25'], [1, -1, -1, 1]),
+                (['companyfixasset35', 'companyfixasset32', 'companyfixasset33', 'companyfixasset34'], [1, -1, -1, 1]),
+                (['companyfixasset49', 'companyfixasset36', 'companyfixasset37', 'companyfixasset43'], [1, -1, -1, 1]),
+                (['companyfixasset53', 'companyfixasset50', 'companyfixasset51', 'companyfixasset52'], [1, -1, -1, 1]),
+            ]
+
+            print("\n  【强制测试已知规则】")
+            for fields, coeffs in known_rules:
+                # 手动验证
+                valid_mask = self.data[fields].notna().all(axis=1)
+                valid_df = self.data[valid_mask][fields]
+                valid_rows = len(valid_df)
+
+                if valid_rows == 0:
+                    print(f"    ❌ {fields}: 无有效数据")
+                    continue
+
+                X = valid_df.values
+                result = X @ np.array(coeffs)
+                scale = np.max(np.abs(X), axis=1)
+                scale = np.maximum(scale, 1)
+                confidence = (np.abs(result) / scale < 1e-4).mean()
+                violations = (np.abs(result) / scale >= 1e-4).sum()
+
+                status = "✅" if confidence >= 0.95 else "⚠️"
+                # 构建表达式
+                left = [f for f, c in zip(fields, coeffs) if c < 0]
+                right = [f for f, c in zip(fields, coeffs) if c > 0]
+                expr = f"{' + '.join(left)} = {' + '.join(right)}"
+                print(f"    {status} {expr}")
+                print(f"       置信度: {confidence:.4f}, 有效行数: {valid_rows}, 违反数: {violations}")
+
+            if 'audit_rules' not in self.quality_report:
+                self.quality_report['audit_rules'] = {}
+            self.quality_report['audit_rules'].update(audit_rules)
+
+            if not self.quiet:
+                arithmetic_count = len(audit_rules.get('arithmetic_rules', []))
+                fd_count = len(audit_rules.get('functional_dependencies', []))
+                temporal_count = len(audit_rules.get('temporal_rules', []))
+                print(f"  ✅ 发现 {arithmetic_count} 条数值关系")
+                print(f"  ✅ 发现 {fd_count} 条函数依赖")
+                print(f"  ✅ 发现 {temporal_count} 条时序约束")
+
+        except Exception as e:
+            if not self.quiet:
+                print(f"  ⚠️ 勾稽规则发现失败: {e}")
+                import traceback
+                traceback.print_exc()
+
     def generate_full_report(self, show_outlier_details=False):
         """生成完整报告"""
         print("\n" + "=" * 70)
@@ -556,6 +640,10 @@ class AutoStatisticalAnalyzer:
         self.auto_describe()
         self.auto_time_series_analysis()
         self.auto_analyze_relationships()
+
+        # 🆕 勾稽关系发现（在时间序列和关系分析之后）
+        self._discover_audit_rules()
+
         self.recommend_scenarios()
 
         try:
@@ -687,7 +775,8 @@ class AutoStatisticalAnalyzer:
                 },
                 'duplicates': self.quality_report.get('duplicates', {}),
                 'inconsistent_types': self.quality_report.get('inconsistent_types', {}),
-                'invalid_values': self.quality_report.get('invalid_values', {})
+                'invalid_values': self.quality_report.get('invalid_values', {}),
+                'audit_rules': self.quality_report.get('audit_rules', {})  # 新增这一行
             },
             'cleaning_suggestions': self.cleaning_suggestions,
             'correlations': {

@@ -356,6 +356,93 @@
         {% endif %}
     </div>
 
+    <!-- 勾稽规则卡片 -->
+    {% if quality_report.audit_rules %}
+    <div class="card">
+        <h2>🔗 勾稽规则（数据一致性校验）</h2>
+
+        {% if quality_report.audit_rules.arithmetic_rules %}
+        <h3>📐 数值关系</h3>
+        <table style="width:100%; margin-bottom:20px;">
+            <thead>
+                <tr><th>规则</th><th>置信度</th><th>优先级</th><th>违反记录</th></tr>
+            </thead>
+            <tbody>
+                {% for rule in quality_report.audit_rules.arithmetic_rules %}
+                <tr>
+                    <td><code>{{ rule.rule }}</code></td>
+                    <td>{{ "%.1f"|format(rule.confidence * 100) }}%</td>
+                    <td>{% if rule.priority == '高' %}🔴 高{% elif rule.priority == '中' %}🟠 中{% else %}🟢 低{% endif %}</td>
+                    <td>
+                        {% if rule.violation_count > 0 %}
+                        ⚠️ {{ rule.violation_count }} 条
+                        {% else %}
+                        ✅ 0 条
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% endif %}
+
+        {% if quality_report.audit_rules.functional_dependencies %}
+        <h3>🏷️ 函数依赖</h3>
+        <table style="width:100%; margin-bottom:20px;">
+            <thead>
+                <tr><th>规则</th><th>置信度</th><th>优先级</th></tr>
+            </thead>
+            <tbody>
+                {% for rule in quality_report.audit_rules.functional_dependencies %}
+                <tr>
+                    <td><code>{{ rule.rule }}</code></td>
+                    <td>{{ "%.1f"|format(rule.confidence * 100) }}%</td>
+                    <td>{% if rule.priority == '高' %}🔴 高{% elif rule.priority == '中' %}🟠 中{% else %}🟢 低{% endif %}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% endif %}
+
+        {% if quality_report.audit_rules.temporal_rules %}
+        <h3>📅 时序约束</h3>
+        <table style="width:100%; margin-bottom:20px;">
+            <thead>
+                <tr><th>规则</th><th>置信度</th><th>优先级</th></tr>
+            </thead>
+            <tbody>
+                {% for rule in quality_report.audit_rules.temporal_rules %}
+                <tr>
+                    <td><code>{{ rule.rule }}</code></td>
+                    <td>{{ "%.1f"|format(rule.confidence * 100) }}%</td>
+                    <td>{% if rule.priority == '高' %}🔴 高{% elif rule.priority == '中' %}🟠 中{% else %}🟢 低{% endif %}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% endif %}
+
+        {% if quality_report.audit_rules.foreign_keys %}
+        <h3>🔗 外键约束</h3>
+        <table style="width:100%; margin-bottom:20px;">
+            <thead>
+                <tr><th>规则</th><th>置信度</th><th>优先级</th><th>违反记录</th></tr>
+            </thead>
+            <tbody>
+                {% for rule in quality_report.audit_rules.foreign_keys %}
+                <tr>
+                    <td><code>{{ rule.from_table }}.{{ rule.from_col }} → {{ rule.to_table }}.{{ rule.to_col }}</code></td>
+                    <td>{{ "%.1f"|format(rule.confidence * 100) }}%</td>
+                    <td>{% if rule.priority == '高' %}🔴 高{% elif rule.priority == '中' %}🟠 中{% else %}🟢 低{% endif %}</td>
+                    <td>{% if rule.violation_count %}{{ rule.violation_count }}{% else %}0{% endif %} 条</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% endif %}
+    </div>
+    {% endif %}
+
     <!-- 数据清洗建议 -->
     <div class="card">
         <h2>🧹 数据清洗建议</h2>
@@ -379,6 +466,8 @@
         </div>
         {% endif %}
     </div>
+
+
 
     <!-- 偏态与不平衡变量 -->
     {% if skewed_vars or imbalanced_vars %}
