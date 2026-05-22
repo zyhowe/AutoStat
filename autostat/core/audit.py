@@ -23,7 +23,7 @@ class AuditRuleDiscoverer:
                  min_cooccurrence_rows: int = 10,
                  nonnull_diff_ratio: float = 0.2,
                  row_similarity_threshold: float = 0.85,
-                 min_cluster_size: int = 10,
+                 min_cluster_size: int = 5,
                  max_numeric_fields: int = 100,
                  ransac_iter: int = 50,
                  ransac_sample_size: int = 20,
@@ -100,7 +100,7 @@ class AuditRuleDiscoverer:
         ]
         excluded = [col for col in data.columns if col not in self._keep_cols]
         if excluded:
-            self._log(f"排除字段: {excluded[:5]}{'...' if len(excluded) > 5 else ''}")
+            self._log(f"排除字段: {excluded}")
         self._log(f"保留字段数: {len(self._keep_cols)} / {len(data.columns)}")
 
         # 数值关系发现
@@ -226,7 +226,7 @@ class AuditRuleDiscoverer:
         return subclusters
 
     # ==================== 路径二：共同非空比例聚类 ====================
-    def _cluster_by_cooccurrence_ratio(self, df: pd.DataFrame, numeric_cols: List[str]) -> List[List[str]]:
+    def _cluster_by_cooccurrence_ratioold(self, df: pd.DataFrame, numeric_cols: List[str]) -> List[List[str]]:
         """基于共同非空比例直接聚类"""
         if len(numeric_cols) < 2:
             return [[col] for col in numeric_cols]
@@ -264,6 +264,64 @@ class AuditRuleDiscoverer:
 
         self._log(f"    共同非空比例聚类: {len(all_clusters)} -> {len(unique)}")
         return unique
+
+    def _cluster_by_cooccurrence_ratio(self, df: pd.DataFrame, numeric_cols: List[str]) -> List[List[str]]:
+        """
+        基于共同非空比例直接聚类（非互斥，每个字段都可以作为中心生成聚类）
+
+        条件：子类内所有字段同时非空的行数 >= cooccur_ratio * min(各字段非空数)
+        """
+        if len(numeric_cols) < 2:
+            return [[col] for col in numeric_cols]
+
+        nonnull_counts = {col: df[col].notna().sum() for col in numeric_cols}
+        all_clusters = []
+
+        for center in numeric_cols:
+            cluster = [center]
+            center_count = nonnull_counts[center]
+
+            for other in numeric_cols:
+                if other == center:
+                    continue
+
+                # 测试全部字段同时非空的行数
+                test_fields = cluster + [other]
+                co = self._check_cooccurrence(df, test_fields)
+
+                # 计算最小非空数
+                min_count = min(center_count, min(nonnull_counts[c] for c in cluster), nonnull_counts[other])
+
+                # 共同非空比例条件
+                if co >= self.cooccur_ratio * min_count and co >= self.min_cooccurrence_rows:
+                    cluster.append(other)
+
+            if len(cluster) >= 3:
+                all_clusters.append(cluster)
+
+        # 去重（相同字段集合只保留一个）
+        unique_clusters = []
+        seen = set()
+        for c in all_clusters:
+            key = frozenset(c)
+            if key not in seen:
+                seen.add(key)
+                # 按非空数排序，确保输出稳定
+                c_sorted = sorted(c, key=lambda x: nonnull_counts[x], reverse=True)
+                unique_clusters.append(c_sorted)
+
+        self._log(f"    共同非空比例聚类（非互斥）: {len(all_clusters)} -> 去重后 {len(unique_clusters)}")
+
+        # 打印聚类详情（调试用）
+        if self.debug:
+            for i, cluster in enumerate(unique_clusters):
+                self._log(
+                    f"      聚类{i + 1}: {len(cluster)}个变量 - {cluster[:10]}{'...' if len(cluster) > 10 else ''}")
+                # 打印该聚类的共同非空行数
+                co = self._check_cooccurrence(df, cluster)
+                self._log(f"        共同非空行数: {co}")
+
+        return unique_clusters
 
     # ==================== 路径三：非空数相近聚类 ====================
     def _cluster_by_nonnull_similarity(self, df: pd.DataFrame, numeric_cols: List[str]) -> List[List[str]]:
@@ -304,13 +362,12 @@ class AuditRuleDiscoverer:
         return clusters
 
     # ==================== 路径四：行相似度聚类 ====================
-    # ==================== 路径四：行相似度聚类 ====================
     def _cluster_rows_by_similarity(self, df: pd.DataFrame, numeric_cols: List[str]) -> List[pd.DataFrame]:
         """
         基于行相似度的在线聚类
         返回: 每个聚类的DataFrame列表
         """
-        if len(df) <5: # self.min_cluster_size:
+        if len(df) < self.min_cluster_size:
             return []
 
         # 提取数值数据，缺失填0
@@ -346,11 +403,11 @@ class AuditRuleDiscoverer:
         self._log(f"    行相似度聚类（原始）: {len(classes)} 个类")
 
         # 打印每个类的信息
-        # for i, class_indices in enumerate(classes):
-        #     self._log(f"      类{i + 1}: {len(class_indices)} 行")
-        #     # 输出该类的前5个行索引
-        #     sample_indices = class_indices[:5]
-        #     self._log(f"        行索引样例: {sample_indices}")
+        for i, class_indices in enumerate(classes):
+            self._log(f"      类{i + 1}: {len(class_indices)} 行")
+            # 输出该类的前5个行索引
+            sample_indices = class_indices[:5]
+            self._log(f"        行索引样例: {sample_indices}")
 
         # 过滤小类，返回每个类的DataFrame
         result_dfs = []
@@ -372,8 +429,7 @@ class AuditRuleDiscoverer:
         #     self._log(f"      保留类{i + 1}: {len(cluster_df)} 行")
         #     # 输出该类前3行的简要信息（可选，根据debug级别）
         #     if self.debug and len(cluster_df) > 0:
-        #         #preview = cluster_df.iloc[0:3, :3].to_string() if len(cluster_df.columns) > 3 else cluster_df.iloc[0:3].to_string()
-        #         preview = cluster_df.iloc[0:3, :3].to_string()
+        #         preview = cluster_df.iloc[0:3, :3].to_string() if len(cluster_df.columns) > 3 else cluster_df.iloc[0:3].to_string()
         #         self._log(f"        前3行预览:\n{preview}")
 
         return result_dfs
@@ -545,8 +601,7 @@ class AuditRuleDiscoverer:
 
         return rules
 
-
-
+    # ==================== 主流程 ====================
     # ==================== 主流程 ====================
     def _discover_arithmetic_rules(self, df: pd.DataFrame,
                                    numeric_cols: List[str]) -> List[Dict]:
@@ -558,13 +613,63 @@ class AuditRuleDiscoverer:
         if len(numeric_cols) < 3:
             return []
 
+        # ==================== 调试：目标字段组定义 ====================
+        target_groups = [
+            (['companyfixasset32', 'companyfixasset33', 'companyfixasset34', 'companyfixasset35'], "32+33=35+34"),
+            (['companyfixasset36', 'companyfixasset37', 'companyfixasset43', 'companyfixasset49'], "36+37=49+43"),
+            (['companyfixasset50', 'companyfixasset51', 'companyfixasset52', 'companyfixasset53'], "50+51=53+52"),
+        ]
+
+        # 打印目标字段组的非空数和两两相关系数
+        if self.debug:
+            self._log("\n  【目标字段组调试信息】")
+            for fields, desc in target_groups:
+                self._log(f"    目标组: {desc} = {fields}")
+                # 非空数
+                for f in fields:
+                    if f in df.columns:
+                        n = df[f].notna().sum()
+                        self._log(f"      {f}: 非空数={n}")
+                    else:
+                        self._log(f"      {f}: 字段不存在")
+                # 两两相关系数
+                for i, f1 in enumerate(fields):
+                    for f2 in fields[i + 1:]:
+                        if f1 in df.columns and f2 in df.columns:
+                            valid_df = df[[f1, f2]].dropna()
+                            if len(valid_df) > 0:
+                                corr = valid_df.corr().iloc[0, 1]
+                                self._log(f"      {f1} vs {f2}: 共同非空={len(valid_df)}, 相关系数={corr:.4f}")
+                            else:
+                                self._log(f"      {f1} vs {f2}: 无共同非空")
+                        else:
+                            self._log(f"      {f1} vs {f2}: 字段缺失")
+
         all_rules = []
 
         # # 路径一：相关聚类
         # self._log("\n  【路径一：相关聚类】")
+        # # 调试：打印聚类前的字段列表
+        # if self.debug:
+        #     self._log(f"    输入字段数: {len(numeric_cols)}")
+        #
         # rules1 = self._discover_by_path_one(df, numeric_cols)
         # all_rules.extend(rules1)
         # self._log(f"    路径一发现规则数: {len(rules1)}")
+        #
+        # # 调试：打印路径一聚类结果中是否包含目标字段组
+        # if self.debug:
+        #     corr_clusters = self._cluster_by_correlation(df, numeric_cols)
+        #     self._log(f"    路径一聚类结果（共{len(corr_clusters)}个）:")
+        #     for i, cluster in enumerate(corr_clusters):
+        #         self._log(f"      聚类{i + 1}: {len(cluster)}个变量 - {cluster[:5]}{'...' if len(cluster) > 5 else ''}")
+        #         for fields, desc in target_groups:
+        #             if set(fields).issubset(set(cluster)):
+        #                 self._log(f"        ✅ 包含目标组 {desc}")
+        #             elif any(f in cluster for f in fields):
+        #                 present = [f for f in fields if f in cluster]
+        #                 if present:
+        #                     self._log(f"        ⚠️ 部分包含 {desc}: {present}")
         #
         # # 路径二：共同非空比例聚类
         # self._log("\n  【路径二：共同非空比例聚类】")
@@ -579,6 +684,19 @@ class AuditRuleDiscoverer:
         #             rules2.extend(self._discover_rules_in_subcluster(df, sub))
         # all_rules.extend(rules2)
         # self._log(f"    路径二发现规则数: {len(rules2)}")
+        # #
+        # # 调试：打印路径二聚类结果中是否包含目标字段组
+        # if self.debug:
+        #     self._log(f"    路径二聚类结果（共{len(ratio_clusters)}个）:")
+        #     for i, cluster in enumerate(ratio_clusters):
+        #         self._log(f"      聚类{i + 1}: {len(cluster)}个变量 - {cluster}")
+        #         for fields, desc in target_groups:
+        #             if set(fields).issubset(set(cluster)):
+        #                 self._log(f"        ✅ 包含目标组 {desc}")
+        #             elif any(f in cluster for f in fields):
+        #                 present = [f for f in fields if f in cluster]
+        #                 if present:
+        #                     self._log(f"        ⚠️ 部分包含 {desc}: {present}")
         #
         # # 路径三：非空数相近聚类
         # self._log("\n  【路径三：非空数相近聚类】")
@@ -593,53 +711,60 @@ class AuditRuleDiscoverer:
         #             rules3.extend(self._discover_rules_in_subcluster(df, sub))
         # all_rules.extend(rules3)
         # self._log(f"    路径三发现规则数: {len(rules3)}")
+        #
+        # # 调试：打印路径三聚类结果中是否包含目标字段组
+        # if self.debug:
+        #     self._log(f"    路径三聚类结果（共{len(nonnull_clusters)}个）:")
+        #     for i, cluster in enumerate(nonnull_clusters):
+        #         self._log(f"      聚类{i + 1}: {len(cluster)}个变量 - {cluster[:5]}{'...' if len(cluster) > 5 else ''}")
+        #         for fields, desc in target_groups:
+        #             if set(fields).issubset(set(cluster)):
+        #                 self._log(f"        ✅ 包含目标组 {desc}")
+        #             elif any(f in cluster for f in fields):
+        #                 present = [f for f in fields if f in cluster]
+        #                 if present:
+        #                     self._log(f"        ⚠️ 部分包含 {desc}: {present}")
 
-        # 路径四：行相似度聚类
+        # # 路径四：行相似度聚类
         self._log("\n  【路径四：行相似度聚类】")
         row_clusters = self._cluster_rows_by_similarity(df, numeric_cols)
+
+        # 调试：打印行聚类结果中是否包含目标字段组（需要检查每个行聚类子集的字段相关性聚类）
+        if self.debug and len(row_clusters) > 0:
+            self._log(f"    路径四行聚类结果（共{len(row_clusters)}个行类）:")
+            for i, cluster_df in enumerate(row_clusters):
+                self._log(f"      行类{i + 1}: {len(cluster_df)}行")
+                # 对每个行类，计算字段相关聚类，检查是否包含目标字段组
+                corr_clusters = self._cluster_by_correlation(cluster_df, numeric_cols)
+                self._log(f"        字段聚类结果（共{len(corr_clusters)}个）:")
+                for j, field_cluster in enumerate(corr_clusters):
+                    if len(field_cluster) < 3:
+                        continue
+                    self._log(
+                        f"          字段聚类{j + 1}: {len(field_cluster)}个变量 - {field_cluster}")
+                    for fields, desc in target_groups:
+                        if set(fields).issubset(set(field_cluster)):
+                            self._log(f"            ✅ 包含目标组 {desc}")
+                        elif any(f in field_cluster for f in fields):
+                            present = [f for f in fields if f in field_cluster]
+                            if present:
+                                self._log(f"            ⚠️ 部分包含 {desc}: {present}")
+
         rules4 = []
         for i, cluster_df in enumerate(row_clusters):
             self._log(f"      处理行聚类{i + 1}: {len(cluster_df)} 行")
             # 在聚类子集上执行路径一
-            sub_rules = self._discover_by_path_one(cluster_df, numeric_cols)
+            sub_rules = self._discover_by_path_one3(cluster_df, numeric_cols)
+
+            # 使用过滤稀疏字段的版本
+            # sub_rules = self._discover_by_path_one3(
+            #     cluster_df, numeric_cols,
+            #     min_nonnull_in_cluster=5,  # 至少10行非空
+            #     min_nonnull_ratio_in_cluster=0.05  # 或至少5%的行数
+            # )
             rules4.extend(sub_rules)
         all_rules.extend(rules4)
         self._log(f"    路径四发现规则数: {len(rules4)}")
-
-        # self._log("\n  【路径四：行相似度聚类】")
-        # row_clusters = self._cluster_rows_by_similarity(df, numeric_cols)
-        # rules4 = []
-        # for i, cluster_df in enumerate(row_clusters):
-        #     self._log(f"      处理行聚类{i + 1}: {len(cluster_df)} 行")
-        #     # 在聚类子集上执行路径一
-        #     sub_rules = self._discover_by_path_one2(cluster_df, numeric_cols)
-        #     rules4.extend(sub_rules)
-        # all_rules.extend(rules4)
-        # self._log(f"    路径四发现规则数: {len(rules4)}")
-
-        # # 路径四：行相似度聚类
-        # self._log("\n  【路径四：行相似度聚类】")
-        # row_clusters = self._cluster_rows_by_similarity(df, numeric_cols)
-        # rules4 = []
-        # for i, cluster_df in enumerate(row_clusters):
-        #     self._log(f"      处理行聚类{i + 1}: {len(cluster_df)} 行")
-        #     # 在聚类子集上执行路径二（共同非空比例聚类）
-        #     sub_rules = self._discover_by_path_two(cluster_df, numeric_cols)
-        #     rules4.extend(sub_rules)
-        # all_rules.extend(rules4)
-        # self._log(f"    路径四发现规则数: {len(rules4)}")
-
-        # # 路径四：行相似度聚类
-        # self._log("\n  【路径四：行相似度聚类】")
-        # row_clusters = self._cluster_rows_by_similarity(df, numeric_cols)
-        # rules4 = []
-        # for i, cluster_df in enumerate(row_clusters):
-        #     self._log(f"      处理行聚类{i + 1}: {len(cluster_df)} 行")
-        #     # 在聚类子集上执行路径三（非空数相近聚类）
-        #     sub_rules = self._discover_by_path_three(cluster_df, numeric_cols)
-        #     rules4.extend(sub_rules)
-        # all_rules.extend(rules4)
-        # self._log(f"    路径四发现规则数: {len(rules4)}")
 
         # 合并去重
         seen = set()
@@ -678,8 +803,87 @@ class AuditRuleDiscoverer:
             rules.extend(self._discover_rules_in_subcluster(df, cluster))
         return rules
 
-        # ==================== 路径二内部方法 ====================
+    def _discover_by_path_one3(self, df: pd.DataFrame, numeric_cols: List[str]) -> List[Dict]:
+        """执行路径一（相关聚类），根据字段数决定是否拆分子类"""
+        rules = []
+        corr_clusters = self._cluster_by_correlation(df, numeric_cols)
+        for cluster in corr_clusters:
+            if len(cluster) < 3:
+                continue
+            # 如果字段数 <= 20，不拆分，直接用聚类结果
+            if len(cluster) <= 20:
+                rules.extend(self._discover_rules_in_subcluster(df, cluster))
+            else:
+                # 字段数 > 20，按共同非空比例拆分子类
+                subclusters = self._split_by_cooccurrence_ratio(df, cluster)
+                for sub in subclusters:
+                    if len(sub) >= 3:
+                        rules.extend(self._discover_rules_in_subcluster(df, sub))
+        return rules
 
+    def _discover_by_path_one5(self, df: pd.DataFrame, numeric_cols: List[str]) -> List[Dict]:
+        """执行路径一（相关聚类），根据共同非空行数决定是否拆分子类"""
+        rules = []
+        corr_clusters = self._cluster_by_correlation(df, numeric_cols)
+        for cluster in corr_clusters:
+            if len(cluster) < 3:
+                continue
+
+            # 检查所有字段同时非空的行数
+            cooccur = self._check_cooccurrence(df, cluster)
+
+            # 如果共同非空行数 >= 100，或者字段数 <= 10，不拆分
+            if cooccur >= 100 or len(cluster) <= 10:
+                rules.extend(self._discover_rules_in_subcluster(df, cluster))
+            else:
+                # 否则按共同非空比例拆分子类
+                subclusters = self._split_by_cooccurrence_ratio(df, cluster)
+                for sub in subclusters:
+                    if len(sub) >= 3:
+                        rules.extend(self._discover_rules_in_subcluster(df, sub))
+        return rules
+
+    def _discover_by_path_one4(self, df: pd.DataFrame, numeric_cols: List[str],
+                              min_nonnull_in_cluster: int = 10,
+                              min_nonnull_ratio_in_cluster: float = 0.05) -> List[Dict]:
+        """
+        执行路径一（相关聚类），在聚类子集上发现关系
+
+        参数:
+        - df: 数据框
+        - numeric_cols: 数值字段列表
+        - min_nonnull_in_cluster: 在行聚类中，字段最小非空数
+        - min_nonnull_ratio_in_cluster: 在行聚类中，字段最小非空比例
+        """
+        # 过滤稀疏字段：只保留在当前行聚类中非空数足够的字段
+        cluster_rows = len(df)
+        filtered_cols = []
+        for col in numeric_cols:
+            nonnull_count = df[col].notna().sum()
+            if nonnull_count >= min_nonnull_in_cluster or nonnull_count / cluster_rows >= min_nonnull_ratio_in_cluster:
+                filtered_cols.append(col)
+            else:
+                self._log(
+                    f"        过滤稀疏字段: {col} (非空数={nonnull_count}, 比例={nonnull_count / cluster_rows:.1%})")
+
+        if len(filtered_cols) < 3:
+            self._log(f"        过滤后字段不足3个，跳过")
+            return []
+
+        self._log(f"        过滤后保留 {len(filtered_cols)} 个字段")
+
+        rules = []
+        corr_clusters = self._cluster_by_correlation(df, filtered_cols)
+        for cluster in corr_clusters:
+            if len(cluster) < 3:
+                continue
+            subclusters = self._split_by_cooccurrence_ratio(df, cluster)
+            for sub in subclusters:
+                if len(sub) >= 3:
+                    rules.extend(self._discover_rules_in_subcluster(df, sub))
+        return rules
+
+    # ==================== 路径二内部方法 ====================
     def _discover_by_path_two(self, df: pd.DataFrame, numeric_cols: List[str]) -> List[Dict]:
         """执行路径二（共同非空比例聚类）"""
         rules = []
@@ -706,8 +910,6 @@ class AuditRuleDiscoverer:
                 if len(sub) >= 3:
                     rules.extend(self._discover_rules_in_subcluster(df, sub))
         return rules
-
-
 
     # ==================== 函数依赖 ====================
     def _discover_functional_dependencies(self, df: pd.DataFrame,
