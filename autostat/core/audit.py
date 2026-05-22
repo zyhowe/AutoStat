@@ -1,17 +1,17 @@
 # autostat/core/audit.py
-"""勾稽关系发现模块 - 按相关图聚类，按共同非空拆分子类，RANSAC+SVD发现关系，支持等式验证"""
+"""勾稽关系发现模块 - 四条路径：相关聚类 + 共同非空聚类 + 非空数相近聚类 + 行相似度聚类"""
 
 import numpy as np
 import pandas as pd
 import networkx as nx
 from typing import Dict, List, Tuple, Any, Optional, Set
 from collections import defaultdict
-from math import gcd
-from functools import reduce
+from sklearn.ensemble import IsolationForest
+from sklearn.preprocessing import StandardScaler
 
 
 class AuditRuleDiscoverer:
-    """勾稽规则发现器"""
+    """勾稽规则发现器 - 四条路径"""
 
     def __init__(self,
                  precision: float = 1e-6,
@@ -21,20 +21,28 @@ class AuditRuleDiscoverer:
                  min_nonnull_rate: float = 0.01,
                  cooccur_ratio: float = 0.9,
                  min_cooccurrence_rows: int = 10,
+                 nonnull_diff_ratio: float = 0.2,
+                 row_similarity_threshold: float = 0.85,
+                 min_cluster_size: int = 10,
                  max_numeric_fields: int = 100,
                  ransac_iter: int = 50,
                  ransac_sample_size: int = 20,
                  inlier_ratio: float = 0.7,
                  debug: bool = False):
         """
+        勾稽规则发现器初始化
+
         参数:
         - precision: 浮点数比较精度
         - min_confidence: 最小置信度阈值
-        - corr_threshold: 相关系数阈值
+        - corr_threshold: 相关系数阈值（路径一使用）
         - min_nonnull_count: 最小非空数（低于此值排除）
         - min_nonnull_rate: 最小非空率（低于此值排除）
-        - cooccur_ratio: 共同非空比例阈值（>= 此值 * min(非空数) 才合并）
+        - cooccur_ratio: 共同非空比例阈值（路径二使用）
         - min_cooccurrence_rows: 最小共同非空行数
+        - nonnull_diff_ratio: 非空数差异比例阈值（路径三使用）
+        - row_similarity_threshold: 行相似度阈值（路径四使用）
+        - min_cluster_size: 最小聚类大小（路径四使用）
         - max_numeric_fields: 最多处理的数值字段数
         - ransac_iter: RANSAC 迭代次数
         - ransac_sample_size: RANSAC 采样大小
@@ -48,6 +56,9 @@ class AuditRuleDiscoverer:
         self.min_nonnull_rate = min_nonnull_rate
         self.cooccur_ratio = cooccur_ratio
         self.min_cooccurrence_rows = min_cooccurrence_rows
+        self.nonnull_diff_ratio = nonnull_diff_ratio
+        self.row_similarity_threshold = row_similarity_threshold
+        self.min_cluster_size = min_cluster_size
         self.max_numeric_fields = max_numeric_fields
         self.ransac_iter = ransac_iter
         self.ransac_sample_size = ransac_sample_size
@@ -62,7 +73,7 @@ class AuditRuleDiscoverer:
                      foreign_keys: List[Dict] = None) -> Dict[str, Any]:
         """发现所有类型的勾稽规则"""
         self._log("=" * 60)
-        self._log("开始勾稽关系发现")
+        self._log("开始勾稽关系发现（四条路径）")
         self._log("=" * 60)
 
         rules = {
@@ -81,7 +92,7 @@ class AuditRuleDiscoverer:
         for col in list(data.columns)[:20]:
             self._log(f"  {col}: 非空数={nonnull_counts[col]}, 非空率={nonnull_rates[col]:.2%}")
 
-        # 步骤1：过滤高缺失字段
+        # 过滤高缺失字段
         self._keep_cols = [
             col for col in data.columns
             if nonnull_counts[col] >= self.min_nonnull_count
@@ -89,8 +100,7 @@ class AuditRuleDiscoverer:
         ]
         excluded = [col for col in data.columns if col not in self._keep_cols]
         if excluded:
-            self._log(
-                f"排除字段（非空数<{self.min_nonnull_count} 且 非空率<{self.min_nonnull_rate:.0%}）: {excluded[:5]}{'...' if len(excluded) > 5 else ''}")
+            self._log(f"排除字段: {excluded[:5]}{'...' if len(excluded) > 5 else ''}")
         self._log(f"保留字段数: {len(self._keep_cols)} / {len(data.columns)}")
 
         # 数值关系发现
@@ -143,7 +153,15 @@ class AuditRuleDiscoverer:
         valid_mask = df[fields].notna().all(axis=1)
         return valid_mask.sum()
 
-    # ==================== 步骤2：按相关图聚类 ====================
+    def _calculate_row_similarity(self, a: np.ndarray, b: np.ndarray) -> float:
+        """计算两行数据的相关系数（忽略缺失值）"""
+        mask = ~(np.isnan(a) | np.isnan(b))
+        if mask.sum() < 3:
+            return 0.0
+        corr = np.corrcoef(a[mask], b[mask])[0, 1]
+        return corr if not np.isnan(corr) else 0.0
+
+    # ==================== 路径一：相关聚类 ====================
     def _cluster_by_correlation(self, df: pd.DataFrame, numeric_cols: List[str]) -> List[List[str]]:
         """
         按相关系数构建图，取连通分量作为聚类
@@ -165,31 +183,19 @@ class AuditRuleDiscoverer:
                     edge_count += 1
 
         self._log(f"    相关图: {len(numeric_cols)} 节点, {edge_count} 边, 阈值={self.corr_threshold}")
-
         components = list(nx.connected_components(G))
         clusters = [list(comp) for comp in components]
-
-        self._log(f"    连通分量数: {len(clusters)}")
+        self._log(f"    相关聚类数: {len(clusters)}")
         return clusters
 
-    # ==================== 步骤3：按共同非空拆分子类（非互斥） ====================
-    def _split_by_cooccurrence_non_exclusive(self, df: pd.DataFrame, cluster: List[str]) -> List[List[str]]:
-        """
-        按共同非空条件拆分子类（非互斥）
-
-        每个字段可以属于多个子类，只要满足条件就创建子类
-
-        条件：子类内所有字段同时非空的行数 >= cooccur_ratio * min(各字段非空数)
-        """
+    # ==================== 按共同非空比例拆分子类 ====================
+    def _split_by_cooccurrence_ratio(self, df: pd.DataFrame, cluster: List[str]) -> List[List[str]]:
+        """按共同非空比例拆分子类"""
         if len(cluster) <= 3:
             return [cluster]
 
-        # 计算非空数
         nonnull_counts = {col: df[col].notna().sum() for col in cluster}
-
-        # 按非空数从大到小排序（大的作为种子，更容易找到关系）
         sorted_cols = sorted(cluster, key=lambda x: nonnull_counts[x], reverse=True)
-
         subclusters = []
 
         for seed in sorted_cols:
@@ -200,19 +206,15 @@ class AuditRuleDiscoverer:
                 if other == seed:
                     continue
 
-                # 测试加入 other 后的共同非空数
                 test_fields = subcluster + [other]
-                cooccur = self._check_cooccurrence(df, test_fields)
-
-                # 计算最小非空数
+                co = self._check_cooccurrence(df, test_fields)
                 min_count = min(seed_count, min(nonnull_counts[o] for o in subcluster), nonnull_counts[other])
 
-                # 判断条件
-                if cooccur >= self.cooccur_ratio * min_count and cooccur >= self.min_cooccurrence_rows:
+                if co >= self.cooccur_ratio * min_count and co >= self.min_cooccurrence_rows:
                     subcluster.append(other)
 
             if len(subcluster) >= 3:
-                # 检查是否与已有子类重复
+                # 去重
                 is_dup = False
                 for existing in subclusters:
                     if set(subcluster) == set(existing):
@@ -220,23 +222,172 @@ class AuditRuleDiscoverer:
                         break
                 if not is_dup:
                     subclusters.append(subcluster)
-                    self._log(
-                        f"      子类: {len(subcluster)}个变量, 共同非空={self._check_cooccurrence(df, subcluster)}")
 
         return subclusters
 
-    # ==================== 步骤4：发现关系 ====================
+    # ==================== 路径二：共同非空比例聚类 ====================
+    def _cluster_by_cooccurrence_ratio(self, df: pd.DataFrame, numeric_cols: List[str]) -> List[List[str]]:
+        """基于共同非空比例直接聚类"""
+        if len(numeric_cols) < 2:
+            return [[col] for col in numeric_cols]
+
+        nonnull_counts = {col: df[col].notna().sum() for col in numeric_cols}
+        all_clusters = []
+
+        for center in numeric_cols:
+            cluster = [center]
+
+            for other in numeric_cols:
+                if other == center:
+                    continue
+
+                test_fields = cluster + [other]
+                co = self._check_cooccurrence(df, test_fields)
+                min_count = min(nonnull_counts[center],
+                                min(nonnull_counts[c] for c in cluster),
+                                nonnull_counts[other])
+
+                if co >= self.cooccur_ratio * min_count and co >= self.min_cooccurrence_rows:
+                    cluster.append(other)
+
+            if len(cluster) >= 3:
+                all_clusters.append(cluster)
+
+        # 去重
+        unique = []
+        seen = set()
+        for c in all_clusters:
+            key = frozenset(c)
+            if key not in seen:
+                seen.add(key)
+                unique.append(c)
+
+        self._log(f"    共同非空比例聚类: {len(all_clusters)} -> {len(unique)}")
+        return unique
+
+    # ==================== 路径三：非空数相近聚类 ====================
+    def _cluster_by_nonnull_similarity(self, df: pd.DataFrame, numeric_cols: List[str]) -> List[List[str]]:
+        """基于非空数相近聚类"""
+        if len(numeric_cols) < 2:
+            return [[col] for col in numeric_cols]
+
+        nonnull_counts = {col: df[col].notna().sum() for col in numeric_cols}
+        sorted_cols = sorted(numeric_cols, key=lambda x: nonnull_counts[x])
+
+        clusters = []
+        used = set()
+
+        for col in sorted_cols:
+            if col in used:
+                continue
+
+            cluster = [col]
+            base_count = nonnull_counts[col]
+            used.add(col)
+
+            for other in sorted_cols:
+                if other in used or other == col:
+                    continue
+                other_count = nonnull_counts[other]
+                diff_ratio = abs(other_count - base_count) / max(base_count, other_count)
+                if diff_ratio <= self.nonnull_diff_ratio:
+                    test_fields = cluster + [other]
+                    co = self._check_cooccurrence(df, test_fields)
+                    if co >= self.min_cooccurrence_rows:
+                        cluster.append(other)
+                        used.add(other)
+
+            if len(cluster) >= 3:
+                clusters.append(cluster)
+
+        self._log(f"    非空数相近聚类: {len(clusters)}")
+        return clusters
+
+    # ==================== 路径四：行相似度聚类 ====================
+    # ==================== 路径四：行相似度聚类 ====================
+    def _cluster_rows_by_similarity(self, df: pd.DataFrame, numeric_cols: List[str]) -> List[pd.DataFrame]:
+        """
+        基于行相似度的在线聚类
+        返回: 每个聚类的DataFrame列表
+        """
+        if len(df) <5: # self.min_cluster_size:
+            return []
+
+        # 提取数值数据，缺失填0
+        X = df[numeric_cols].values
+        X = np.nan_to_num(X, nan=0)
+
+        # 在线聚类
+        classes = []  # 每个类的行索引列表
+        centers = []  # 每个类的中心（均值向量）
+
+        for i, row in enumerate(X):
+            best_class = -1
+            best_sim = -1
+
+            # 找最相似的类
+            for j, center in enumerate(centers):
+                sim = self._calculate_row_similarity(row, center)
+                if sim > best_sim and sim > self.row_similarity_threshold:
+                    best_sim = sim
+                    best_class = j
+
+            if best_class >= 0:
+                # 加入现有类
+                classes[best_class].append(i)
+                # 增量更新中心（均值）
+                old_size = len(classes[best_class]) - 1
+                centers[best_class] = (centers[best_class] * old_size + row) / (old_size + 1)
+            else:
+                # 创建新类
+                classes.append([i])
+                centers.append(row.copy())
+
+        self._log(f"    行相似度聚类（原始）: {len(classes)} 个类")
+
+        # 打印每个类的信息
+        # for i, class_indices in enumerate(classes):
+        #     self._log(f"      类{i + 1}: {len(class_indices)} 行")
+        #     # 输出该类的前5个行索引
+        #     sample_indices = class_indices[:5]
+        #     self._log(f"        行索引样例: {sample_indices}")
+
+        # 过滤小类，返回每个类的DataFrame
+        result_dfs = []
+        filtered_out = []
+        for i, class_indices in enumerate(classes):
+            if len(class_indices) >= self.min_cluster_size:
+                cluster_df = df.iloc[class_indices].copy()
+                result_dfs.append(cluster_df)
+            else:
+                filtered_out.append(i + 1)  # 记录被过滤的类编号
+
+        if filtered_out:
+            self._log(f"    被过滤的小类（<{self.min_cluster_size}行）: 类{filtered_out}")
+
+        self._log(f"    行相似度聚类（过滤后）: {len(result_dfs)} 个类")
+
+        # 输出过滤后每个类的信息
+        # for i, cluster_df in enumerate(result_dfs):
+        #     self._log(f"      保留类{i + 1}: {len(cluster_df)} 行")
+        #     # 输出该类前3行的简要信息（可选，根据debug级别）
+        #     if self.debug and len(cluster_df) > 0:
+        #         #preview = cluster_df.iloc[0:3, :3].to_string() if len(cluster_df.columns) > 3 else cluster_df.iloc[0:3].to_string()
+        #         preview = cluster_df.iloc[0:3, :3].to_string()
+        #         self._log(f"        前3行预览:\n{preview}")
+
+        return result_dfs
+
+    # ==================== 关系发现 ====================
     def _discover_rules_in_subcluster(self, df: pd.DataFrame, fields: List[str]) -> List[Dict]:
-        """
-        在子类中发现关系
-        """
+        """在子类中发现关系"""
         if len(fields) < 3:
             return []
 
-        # 取共同非空的数据
         valid_df = self._get_valid_data(df, fields)
         valid_rows = len(valid_df)
         self._log(f"        有效数据行数: {valid_rows}")
+        self._log(f"        有效数据: {fields}")
 
         if valid_rows < self.min_cooccurrence_rows:
             self._log(f"        有效数据行数 < {self.min_cooccurrence_rows}，跳过")
@@ -245,7 +396,6 @@ class AuditRuleDiscoverer:
         X = valid_df[fields].values
         n_cols = len(fields)
 
-        # 确保采样数大于列数
         actual_sample_size = max(self.ransac_sample_size, n_cols + 1)
         if actual_sample_size > valid_rows:
             actual_sample_size = valid_rows
@@ -305,7 +455,6 @@ class AuditRuleDiscoverer:
         U, s, Vt = np.linalg.svd(inlier_X_centered, full_matrices=False)
         coeffs = Vt[-1, :]
 
-        # 符号系数
         coeffs_sign = np.zeros(len(coeffs), dtype=int)
         for i, c in enumerate(coeffs):
             if c > self.precision:
@@ -315,7 +464,6 @@ class AuditRuleDiscoverer:
 
         self._log(f"        符号系数: {coeffs_sign}")
 
-        # 找出非零系数
         nonzero_indices = [i for i, c in enumerate(coeffs_sign) if c != 0]
 
         if len(nonzero_indices) < 3:
@@ -365,7 +513,6 @@ class AuditRuleDiscoverer:
                 self._log(f"        跳过: 置信度不足")
                 continue
 
-            # 构建表达式
             left_parts = []
             right_parts = []
 
@@ -398,166 +545,169 @@ class AuditRuleDiscoverer:
 
         return rules
 
+
+
     # ==================== 主流程 ====================
     def _discover_arithmetic_rules(self, df: pd.DataFrame,
                                    numeric_cols: List[str]) -> List[Dict]:
         """
-        主流程：
-        1. 按相关图聚类
-        2. 对每个聚类按共同非空拆分子类（非互斥）
-        3. 对每个子类发现关系
+        主流程：四条路径独立运行，合并去重
         """
         self._log("  [数值关系] 开始...")
 
         if len(numeric_cols) < 3:
             return []
 
-        # 步骤2：相关图聚类
-        clusters = self._cluster_by_correlation(df, numeric_cols)
-        self._log(f"    相关聚类数: {len(clusters)}")
-
         all_rules = []
 
-        for i, cluster in enumerate(clusters):
-            if len(cluster) < 3:
-                continue
+        # # 路径一：相关聚类
+        # self._log("\n  【路径一：相关聚类】")
+        # rules1 = self._discover_by_path_one(df, numeric_cols)
+        # all_rules.extend(rules1)
+        # self._log(f"    路径一发现规则数: {len(rules1)}")
+        #
+        # # 路径二：共同非空比例聚类
+        # self._log("\n  【路径二：共同非空比例聚类】")
+        # ratio_clusters = self._cluster_by_cooccurrence_ratio(df, numeric_cols)
+        # rules2 = []
+        # for cluster in ratio_clusters:
+        #     if len(cluster) < 3:
+        #         continue
+        #     subclusters = self._split_by_cooccurrence_ratio(df, cluster)
+        #     for sub in subclusters:
+        #         if len(sub) >= 3:
+        #             rules2.extend(self._discover_rules_in_subcluster(df, sub))
+        # all_rules.extend(rules2)
+        # self._log(f"    路径二发现规则数: {len(rules2)}")
+        #
+        # # 路径三：非空数相近聚类
+        # self._log("\n  【路径三：非空数相近聚类】")
+        # nonnull_clusters = self._cluster_by_nonnull_similarity(df, numeric_cols)
+        # rules3 = []
+        # for cluster in nonnull_clusters:
+        #     if len(cluster) < 3:
+        #         continue
+        #     subclusters = self._split_by_cooccurrence_ratio(df, cluster)
+        #     for sub in subclusters:
+        #         if len(sub) >= 3:
+        #             rules3.extend(self._discover_rules_in_subcluster(df, sub))
+        # all_rules.extend(rules3)
+        # self._log(f"    路径三发现规则数: {len(rules3)}")
 
-            self._log(f"    聚类{i + 1}: {len(cluster)}个变量")
+        # 路径四：行相似度聚类
+        self._log("\n  【路径四：行相似度聚类】")
+        row_clusters = self._cluster_rows_by_similarity(df, numeric_cols)
+        rules4 = []
+        for i, cluster_df in enumerate(row_clusters):
+            self._log(f"      处理行聚类{i + 1}: {len(cluster_df)} 行")
+            # 在聚类子集上执行路径一
+            sub_rules = self._discover_by_path_one(cluster_df, numeric_cols)
+            rules4.extend(sub_rules)
+        all_rules.extend(rules4)
+        self._log(f"    路径四发现规则数: {len(rules4)}")
 
-            # 步骤3：按共同非空拆分子类（非互斥）
-            subclusters = self._split_by_cooccurrence_non_exclusive(df, cluster)
-            self._log(f"      拆分为 {len(subclusters)} 个子类")
+        # self._log("\n  【路径四：行相似度聚类】")
+        # row_clusters = self._cluster_rows_by_similarity(df, numeric_cols)
+        # rules4 = []
+        # for i, cluster_df in enumerate(row_clusters):
+        #     self._log(f"      处理行聚类{i + 1}: {len(cluster_df)} 行")
+        #     # 在聚类子集上执行路径一
+        #     sub_rules = self._discover_by_path_one2(cluster_df, numeric_cols)
+        #     rules4.extend(sub_rules)
+        # all_rules.extend(rules4)
+        # self._log(f"    路径四发现规则数: {len(rules4)}")
 
-            # 步骤4：对每个子类发现关系
-            for subcluster in subclusters:
-                if len(subcluster) < 3:
-                    continue
+        # # 路径四：行相似度聚类
+        # self._log("\n  【路径四：行相似度聚类】")
+        # row_clusters = self._cluster_rows_by_similarity(df, numeric_cols)
+        # rules4 = []
+        # for i, cluster_df in enumerate(row_clusters):
+        #     self._log(f"      处理行聚类{i + 1}: {len(cluster_df)} 行")
+        #     # 在聚类子集上执行路径二（共同非空比例聚类）
+        #     sub_rules = self._discover_by_path_two(cluster_df, numeric_cols)
+        #     rules4.extend(sub_rules)
+        # all_rules.extend(rules4)
+        # self._log(f"    路径四发现规则数: {len(rules4)}")
 
-                rules = self._discover_rules_in_subcluster(df, subcluster)
-                all_rules.extend(rules)
+        # # 路径四：行相似度聚类
+        # self._log("\n  【路径四：行相似度聚类】")
+        # row_clusters = self._cluster_rows_by_similarity(df, numeric_cols)
+        # rules4 = []
+        # for i, cluster_df in enumerate(row_clusters):
+        #     self._log(f"      处理行聚类{i + 1}: {len(cluster_df)} 行")
+        #     # 在聚类子集上执行路径三（非空数相近聚类）
+        #     sub_rules = self._discover_by_path_three(cluster_df, numeric_cols)
+        #     rules4.extend(sub_rules)
+        # all_rules.extend(rules4)
+        # self._log(f"    路径四发现规则数: {len(rules4)}")
 
-        # 步骤5：去重
+        # 合并去重
         seen = set()
         unique_rules = []
-
         for rule in all_rules:
             key = frozenset(rule["fields"])
             if key not in seen:
                 seen.add(key)
                 unique_rules.append(rule)
 
-        self._log(f"    总计: {len(unique_rules)} 条数值关系")
+        self._log(f"\n    合并后总计: {len(unique_rules)} 条数值关系")
         return unique_rules
 
-    # ==================== 等式验证 ====================
-    def verify_rule(self, df: pd.DataFrame, fields: List[str], coeffs: List[int]) -> Dict:
-        """
-        验证指定等式是否成立
+    # ==================== 路径一内部方法 ====================
+    def _discover_by_path_one(self, df: pd.DataFrame, numeric_cols: List[str]) -> List[Dict]:
+        """执行路径一（相关聚类）"""
+        rules = []
+        corr_clusters = self._cluster_by_correlation(df, numeric_cols)
+        for cluster in corr_clusters:
+            if len(cluster) < 3:
+                continue
+            subclusters = self._split_by_cooccurrence_ratio(df, cluster)
+            for sub in subclusters:
+                if len(sub) >= 3:
+                    rules.extend(self._discover_rules_in_subcluster(df, sub))
+        return rules
 
-        参数:
-        - fields: 字段列表 [A, B, C, D]
-        - coeffs: 系数列表 [1, 1, -1, -1] 表示 A + B = C + D
+    def _discover_by_path_one2(self, df: pd.DataFrame, numeric_cols: List[str]) -> List[Dict]:
+        """执行路径一（相关聚类），不拆分子类"""
+        rules = []
+        corr_clusters = self._cluster_by_correlation(df, numeric_cols)
+        for cluster in corr_clusters:
+            if len(cluster) < 3:
+                continue
+            # 直接用聚类结果作为字段列表，不拆分
+            rules.extend(self._discover_rules_in_subcluster(df, cluster))
+        return rules
 
-        返回: {
-            "success": bool,
-            "fields": List[str],
-            "coeffs": List[int],
-            "confidence": float,
-            "valid_rows": int,
-            "total_rows": int,
-            "violations": int
-        }
-        """
-        if len(fields) != len(coeffs):
-            return {
-                "success": False,
-                "error": "fields 和 coeffs 长度不匹配"
-            }
+        # ==================== 路径二内部方法 ====================
 
-        # 检查字段是否存在
-        missing_fields = [f for f in fields if f not in df.columns]
-        if missing_fields:
-            return {
-                "success": False,
-                "error": f"字段不存在: {missing_fields}"
-            }
+    def _discover_by_path_two(self, df: pd.DataFrame, numeric_cols: List[str]) -> List[Dict]:
+        """执行路径二（共同非空比例聚类）"""
+        rules = []
+        ratio_clusters = self._cluster_by_cooccurrence_ratio(df, numeric_cols)
+        for cluster in ratio_clusters:
+            if len(cluster) < 3:
+                continue
+            subclusters = self._split_by_cooccurrence_ratio(df, cluster)
+            for sub in subclusters:
+                if len(sub) >= 3:
+                    rules.extend(self._discover_rules_in_subcluster(df, sub))
+        return rules
 
-        # 取共同非空的数据
-        valid_df = self._get_valid_data(df, fields)
-        valid_rows = len(valid_df)
+    # ==================== 路径三内部方法 ====================
+    def _discover_by_path_three(self, df: pd.DataFrame, numeric_cols: List[str]) -> List[Dict]:
+        """执行路径三（非空数相近聚类）"""
+        rules = []
+        nonnull_clusters = self._cluster_by_nonnull_similarity(df, numeric_cols)
+        for cluster in nonnull_clusters:
+            if len(cluster) < 3:
+                continue
+            subclusters = self._split_by_cooccurrence_ratio(df, cluster)
+            for sub in subclusters:
+                if len(sub) >= 3:
+                    rules.extend(self._discover_rules_in_subcluster(df, sub))
+        return rules
 
-        if valid_rows == 0:
-            return {
-                "success": False,
-                "fields": fields,
-                "coeffs": coeffs,
-                "confidence": 0.0,
-                "valid_rows": 0,
-                "total_rows": len(df),
-                "violations": 0,
-                "error": "没有共同非空的行"
-            }
 
-        X = valid_df[fields].values
-        result = X @ np.array(coeffs)
-
-        # 计算相对误差
-        scale = np.max(np.abs(X), axis=1)
-        scale = np.maximum(scale, 1)
-        rel_error = np.abs(result) / scale
-        violations = (rel_error >= 1e-4).sum()
-        confidence = (rel_error < 1e-4).mean()
-
-        # 构建表达式
-        left_parts = []
-        right_parts = []
-        for field, coeff in zip(fields, coeffs):
-            if coeff > 0:
-                right_parts.append(field)
-            elif coeff < 0:
-                left_parts.append(field)
-
-        if not left_parts:
-            left_parts = ["0"]
-        if not right_parts:
-            right_parts = ["0"]
-
-        left_expr = " + ".join(left_parts)
-        right_expr = " + ".join(right_parts)
-        expr = f"{left_expr} = {right_expr}"
-
-        return {
-            "success": True,
-            "rule": expr,
-            "fields": fields,
-            "coeffs": coeffs,
-            "confidence": round(confidence, 4),
-            "valid_rows": valid_rows,
-            "total_rows": len(df),
-            "violations": violations,
-            "violation_rate": round(violations / valid_rows, 4) if valid_rows > 0 else 0
-        }
-
-    def verify_rules_batch(self, df: pd.DataFrame, rules: List[Tuple[List[str], List[int]]]) -> List[Dict]:
-        """
-        批量验证多个等式
-
-        参数:
-        - rules: 规则列表，每个元素为 (fields, coeffs)
-
-        返回: 验证结果列表
-        """
-        results = []
-        for fields, coeffs in rules:
-            result = self.verify_rule(df, fields, coeffs)
-            results.append(result)
-            if self.debug:
-                if result["success"]:
-                    self._log(
-                        f"      验证规则 {result['rule']}: 置信度={result['confidence']:.4f}, 有效行数={result['valid_rows']}, 违反数={result['violations']}")
-                else:
-                    self._log(f"      验证规则失败: {result.get('error', 'unknown')}")
-        return results
 
     # ==================== 函数依赖 ====================
     def _discover_functional_dependencies(self, df: pd.DataFrame,
@@ -718,5 +868,30 @@ def verify_audit_rules(data: pd.DataFrame,
 
     返回: 验证结果列表
     """
-    discoverer = AuditRuleDiscoverer(debug=debug)
-    return discoverer.verify_rules_batch(data, rules)
+    results = []
+    for fields, coeffs in rules:
+        valid_mask = data[fields].notna().all(axis=1)
+        valid_df = data[valid_mask][fields]
+        valid_rows = len(valid_df)
+        if valid_rows == 0:
+            results.append({"success": False, "error": "无有效数据", "fields": fields})
+            continue
+        X = valid_df.values
+        result = X @ np.array(coeffs)
+        scale = np.max(np.abs(X), axis=1)
+        scale = np.maximum(scale, 1)
+        confidence = (np.abs(result) / scale < 1e-4).mean()
+        violations = (np.abs(result) / scale >= 1e-4).sum()
+        left = [f for f, c in zip(fields, coeffs) if c < 0]
+        right = [f for f, c in zip(fields, coeffs) if c > 0]
+        expr = f"{' + '.join(left)} = {' + '.join(right)}"
+        results.append({
+            "success": True,
+            "rule": expr,
+            "fields": fields,
+            "coeffs": coeffs,
+            "confidence": round(confidence, 4),
+            "valid_rows": valid_rows,
+            "violations": violations
+        })
+    return results

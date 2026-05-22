@@ -551,11 +551,12 @@ class AutoStatisticalAnalyzer:
                 debug=True,
                 precision=1e-6,
                 min_confidence=0.5,
-                corr_threshold=0.8,
+                corr_threshold=0.3,
                 min_nonnull_count=10,
                 min_nonnull_rate=0.01,
                 cooccur_ratio=0.9,
                 min_cooccurrence_rows=10,
+                nonnull_diff_ratio=0.2,  # 新增：非空数相差比例阈值
                 max_numeric_fields=100,
                 ransac_iter=50,
                 ransac_sample_size=20,
