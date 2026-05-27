@@ -550,17 +550,18 @@ class AutoStatisticalAnalyzer:
                 foreign_keys=[],
                 debug=True,
                 precision=1e-6,
-                min_confidence=0.5,
+                min_confidence=0.7,
                 corr_threshold=0.3,
                 min_nonnull_count=10,
                 min_nonnull_rate=0.01,
-                cooccur_ratio=0.9,
-                min_cooccurrence_rows=10,
+                cooccur_ratio=0.5,
+                min_cooccurrence_rows=5,
                 nonnull_diff_ratio=0.2,  # 新增：非空数相差比例阈值
                 max_numeric_fields=100,
                 ransac_iter=50,
-                ransac_sample_size=20,
-                inlier_ratio=0.7
+                ransac_sample_size=50,
+                inlier_ratio=0.7,
+                min_cluster_size=3
             )
 
             # 强制测试已知规则（仅打印）
