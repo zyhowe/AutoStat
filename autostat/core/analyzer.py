@@ -558,7 +558,7 @@ class AutoStatisticalAnalyzer:
                 min_cooccurrence_rows=5,
                 nonnull_diff_ratio=0.2,  # 新增：非空数相差比例阈值
                 max_numeric_fields=100,
-                ransac_iter=50,
+                ransac_iter=1,
                 ransac_sample_size=50,
                 inlier_ratio=0.7,
                 min_cluster_size=3
