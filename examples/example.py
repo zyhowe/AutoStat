@@ -329,6 +329,46 @@ def example_database():
         analyzer.analyze_all_tables()
 
 
+def example_database_single_table():
+    """数据库分析示例"""
+    print("=" * 60)
+    print("示例7: 数据库分析（SQL Server）")
+    print("=" * 60)
+    print("⚠️ 此示例需要配置数据库连接信息")
+    print("请修改以下配置后取消注释运行:")
+
+
+    # 实际使用示例（注释状态）
+
+    DB_CONFIG = {
+        'server': '10.17.207.163',
+        'database': 'FCDB',
+        'username': 'sa',
+        'password': 'Finchina#2014',
+        'trusted_connection': False
+    }
+
+    TABLE_NAMES = ['CompanyFixAsset']
+    RELATIONSHIPS = [
+    ]
+
+    tables = DataLoader.load_multiple_tables(
+        server=DB_CONFIG['server'],
+        database=DB_CONFIG['database'],
+        table_names=TABLE_NAMES,
+        username=DB_CONFIG['username'],
+        password=DB_CONFIG['password'],
+        trusted_connection=DB_CONFIG['trusted_connection'],
+        relationships=RELATIONSHIPS,
+        limit=5000
+    )
+
+    if tables:
+        analyzer = MultiTableStatisticalAnalyzer(tables)
+        analyzer.analyze_all_tables()
+        # reporter = Reporter(analyzer)
+        # reporter.to_html("results\\database_single_table_report.html")
+
 
 def example_single_table_from_file():
     """单表分析示例 - 从文件加载CSV"""
@@ -401,7 +441,7 @@ if __name__ == "__main__":
     # example_json_output()
 
     # 多表分析（使用生成的数据）
-    example_multi_table()
+    #example_multi_table()
 
     # 多表分析（从文件加载）
     # example_multi_table_from_files()
@@ -411,6 +451,8 @@ if __name__ == "__main__":
 
     # 数据库分析（需要配置）
     #example_database()
+
+    example_database_single_table()
 
     # 单表分析（从CSV文件加载）
     # example_single_table_from_file()

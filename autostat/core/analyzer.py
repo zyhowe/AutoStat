@@ -565,39 +565,39 @@ class AutoStatisticalAnalyzer:
             )
 
             # 强制测试已知规则（仅打印）
-            known_rules = [
-                (['companyfixasset17', 'companyfixasset4', 'companyfixasset5', 'companyfixasset11'], [1, -1, -1, 1]),
-                (['companyfixasset31', 'companyfixasset18', 'companyfixasset19', 'companyfixasset25'], [1, -1, -1, 1]),
-                (['companyfixasset35', 'companyfixasset32', 'companyfixasset33', 'companyfixasset34'], [1, -1, -1, 1]),
-                (['companyfixasset49', 'companyfixasset36', 'companyfixasset37', 'companyfixasset43'], [1, -1, -1, 1]),
-                (['companyfixasset53', 'companyfixasset50', 'companyfixasset51', 'companyfixasset52'], [1, -1, -1, 1]),
-            ]
-
-            print("\n  【强制测试已知规则】")
-            for fields, coeffs in known_rules:
-                # 手动验证
-                valid_mask = self.data[fields].notna().all(axis=1)
-                valid_df = self.data[valid_mask][fields]
-                valid_rows = len(valid_df)
-
-                if valid_rows == 0:
-                    print(f"    ❌ {fields}: 无有效数据")
-                    continue
-
-                X = valid_df.values
-                result = X @ np.array(coeffs)
-                scale = np.max(np.abs(X), axis=1)
-                scale = np.maximum(scale, 1)
-                confidence = (np.abs(result) / scale < 1e-4).mean()
-                violations = (np.abs(result) / scale >= 1e-4).sum()
-
-                status = "✅" if confidence >= 0.95 else "⚠️"
-                # 构建表达式
-                left = [f for f, c in zip(fields, coeffs) if c < 0]
-                right = [f for f, c in zip(fields, coeffs) if c > 0]
-                expr = f"{' + '.join(left)} = {' + '.join(right)}"
-                print(f"    {status} {expr}")
-                print(f"       置信度: {confidence:.4f}, 有效行数: {valid_rows}, 违反数: {violations}")
+            # known_rules = [
+            #     (['companyfixasset17', 'companyfixasset4', 'companyfixasset5', 'companyfixasset11'], [1, -1, -1, 1]),
+            #     (['companyfixasset31', 'companyfixasset18', 'companyfixasset19', 'companyfixasset25'], [1, -1, -1, 1]),
+            #     (['companyfixasset35', 'companyfixasset32', 'companyfixasset33', 'companyfixasset34'], [1, -1, -1, 1]),
+            #     (['companyfixasset49', 'companyfixasset36', 'companyfixasset37', 'companyfixasset43'], [1, -1, -1, 1]),
+            #     (['companyfixasset53', 'companyfixasset50', 'companyfixasset51', 'companyfixasset52'], [1, -1, -1, 1]),
+            # ]
+            #
+            # print("\n  【强制测试已知规则】")
+            # for fields, coeffs in known_rules:
+            #     # 手动验证
+            #     valid_mask = self.data[fields].notna().all(axis=1)
+            #     valid_df = self.data[valid_mask][fields]
+            #     valid_rows = len(valid_df)
+            #
+            #     if valid_rows == 0:
+            #         print(f"    ❌ {fields}: 无有效数据")
+            #         continue
+            #
+            #     X = valid_df.values
+            #     result = X @ np.array(coeffs)
+            #     scale = np.max(np.abs(X), axis=1)
+            #     scale = np.maximum(scale, 1)
+            #     confidence = (np.abs(result) / scale < 1e-4).mean()
+            #     violations = (np.abs(result) / scale >= 1e-4).sum()
+            #
+            #     status = "✅" if confidence >= 0.95 else "⚠️"
+            #     # 构建表达式
+            #     left = [f for f, c in zip(fields, coeffs) if c < 0]
+            #     right = [f for f, c in zip(fields, coeffs) if c > 0]
+            #     expr = f"{' + '.join(left)} = {' + '.join(right)}"
+            #     print(f"    {status} {expr}")
+            #     print(f"       置信度: {confidence:.4f}, 有效行数: {valid_rows}, 违反数: {violations}")
 
             if 'audit_rules' not in self.quality_report:
                 self.quality_report['audit_rules'] = {}
