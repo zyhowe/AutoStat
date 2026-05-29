@@ -300,15 +300,38 @@ class AuditRuleDiscoverer:
             self._log(f"路径四行聚类结果（共{len(row_clusters)}个行类）:")
 
         rules4 = []
+        # 调用相关聚类再发现规则
         for i, cluster_df in enumerate(row_clusters):
             self._log(f"处理行聚类{i + 1}: {len(cluster_df)} 行")
-            # 过滤稀疏字段，只保留全1字段或非空率高的字段
             sub_rules = self._cluster_columns_and_rules(
                 cluster_df, numeric_cols,
                 min_nonnull_in_cluster=self.min_cluster_size,  # 全1字段才保留
                 min_nonnull_ratio_in_cluster=0.01  # 或者100%非空
             )
             rules4.extend(sub_rules)
+
+        #直接规则发现，不先相关的话，效果极差，基本得不到规则
+        # for i, cluster_df in enumerate(row_clusters):
+        #     weights = cluster_df.attrs.get('column_weights', None)
+        #     all_numeric_cols = cluster_df.attrs.get('numeric_cols', numeric_cols)
+        #     self._log(f"处理行聚类{i + 1}: {len(cluster_df)} 行")
+        #
+        #     # 关键修复：只保留在 all_numeric_cols 中的数值字段
+        #     numeric_fields_in_cluster = [col for col in all_numeric_cols if col in cluster_df.columns]
+        #
+        #     if len(numeric_fields_in_cluster) < 3:
+        #         self._log(f"    数值字段不足3个，跳过")
+        #         continue
+        #
+        #     self._log(f"    数值字段数: {len(numeric_fields_in_cluster)}")
+        #
+        #     sub_rules = self._discover_rules_in_subcluster(
+        #         cluster_df,  # 使用行聚类子集
+        #         numeric_fields_in_cluster,  # 只传数值字段
+        #         weights=weights,
+        #         all_numeric_cols=all_numeric_cols
+        #     )
+        #     rules4.extend(sub_rules)
 
         all_rules.extend(rules4)
         self._log(f"    路径四发现规则数: {len(rules4)}")
@@ -440,7 +463,7 @@ class AuditRuleDiscoverer:
         return result_dfs
 
     # ==================== 字段相关聚类与规则发现主函数 ====================
-    def _cluster_columns_and_rules(self, df: pd.DataFrame, numeric_cols: List[str],
+    def _cluster_columns_and_rules1(self, df: pd.DataFrame, numeric_cols: List[str],
                               min_nonnull_in_cluster: int = 10,
                               min_nonnull_ratio_in_cluster: float = 0.05) -> List[Dict]:
         """
@@ -514,6 +537,128 @@ class AuditRuleDiscoverer:
 
         return rules
 
+    # 执行完后再过滤后再次执行
+    def _cluster_columns_and_rules(self, df: pd.DataFrame, numeric_cols: List[str],
+                                   min_nonnull_in_cluster: int = 10,
+                                   min_nonnull_ratio_in_cluster: float = 0.05) -> List[Dict]:
+        """
+        执行相关聚类，在聚类子集上发现关系。
+        增强：利用行聚类时计算的 column_weights 筛选出高权重的稀疏字段，
+        仅对这些字段进行关系发现（不加权 SVD），避免稠密字段干扰。
+        再增加：第一次发现规则后，对每个字段聚类，剔除规则中与当前聚类重叠 ≥3 的字段，
+               然后在剩余字段上再次发现规则（使用全局规则）。
+        """
+        cluster_rows = len(df)
+
+        # 获取权重（从行聚类传递过来）
+        weights = df.attrs.get('column_weights', None)
+        all_numeric_cols = df.attrs.get('numeric_cols', numeric_cols)
+
+        # 相关聚类
+        corr_clusters = self._cluster_columns_by_correlation(df, all_numeric_cols)
+        self._log(f"    行类: {len(df)}行,字段聚类结果（共{len(corr_clusters)}个）:")
+
+        # ========== 第一阶段：收集所有第一次发现的规则 ==========
+        first_rules_all = []  # 存储所有第一次发现的规则（全局）
+        cluster_info = []  # 存储每个 cluster 的原始字段列表和拆分信息，供第二阶段使用
+
+        for idx, cluster in enumerate(corr_clusters):
+            if len(cluster) < 3:
+                continue
+            self._log(f"        字段聚类: {len(cluster)}个变量 - {cluster}")
+
+            # 检查所有字段同时非空的行数
+            cooccur = self._check_cooccurrence(df, cluster)
+
+            # 第一次发现规则
+            first_rules = []
+            if cooccur >= 100 or len(cluster) <= 10:
+                sub_rules = self._discover_rules_in_subcluster(df, cluster, weights=weights,
+                                                               all_numeric_cols=all_numeric_cols)
+                first_rules.extend(sub_rules)
+            else:
+                subclusters = self._split_by_cooccurrence_ratio(df, cluster)
+                for sub in subclusters:
+                    if len(sub) < 3:
+                        continue
+                    sub_rules = self._discover_rules_in_subcluster(df, sub, weights=weights,
+                                                                   all_numeric_cols=all_numeric_cols)
+                    first_rules.extend(sub_rules)
+
+            if first_rules:
+                self._log(f"          第一次发现规则:{first_rules}")
+                first_rules_all.extend(first_rules)
+
+            # 保存该 cluster 的相关信息，供第二阶段使用
+            cluster_info.append({
+                'cluster': cluster,
+                'cooccur': cooccur,
+                'first_rules': first_rules  # 可保留，但第二阶段基于全局规则
+            })
+
+        # ========== 第二阶段：基于全局规则，剔除字段后再次发现 ==========
+        # 汇总所有第一次规则（去重，基于字段集合）
+        seen_global = set()
+        global_rules = []
+        for rule in first_rules_all:
+            key = frozenset(rule['fields'])
+            if key not in seen_global:
+                seen_global.add(key)
+                global_rules.append(rule)
+
+        # 收集需要剔除的字段（按 cluster 分别计算）
+        all_rules = first_rules_all[:]  # 最终结果先包含第一次规则
+
+        for info in cluster_info:
+            cluster = info['cluster']
+            cooccur = info['cooccur']
+
+            # 基于全局规则，找出需要从该 cluster 中剔除的字段
+            remove_fields = set()
+            for rule in global_rules:
+                rule_fields = set(rule.get('fields', []))
+                overlap = len(rule_fields & set(cluster))
+                if overlap >= 3:
+                    remove_fields.update(rule_fields)
+
+            if not remove_fields:
+                self._log(f"        字段聚类 {cluster} 无剔除字段，跳过第二次发现")
+                continue
+
+            remaining_fields = [f for f in cluster if f not in remove_fields]
+            self._log(f"        字段聚类 {cluster} 剔除 {remove_fields} 后剩余: {remaining_fields}")
+
+            if len(remaining_fields) < 3:
+                self._log(f"          剩余字段不足3个，跳过第二次发现")
+                continue
+
+            # 第二次发现规则（使用相同的拆分策略）
+            second_rules = []
+            if cooccur >= 100 or len(remaining_fields) <= 10:
+                sub_rules = self._discover_rules_in_subcluster(df, remaining_fields,
+                                                               weights=weights,
+                                                               all_numeric_cols=all_numeric_cols)
+                second_rules.extend(sub_rules)
+            else:
+                subclusters = self._split_by_cooccurrence_ratio(df, remaining_fields)
+                for sub in subclusters:
+                    if len(sub) < 3:
+                        continue
+                    sub_rules = self._discover_rules_in_subcluster(df, sub, weights=weights,
+                                                                   all_numeric_cols=all_numeric_cols)
+                    second_rules.extend(sub_rules)
+
+            if second_rules:
+                self._log(f"          第二次发现规则:{second_rules}")
+                # 合并去重
+                existing_keys = {frozenset(r.get('fields', [])) for r in all_rules}
+                for r in second_rules:
+                    key = frozenset(r.get('fields', []))
+                    if key not in existing_keys:
+                        existing_keys.add(key)
+                        all_rules.append(r)
+
+        return all_rules
 
     # ==================== 字段相关聚类 ====================
     def _cluster_columns_by_correlation(self, df: pd.DataFrame, numeric_cols: List[str]) -> List[List[str]]:
@@ -529,12 +674,23 @@ class AuditRuleDiscoverer:
         corr_matrix = df[numeric_cols].corr().abs()
         edge_count = 0
 
+        # 1. 构建直接相连的边（1跳）
         for i, col1 in enumerate(numeric_cols):
             for col2 in numeric_cols[i + 1:]:
                 corr_val = corr_matrix.loc[col1, col2]
                 if not pd.isna(corr_val) and corr_val > self.corr_threshold:
                     G.add_edge(col1, col2)
                     edge_count += 1
+
+        # 2. 添加2跳连通关系（距离为2的节点也直接连边）
+        # 方法：计算图的平方（graph square）
+        nodes = list(G.nodes())
+        for i, u in enumerate(nodes):
+            for v in nodes[i + 1:]:
+                # 检查是否存在长度为2的路径 u - x - v
+                if nx.has_path(G, u, v) and nx.shortest_path_length(G, u, v) == 2:
+                    G.add_edge(u, v)
+
 
         components = list(nx.connected_components(G))
         clusters = [list(comp) for comp in components]
@@ -579,6 +735,7 @@ class AuditRuleDiscoverer:
         return subclusters
 
     # ==================== 关系发现 ====================
+    #继承权重
     def _discover_rules_in_subcluster(self, df: pd.DataFrame, fields: List[str],
                                       weights: np.ndarray = None,
                                       all_numeric_cols: List[str] = None) -> List[Dict]:
@@ -622,6 +779,105 @@ class AuditRuleDiscoverer:
                     self._log(
                         f"        发现规则: {rule['rule']} (置信度={rule['confidence']})，当前字段数={len(current_fields)}")
             #break #只跑一次
+
+            # 如果剩余字段数 <= 3，无法继续剔除（因为至少需要3个字段）
+            if len(current_fields) <= 3:
+                break
+
+            # 找到当前字段集中权重最小的字段（IDF 最小，最稠密）
+            min_weight_field = min(current_fields, key=lambda f: field_weight_dict[f])
+            # 移除该字段
+            current_fields.remove(min_weight_field)
+            # self._log(
+            #     f"        剔除低权重字段: {min_weight_field} (权重={field_weight_dict[min_weight_field]:.3f})，剩余 {len(current_fields)} 个字段")
+
+        # 反向剔除，效果不好
+        # # 逐步剔除权重最高的字段，直到字段数 < 3
+        # while len(current_fields) >= 3:
+        #     # 对当前字段集做普通 SVD（不加权）
+        #     rules = self._discover_rules_single_svd(df, current_fields)
+        #
+        #     for rule in rules:
+        #         # 使用规则涉及的字段集合作为去重key
+        #         rule_key = frozenset(rule.get('fields', []))
+        #         if rule_key not in seen_rules:
+        #             seen_rules.add(rule_key)
+        #             all_rules.append(rule)
+        #             self._log(
+        #                 f"        发现规则: {rule['rule']} (置信度={rule['confidence']})，当前字段数={len(current_fields)}")
+        #     # break #只跑一次
+        #
+        #     # 如果剩余字段数 <= 3，无法继续剔除（因为至少需要3个字段）
+        #     if len(current_fields) <= 3:
+        #         break
+        #
+        #     # 找到当前字段集中权重最大的字段（IDF 最小，最稠密）
+        #     max_weight_field = max(current_fields, key=lambda f: field_weight_dict[f])   ###仅此不同
+        #     # 移除该字段
+        #     current_fields.remove(max_weight_field)  ###
+        #     # self._log(
+        #     #     f"        剔除高权重字段: {min_weight_field} (权重={field_weight_dict[min_weight_field]:.3f})，剩余 {len(current_fields)} 个字段")
+
+        # 返回所有收集到的规则
+        return all_rules
+
+
+    #只对当前类计算权重,没啥用，基本上都是【1 1 1.。。】
+    def _discover_rules_in_subcluster2(self, df: pd.DataFrame, fields: List[str],
+                                      weights: np.ndarray = None,
+                                      all_numeric_cols: List[str] = None) -> List[Dict]:
+        """
+        在子类中发现关系，支持逐步剔除低权重字段的循环 SVD。
+        每次剔除权重最低的字段，对剩余字段做普通 SVD，收集所有发现的规则。
+
+        注意：权重基于当前 df（行聚类子集）重新计算，不使用传入的 weights 参数。
+        """
+        if len(fields) < 3:
+            return []
+
+        # ========== 新增：基于当前类重新计算权重 ==========
+        # 获取当前类中的数值字段（只取 fields 中存在于 df 的列）
+        available_fields = [f for f in fields if f in df.columns]
+        if len(available_fields) < 3:
+            return []
+
+        # 构建当前类的0-1缺失矩阵
+        X_binary = df[available_fields].notna().astype(int).values
+        total_rows = X_binary.shape[0]
+
+        if total_rows < self.min_cluster_size:
+            return []
+
+        # 计算当前类的IDF权重
+        field_freq = X_binary.sum(axis=0)
+        idf = np.log((total_rows + 1) / (field_freq + 1)) + 1
+        # 使用三次方放大稀疏字段权重
+        local_weights = idf
+
+        # 构建当前字段的权重字典
+        current_fields = available_fields.copy()
+        field_weight_dict = {current_fields[i]: local_weights[i] for i in range(len(current_fields))}
+
+        self._log(
+            f"        基于当前类重新计算权重（{local_weights}）")
+        # ================================================
+
+        all_rules = []  # 收集所有发现的规则
+        seen_rules = set()  # 用于去重（基于字段集合）
+
+        # 逐步剔除权重最低的字段，直到字段数 < 3
+        while len(current_fields) >= 3:
+            # 对当前字段集做普通 SVD（不加权）
+            rules = self._discover_rules_single_svd(df, current_fields)
+
+            for rule in rules:
+                # 使用规则涉及的字段集合作为去重key
+                rule_key = frozenset(rule.get('fields', []))
+                if rule_key not in seen_rules:
+                    seen_rules.add(rule_key)
+                    all_rules.append(rule)
+                    self._log(
+                        f"        发现规则: {rule['rule']} (置信度={rule['confidence']})，当前字段数={len(current_fields)}")
 
             # 如果剩余字段数 <= 3，无法继续剔除（因为至少需要3个字段）
             if len(current_fields) <= 3:

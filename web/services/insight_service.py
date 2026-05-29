@@ -150,13 +150,16 @@ class InsightService:
         # 2. 收集强相关对（相关系数 ≥ 0.5）
         high_corrs = analysis_result.get('correlations', {}).get('high_correlations', [])
         for corr in high_corrs:
-            if abs(corr.get('value', 0)) >= 0.5:
+            if abs(corr.get('value', 0)) >= 0.9:
                 direction = "正" if corr.get('value', 0) > 0 else "负"
                 high_corr_pairs.append(f"{corr['var1']}↔{corr['var2']}({direction}r={corr['value']:.2f})")
 
         if high_corr_pairs:
             # 全部列出，不截断
-            pair_str = '、'.join(high_corr_pairs)
+            if len(high_corr_pairs)<=10:
+               pair_str = '、'.join(high_corr_pairs)
+            else:
+                pair_str = '、'.join(high_corr_pairs[:10])+"......"
             conclusions.append({
                 "icon": "🔗",
                 "title": f"发现{len(high_corr_pairs)}对强相关关系",
