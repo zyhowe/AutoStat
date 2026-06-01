@@ -648,7 +648,6 @@ class AuditRuleDiscoverer:
             })
 
         # ========== 第二阶段：基于全局规则，剔除字段后再次发现 ==========
-        # 汇总所有第一次规则（去重，基于字段集合）
         seen_global = set()
         global_rules = []
         for rule in first_rules_all:
@@ -657,8 +656,16 @@ class AuditRuleDiscoverer:
                 seen_global.add(key)
                 global_rules.append(rule)
 
-        # 收集需要剔除的字段（按 cluster 分别计算）
-        all_rules = first_rules_all[:]  # 最终结果先包含第一次规则
+        # 🆕 最终结果先包含 equality_rules（2字段相等规则）
+        all_rules = equality_rules[:]
+
+        # 然后将第一次发现的规则也加入
+        existing_keys = {frozenset(r.get('fields', [])) for r in all_rules}
+        for rule in first_rules_all:
+            key = frozenset(rule['fields'])
+            if key not in existing_keys:
+                existing_keys.add(key)
+                all_rules.append(rule)
 
         for info in cluster_info:
             cluster = info['cluster']
@@ -798,7 +805,7 @@ class AuditRuleDiscoverer:
         if len(fields) < 3:
             return []
 
-        self._log(f"调用前: weights= {weights}, all_numeric_cols= {all_numeric_cols}")
+        #self._log(f"调用前: weights= {weights}, all_numeric_cols= {all_numeric_cols}")
 
         # 如果没有权重信息，则直接做一次普通 SVD
         if weights is None or all_numeric_cols is None:
