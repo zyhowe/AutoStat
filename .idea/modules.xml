@@ -5,6 +5,7 @@
       <module fileurl="file://$PROJECT_DIR$/.idea/AutoStat.iml" filepath="$PROJECT_DIR$/.idea/AutoStat.iml" />
       <module fileurl="file://$PROJECT_DIR$/../demo/.idea/demo.iml" filepath="$PROJECT_DIR$/../demo/.idea/demo.iml" />
       <module fileurl="file://$PROJECT_DIR$/../dify-official-plugins/.idea/dify-official-plugins.iml" filepath="$PROJECT_DIR$/../dify-official-plugins/.idea/dify-official-plugins.iml" />
+      <module fileurl="file://$PROJECT_DIR$/../hello-agents/.idea/hello-agents.iml" filepath="$PROJECT_DIR$/../hello-agents/.idea/hello-agents.iml" />
       <module fileurl="file://$USER_HOME$/PycharmProjects/myapp/.idea/myapp.iml" filepath="$USER_HOME$/PycharmProjects/myapp/.idea/myapp.iml" />
       <module fileurl="file://$PROJECT_DIR$/../myapp310/.idea/myapp310.iml" filepath="$PROJECT_DIR$/../myapp310/.idea/myapp310.iml" />
     </modules>

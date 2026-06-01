@@ -4,11 +4,13 @@
 import numpy as np
 import pandas as pd
 import networkx as nx
+from sympy import false
 from typing import Dict, List, Tuple, Any, Optional, Set
 from collections import defaultdict
 from sklearn.ensemble import IsolationForest
 from sklearn.preprocessing import StandardScaler
-
+from collections import defaultdict
+import math
 
 class AuditRuleDiscoverer:
     """勾稽规则发现器 - 四条路径"""
@@ -28,6 +30,8 @@ class AuditRuleDiscoverer:
                  ransac_iter: int = 50,
                  ransac_sample_size: int = 20,
                  inlier_ratio: float = 0.7,
+                 min_final_inlier_ratio: float = 0.5,  # 最终内点比例最低要求
+                 coeff_group_tolerance:float=0.5,
                  debug: bool = False):
         """
         勾稽规则发现器初始化
@@ -47,6 +51,8 @@ class AuditRuleDiscoverer:
         - ransac_iter: RANSAC 迭代次数
         - ransac_sample_size: RANSAC 采样大小
         - inlier_ratio: 内点比例阈值
+        - min_final_inlier_ratio: 最终内点比例最低要求
+        - coeff_group_tolerance:系数分组容差阈值
         - debug: 是否输出调试信息
         """
         self.precision = precision
@@ -63,6 +69,8 @@ class AuditRuleDiscoverer:
         self.ransac_iter = ransac_iter
         self.ransac_sample_size = ransac_sample_size
         self.inlier_ratio = inlier_ratio
+        self.min_final_inlier_ratio=min_final_inlier_ratio
+        self.coeff_group_tolerance=coeff_group_tolerance
         self.debug = debug
 
     def _log(self, msg: str):
@@ -345,7 +353,11 @@ class AuditRuleDiscoverer:
                 seen.add(key)
                 unique_rules.append(rule)
 
-        self._log(f"\n    合并后总计: {len(unique_rules)} 条数值关系")
+        self._log(f"\n    合并后总计1: {len(unique_rules)} 条数值关系:{unique_rules}")
+
+        # 新增：线性消元简化
+        unique_rules = self.reduce_arithmetic_rules(unique_rules)
+        self._log(f"\n    合并后总计2: {len(unique_rules)} 条数值关系:{unique_rules}")
         return unique_rules
 
     # ==================== 行相似度聚类 ====================
@@ -546,13 +558,52 @@ class AuditRuleDiscoverer:
         增强：利用行聚类时计算的 column_weights 筛选出高权重的稀疏字段，
         仅对这些字段进行关系发现（不加权 SVD），避免稠密字段干扰。
         再增加：第一次发现规则后，对每个字段聚类，剔除规则中与当前聚类重叠 ≥3 的字段，
-               然后在剩余字段上再次发现规则（使用全局规则）。
+           然后在剩余字段上再次发现规则（使用全局规则）。
         """
         cluster_rows = len(df)
 
         # 获取权重（从行聚类传递过来）
         weights = df.attrs.get('column_weights', None)
         all_numeric_cols = df.attrs.get('numeric_cols', numeric_cols)
+
+        # ========== 新增：先发现2字段相等关系，并剔除冗余字段 ==========
+        equality_rules = self._discover_equality_rules(df, all_numeric_cols)
+
+        # 记录需要剔除的字段（等号右边的字段，即序号较大的）
+        remove_fields = set()
+        for rule in equality_rules:
+            fields = rule['fields']
+            if len(fields) == 2:
+                # 取序号大的字段剔除（假设字段名包含数字，如 companyfixasset50）
+                # 如果没有数字，按字典序取较大的
+                try:
+                    # 尝试提取数字部分
+                    def extract_num(f):
+                        import re
+                        nums = re.findall(r'\d+', f)
+                        return int(nums[-1]) if nums else 0
+
+                    f1_num = extract_num(fields[0])
+                    f2_num = extract_num(fields[1])
+                    if f1_num > f2_num:
+                        remove_fields.add(fields[0])
+                    else:
+                        remove_fields.add(fields[1])
+                except:
+                    # 无法提取数字，按字典序
+                    if fields[0] > fields[1]:
+                        remove_fields.add(fields[0])
+                    else:
+                        remove_fields.add(fields[1])
+
+        # 过滤掉需要剔除的字段
+        if remove_fields:
+            filtered_numeric_cols = [c for c in all_numeric_cols if c not in remove_fields]
+            self._log(f"    2字段相等关系发现 {len(equality_rules)} 条，剔除字段: {remove_fields}")
+            # 更新 all_numeric_cols 和 df（如果需要）
+            all_numeric_cols = filtered_numeric_cols
+            # 注意：不修改 df 本身，只修改后续使用的字段列表
+        # ============================================================
 
         # 相关聚类
         corr_clusters = self._cluster_columns_by_correlation(df, all_numeric_cols)
@@ -893,10 +944,11 @@ class AuditRuleDiscoverer:
         # 返回所有收集到的规则
         return all_rules
 
+
     def _discover_rules_single_svd(self, df: pd.DataFrame, fields: List[str]) -> List[Dict]:
         """
         对指定的字段集合做一次普通 SVD（不加权），返回发现的规则列表。
-        该函数复用原有 SVD 逻辑（去掉加权部分）。
+        优先使用迭代剔除增强版，如果失败则回退到原始 SVD 逻辑。
         """
         if len(fields) < 3:
             return []
@@ -906,32 +958,159 @@ class AuditRuleDiscoverer:
         if valid_rows < self.min_cooccurrence_rows:
             return []
 
-        X = valid_df[fields].values
+        # ========== 调试输出：当目标规则字段同时出现时 ==========
+        bb = False
+        target_fields = ['companyfixasset50', 'companyfixasset51', 'companyfixasset52', 'companyfixasset53']
+        if all(f in fields for f in target_fields):
+            bb = True
+            self._log(f"        [DEBUG] 目标规则字段 {target_fields} 全部存在于当前字段集！")
+            self._log(f"        [DEBUG] 有效数据行数: {valid_rows}")
+            if valid_rows > 0:
+                self._log(f"        [DEBUG] 原始数据前5行:\n{valid_df[target_fields].head()}")
+            else:
+                self._log(f"        [DEBUG] 无有效数据行")
+        # =====================================================
+
+        X_orig = valid_df[fields].values
         n_cols = len(fields)
 
-        # 确定采样大小（全量或随机）
-        actual_sample_size = max(self.ransac_sample_size, n_cols + 1)
-        if actual_sample_size > valid_rows:
-            actual_sample_size = valid_rows
+        # ========== 小样本复制增强 ==========
+        #X_aug, augmented_rows = self._augment_small_sample(X_orig, valid_rows, bb)
+        # =================================
+        X_aug, augmented_rows=X_orig,valid_rows
+
+        # # ========== 尝试迭代剔除增强版 ==========
+        # best_coeffs, best_inlier_mask, best_keep_rows_count = self._iterative_svd_refinement(X_aug, augmented_rows, bb)
+        #
+        # # 如果迭代剔除失败，回退到原始 SVD（全量数据）
+        # if best_coeffs is None:
+        #     if bb:
+        #         self._log("        迭代剔除失败，回退到原始 SVD")
+        #     best_coeffs, best_inlier_mask, best_keep_rows_count = self._basic_svd_fit(X_aug, augmented_rows, bb)
+
+        best_coeffs, best_inlier_mask, best_keep_rows_count = self._basic_svd_fit(X_aug, augmented_rows, bb)
+        if best_coeffs is None:
+            return []
+
+        # 使用最终确定的系数，在原始数据上计算内点（注意：用原始数据，不是增强后的）
+        X = X_orig
+        result = X @ best_coeffs
+        rel_error = np.abs(result) / (np.abs(X[:, 0]) + 1)
+        final_inlier_mask = rel_error < 0.01
+        final_inlier_count = final_inlier_mask.sum()
+
+        if bb:
+            self._log(f"        最终内点 {final_inlier_count}/{valid_rows}")
+
+        if final_inlier_count < valid_rows * self.min_final_inlier_ratio:
+            if bb:
+                self._log("内点不足")
+            return []
+
+        # 共用后续处理（分组、生成规则）
+        return self._extract_rules_from_svd(X, fields, final_inlier_mask, bb)
+
+    def _augment_small_sample(self, X_orig: np.ndarray, valid_rows: int, bb: bool):
+        """
+        小样本复制增强：当有效行数小于阈值时，通过复制和随机缩放增加样本量。
+        返回 (augmented_X, augmented_rows)
+        """
+        REPEAT_THRESHOLD = 50
+        if valid_rows < REPEAT_THRESHOLD:
+            repeat = (REPEAT_THRESHOLD + valid_rows - 1) // valid_rows
+            X_repeated = np.repeat(X_orig, repeat, axis=0)
+            row_scales = np.random.uniform(1, 10, size=(X_repeated.shape[0], 1))
+            # 可选添加微小噪声（当前注释掉）
+            # noise = np.random.uniform(0, 0.0001 * np.abs(X_repeated), size=X_repeated.shape)
+            X_aug = X_repeated * row_scales  # + noise
+            augmented_rows = X_aug.shape[0]
+            if bb:
+                self._log(
+                    f"        有效行数 {valid_rows} < {REPEAT_THRESHOLD}，复制 {repeat} 倍并添加随机缩放(1~10)，用于 SVD 拟合（共 {augmented_rows} 行）")
+            return X_aug, augmented_rows
+        else:
+            return X_orig, valid_rows
+
+    def _iterative_svd_refinement(self, X: np.ndarray, valid_rows: int, bb: bool):
+        """
+        迭代剔除增强版：逐次剔除残差最大的行，找到最优系数。
+        返回 (best_coeffs, best_inlier_mask, best_keep_rows_count)
+        注意：这里的 X 可能是经过小样本增强后的数据，valid_rows 是增强后的行数。
+        """
+        MAX_REMOVE_RATIO = 0.3
+        min_keep_rows = max(5, int(valid_rows * (1 - MAX_REMOVE_RATIO)))
 
         best_coeffs = None
         best_inlier_mask = None
+        best_keep_rows_count = 0
+
+        current_X = X.copy()
+        current_indices = np.arange(valid_rows)
+
+        while len(current_indices) >= min_keep_rows:
+            X_sample = current_X
+            rows_count = len(current_indices)
+
+            try:
+                X_centered = X_sample - np.mean(X_sample, axis=0)
+                U, s, Vt = np.linalg.svd(X_centered, full_matrices=False)
+                coeffs = Vt[-1, :]
+
+                if np.all(np.abs(coeffs) < self.precision):
+                    break
+
+                result = X_sample @ coeffs
+                rel_error = np.abs(result) / (np.abs(X_sample[:, 0]) + 1)
+
+                remove_count = max(1, rows_count // 10)
+                largest_error_indices = np.argsort(rel_error)[-remove_count:]
+
+                # 如果最大误差已经很小，停止剔除
+                if rel_error[largest_error_indices[-1]] < 0.01:
+                    best_coeffs = coeffs
+                    best_keep_rows_count = rows_count
+                    best_inlier_mask = np.zeros(valid_rows, dtype=bool)
+                    best_inlier_mask[current_indices] = True
+                    break
+
+                # 剔除误差最大的行
+                current_X = np.delete(current_X, largest_error_indices, axis=0)
+                current_indices = np.delete(current_indices, largest_error_indices)
+
+            except Exception as e:
+                if bb:
+                    self._log(f"迭代剔除异常: {e}")
+                break
+        else:
+            # while 正常结束，使用最后一次的结果
+            if len(current_indices) >= 3:
+                X_sample = current_X
+                X_centered = X_sample - np.mean(X_sample, axis=0)
+                U, s, Vt = np.linalg.svd(X_centered, full_matrices=False)
+                best_coeffs = Vt[-1, :]
+                best_keep_rows_count = len(current_indices)
+                best_inlier_mask = np.zeros(valid_rows, dtype=bool)
+                best_inlier_mask[current_indices] = True
+
+        return best_coeffs, best_inlier_mask, best_keep_rows_count
+
+    def _basic_svd_fit(self, X: np.ndarray, valid_rows: int, bb: bool):
+        """
+        原始 SVD 拟合：全量数据，RANSAC 迭代（虽然目前是全量采样）。
+        返回 (best_coeffs, best_inlier_mask, best_keep_rows_count)
+        注意：这里的 X 可能是经过小样本增强后的数据，valid_rows 是增强后的行数。
+        """
+        best_coeffs = None
+        best_inlier_mask = None
         best_inlier_count = 0
-        best_sv_ratio = 0
 
-        # RANSAC 迭代
         for _ in range(self.ransac_iter):
-            # if valid_rows <= actual_sample_size:
-            #     sample_idx = np.arange(valid_rows)
-            # else:
-            #     sample_idx = np.random.choice(valid_rows, actual_sample_size, replace=False)
-
             sample_idx = np.arange(valid_rows)
             X_sample = X[sample_idx]
 
             try:
-                X_sample_centered = X_sample - np.mean(X_sample, axis=0)
-                U, s, Vt = np.linalg.svd(X_sample_centered, full_matrices=False)
+                X_centered = X_sample - np.mean(X_sample, axis=0)
+                U, s, Vt = np.linalg.svd(X_centered, full_matrices=False)
                 coeffs = Vt[-1, :]
 
                 if np.all(np.abs(coeffs) < self.precision):
@@ -941,24 +1120,33 @@ class AuditRuleDiscoverer:
                 rel_error = np.abs(result) / (np.abs(X[:, 0]) + 1)
                 inlier_mask = rel_error < 0.01
                 inlier_count = inlier_mask.sum()
-                sv_ratio = s[-1] / s[0] if s[0] > 0 else 1
 
                 if inlier_count > best_inlier_count:
                     best_inlier_count = inlier_count
                     best_coeffs = coeffs
                     best_inlier_mask = inlier_mask
-                    best_sv_ratio = sv_ratio
 
                     if best_inlier_count >= valid_rows * self.inlier_ratio:
                         break
             except Exception:
                 continue
 
-        if best_coeffs is None or best_inlier_count < valid_rows * 0.5:
+        if best_coeffs is None:
+            return None, None, 0
+
+        return best_coeffs, best_inlier_mask, valid_rows
+
+    def _extract_rules_from_svd(self, X: np.ndarray, fields: List[str], inlier_mask: np.ndarray, bb: bool) -> List[
+        Dict]:
+        """
+        共用后续处理：基于内点重新 SVD，分组，生成规则。
+        X 必须是原始数据（未增强），inlier_mask 是基于原始数据的。
+        """
+        # 用内点重新 SVD
+        inlier_X = X[inlier_mask]
+        if len(inlier_X) < 3:
             return []
 
-        # 用内点重新 SVD
-        inlier_X = X[best_inlier_mask]
         inlier_X_centered = inlier_X - np.mean(inlier_X, axis=0)
         U, s, Vt = np.linalg.svd(inlier_X_centered, full_matrices=False)
         coeffs = Vt[-1, :]
@@ -970,28 +1158,43 @@ class AuditRuleDiscoverer:
             elif c < -self.precision:
                 coeffs_sign[i] = -1
 
+        if bb:
+            self._log("7")
+
         nonzero_indices = [i for i, c in enumerate(coeffs_sign) if c != 0]
         if len(nonzero_indices) < 3:
+            if bb:
+                self._log("8")
             return []
 
-        # 按系数绝对值分组
         groups = []
         used = set()
         for i in nonzero_indices:
             if i in used:
                 continue
             target_abs = abs(coeffs[i])
+            if bb:
+                self._log(f"target_abs:{target_abs}")
             group = [i]
             for j in nonzero_indices:
                 if j != i and j not in used:
                     current_abs = abs(coeffs[j])
-                    if target_abs > 0 and abs(current_abs - target_abs) / target_abs < 0.05:
+                    if bb:
+                        self._log(f"current_abs:{current_abs}")
+                    if target_abs > 0 and abs(current_abs - target_abs) / target_abs <self.coeff_group_tolerance: #默认0.2
                         group.append(j)
+            if bb:
+                self._log(f"group:{group}")
             if len(group) >= 3:
                 groups.append(group)
                 used.update(group)
 
+        if bb:
+            self._log("9")
+
         if not groups:
+            if bb:
+                self._log("10")
             return []
 
         rules = []
@@ -1005,7 +1208,12 @@ class AuditRuleDiscoverer:
             scale = np.maximum(scale, 1)
             confidence = (np.abs(result) / scale < 1e-4).mean()
 
+            if bb:
+                self._log(f"11:confidence:{confidence},min_confidence:{self.min_confidence}")
+
             if confidence < self.min_confidence:
+                if bb:
+                    self._log("11")
                 continue
 
             left_parts = []
@@ -1034,6 +1242,178 @@ class AuditRuleDiscoverer:
                 "violation_count": 0,
                 "violation_samples": []
             })
+
+        if bb:
+            self._log(f"12:{rules}")
+
+        return rules
+
+    def reduce_arithmetic_rules(self, rules: List[Dict]) -> List[Dict]:
+        """
+        对加法规则列表进行线性消元简化，去除冗余规则，保留最小不可约集合。
+
+        规则：所有规则（2字段、3字段、4+字段）都参与消元，
+              消元后保留所有长度≥2的线性无关规则。
+        """
+        import math
+
+        # ========== 辅助函数 ==========
+        def rule_to_dict(rule):
+            """将规则转为系数字典 {field: ±1}"""
+            expr = rule['rule']
+            left, right = expr.split(' = ')
+            left_fields = [f.strip() for f in left.split(' + ')] if left != '0' else []
+            right_fields = [f.strip() for f in right.split(' + ')] if right != '0' else []
+            coeffs = {}
+            for f in left_fields:
+                coeffs[f] = coeffs.get(f, 0) - 1
+            for f in right_fields:
+                coeffs[f] = coeffs.get(f, 0) + 1
+            # 标准化：使第一个非零系数为正
+            if coeffs:
+                first = min(coeffs.keys())
+                if coeffs[first] < 0:
+                    coeffs = {f: -c for f, c in coeffs.items()}
+            return coeffs
+
+        def dict_to_rule(coeffs, confidence=1.0, priority='高'):
+            """系数字典转回规则字符串"""
+            left = []
+            right = []
+            for field, c in coeffs.items():
+                if c == 0:
+                    continue
+                if c > 0:
+                    right.append(field)
+                else:
+                    left.append(field)
+            left.sort()
+            right.sort()
+            left_expr = ' + '.join(left) if left else '0'
+            right_expr = ' + '.join(right) if right else '0'
+            rule_str = f"{left_expr} = {right_expr}"
+            return {
+                'rule': rule_str,
+                'fields': list(coeffs.keys()),
+                'confidence': confidence,
+                'priority': priority,
+                'relation_type': 'additive',
+                'violation_count': 0,
+                'violation_samples': []
+            }
+
+        # ========== 1. 所有规则参与消元 ==========
+        if not rules:
+            return []
+
+        # 转换所有规则为系数向量
+        vecs = []
+        for r in rules:
+            vecs.append(rule_to_dict(r))
+
+        # 按长度排序（短的优先作为基）
+        vecs.sort(key=lambda v: len(v))
+
+        # 消元基
+        basis = []
+
+        for v in vecs:
+            cur = v.copy()
+            changed = True
+            iter_count = 0
+            max_iter = 50
+
+            while changed and iter_count < max_iter:
+                changed = False
+                iter_count += 1
+                for b in basis:
+                    # 寻找公共字段
+                    common = None
+                    for f in cur:
+                        if f in b:
+                            common = f
+                            break
+                    if common is None:
+                        continue
+                    # 消去 common
+                    if cur[common] == -b[common]:
+                        for f, coeff in b.items():
+                            cur[f] = cur.get(f, 0) + coeff
+                    elif cur[common] == b[common]:
+                        for f, coeff in b.items():
+                            cur[f] = cur.get(f, 0) - coeff
+                    else:
+                        continue
+                    # 移除系数为0的项
+                    cur = {f: c for f, c in cur.items() if c != 0}
+                    changed = True
+                    break
+
+            if not cur:
+                continue
+
+            # 归一化系数（除以最大公约数）
+            coeff_values = list(cur.values())
+            gcd_val = abs(coeff_values[0])
+            for c in coeff_values[1:]:
+                gcd_val = math.gcd(gcd_val, abs(c))
+            if gcd_val > 1:
+                cur = {f: c // gcd_val for f, c in cur.items()}
+
+            # 标准化：使第一个非零系数为正
+            first_field = min(cur.keys())
+            if cur[first_field] < 0:
+                cur = {f: -c for f, c in cur.items()}
+
+            # 长度检查：只保留2字段及以上的规则
+            if len(cur) < 2:
+                continue
+
+            # 检查是否已在基中
+            already = False
+            for b in basis:
+                if set(cur.keys()) == set(b.keys()) and all(cur[f] == b[f] for f in cur):
+                    already = True
+                    break
+            if already:
+                continue
+
+            basis.append(cur)
+
+        # 转换基向量为规则
+        result = [dict_to_rule(vec) for vec in basis]
+
+        return result
+
+    def _discover_equality_rules(self, df: pd.DataFrame, numeric_cols: List[str]) -> List[Dict]:
+        """
+        发现2字段相等关系：A = B
+        """
+        rules = []
+        n = len(numeric_cols)
+
+        for i in range(n):
+            for j in range(i + 1, n):
+                col1 = numeric_cols[i]
+                col2 = numeric_cols[j]
+
+                # 取两字段都非空的行
+                valid_mask = df[col1].notna() & df[col2].notna()
+                if valid_mask.sum() < self.min_cooccurrence_rows:
+                    continue
+
+                # 检查是否所有行都满足 col1 == col2
+                if (df.loc[valid_mask, col1] == df.loc[valid_mask, col2]).all():
+                    rules.append({
+                        'rule': f"{col1} = {col2}",
+                        'fields': [col1, col2],
+                        'confidence': 1.0,
+                        'priority': '高',
+                        'relation_type': 'additive',
+                        'violation_count': 0,
+                        'violation_samples': []
+                    })
+
         return rules
 
 
