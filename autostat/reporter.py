@@ -348,7 +348,8 @@ class Reporter:
 
         # 强相关对 - 使用 BaseAnalyzer，阈值 0.7
         numeric_vars = [col for col, typ in self.analyzer.variable_types.items() if typ == 'continuous']
-        high_correlations = BaseAnalyzer.get_high_correlations(data, numeric_vars, threshold=0.7) if numeric_vars else []
+        high_correlations = BaseAnalyzer.get_high_correlations(data, numeric_vars,
+                                                               threshold=0.7) if numeric_vars else []
 
         # 时间序列洞察
         time_series_insight = None
@@ -412,12 +413,48 @@ class Reporter:
             next_actions.append("优先处理高缺失率字段")
         if quality.get('outliers'):
             next_actions.append("检查异常值是否为数据错误")
-        if numeric_vars and [c for c in self.analyzer.variable_types if self.analyzer.variable_types[c] in ['categorical', 'categorical_numeric', 'ordinal']]:
+        if numeric_vars and [c for c in self.analyzer.variable_types if
+                             self.analyzer.variable_types[c] in ['categorical', 'categorical_numeric', 'ordinal']]:
             next_actions.append("探索数值变量与分类变量的关系")
         if date_cols and numeric_vars:
             next_actions.append("进行时间序列趋势分析")
         if not next_actions:
             next_actions.append("数据质量良好，可直接进行建模分析")
+
+        # ========== 新增：字段非空统计（用于勾稽规则卡片，只统计数值类型字段） ==========
+        if 'audit_rules' not in quality:
+            quality['audit_rules'] = {}
+
+        # 获取所有数值类型字段
+        numeric_fields = {col for col, typ in self.analyzer.variable_types.items() if typ == 'continuous'}
+
+        if 'field_nonnull_stats' not in quality['audit_rules']:
+            field_stats = []
+            for col in data.columns:
+                if col not in numeric_fields:
+                    continue
+                nonnull_count = data[col].notna().sum()
+                nonnull_rate = nonnull_count / len(data) if len(data) > 0 else 0
+                field_stats.append({
+                    'field': col,
+                    'nonnull_count': nonnull_count,
+                    'nonnull_rate': nonnull_rate
+                })
+            field_stats.sort(key=lambda x: x['nonnull_count'], reverse=True)
+            quality['audit_rules']['field_nonnull_stats'] = field_stats
+
+        # 构建字段非空查找字典，用于鼠标悬停显示
+        field_nonnull_lookup = {}
+        for stat in quality['audit_rules']['field_nonnull_stats']:
+            field_nonnull_lookup[stat['field']] = stat
+        # ==========================================================
+
+        # ========== 新增：对算术规则排序（按字段数，再按规则字符串） ==========
+        if 'audit_rules' in quality and 'arithmetic_rules' in quality['audit_rules']:
+            quality['audit_rules']['arithmetic_rules'].sort(
+                key=lambda r: (len(r.get('fields', [])), r.get('rule', ''))
+            )
+        # ==========================================================
 
         # 使用Jinja2模板渲染
         template_path = os.path.join(os.path.dirname(__file__), '..', 'templates', 'report.html')
@@ -456,7 +493,8 @@ class Reporter:
                 plots=plots,
                 chart_insights=chart_insights,  # 新增：图表解读
                 time_series_diagnostics=time_series_diagnostics,
-                quality_report=quality
+                quality_report=quality,
+                field_nonnull_lookup=field_nonnull_lookup  # 新增：字段非空查找字典
             )
         except Exception as e:
             return self._get_error_html(title, f"模板渲染失败: {str(e)}")

@@ -4,13 +4,10 @@
 import numpy as np
 import pandas as pd
 import networkx as nx
-from sympy import false
 from typing import Dict, List, Tuple, Any, Optional, Set
 from collections import defaultdict
-from sklearn.ensemble import IsolationForest
-from sklearn.preprocessing import StandardScaler
-from collections import defaultdict
 import math
+
 
 class AuditRuleDiscoverer:
     """勾稽规则发现器 - 四条路径"""
@@ -30,30 +27,18 @@ class AuditRuleDiscoverer:
                  ransac_iter: int = 50,
                  ransac_sample_size: int = 20,
                  inlier_ratio: float = 0.7,
-                 min_final_inlier_ratio: float = 0.5,  # 最终内点比例最低要求
-                 coeff_group_tolerance:float=0.5,
+                 min_final_inlier_ratio: float = 0.5,
+                 coeff_group_tolerance: float = 0.5,
+                 # ========== 新增可配置参数 ==========
+                 equality_ratio_threshold: float = 0.8,      # 2字段相等比例阈值
+                 strong_coverage_threshold: float = 0.8,     # 强相等覆盖比例阈值
+                 inlier_error_threshold: float = 0.01,       # 内点误差阈值
+                 max_remove_ratio: float = 0.3,              # 迭代剔除最大比例
+                 small_sample_threshold: int = 50,           # 小样本复制阈值
+                 # ==================================
                  debug: bool = False):
         """
         勾稽规则发现器初始化
-
-        参数:
-        - precision: 浮点数比较精度
-        - min_confidence: 最小置信度阈值
-        - corr_threshold: 相关系数阈值（路径一使用）
-        - min_nonnull_count: 最小非空数（低于此值排除）
-        - min_nonnull_rate: 最小非空率（低于此值排除）
-        - cooccur_ratio: 共同非空比例阈值（路径二使用）
-        - min_cooccurrence_rows: 最小共同非空行数
-        - nonnull_diff_ratio: 非空数差异比例阈值（路径三使用）
-        - row_similarity_threshold: 行相似度阈值（路径四使用）
-        - min_cluster_size: 最小聚类大小（路径四使用）
-        - max_numeric_fields: 最多处理的数值字段数
-        - ransac_iter: RANSAC 迭代次数
-        - ransac_sample_size: RANSAC 采样大小
-        - inlier_ratio: 内点比例阈值
-        - min_final_inlier_ratio: 最终内点比例最低要求
-        - coeff_group_tolerance:系数分组容差阈值
-        - debug: 是否输出调试信息
         """
         self.precision = precision
         self.min_confidence = min_confidence
@@ -69,13 +54,335 @@ class AuditRuleDiscoverer:
         self.ransac_iter = ransac_iter
         self.ransac_sample_size = ransac_sample_size
         self.inlier_ratio = inlier_ratio
-        self.min_final_inlier_ratio=min_final_inlier_ratio
-        self.coeff_group_tolerance=coeff_group_tolerance
+        self.min_final_inlier_ratio = min_final_inlier_ratio
+        self.coeff_group_tolerance = coeff_group_tolerance
+        # 新增参数
+        self.equality_ratio_threshold = equality_ratio_threshold
+        self.strong_coverage_threshold = strong_coverage_threshold
+        self.inlier_error_threshold = inlier_error_threshold
+        self.max_remove_ratio = max_remove_ratio
+        self.small_sample_threshold = small_sample_threshold
         self.debug = debug
 
     def _log(self, msg: str):
         if self.debug:
             print(f"  [DEBUG] {msg}")
+
+    # ==================== 公共工具函数 ====================
+
+    def _parse_rule_string(self, rule_dict: Dict) -> Tuple[List[str], List[str], float]:
+        """解析规则字符串，返回 (left_fields, right_fields, confidence)"""
+        expr = rule_dict['rule']
+        left, right = expr.split(' = ')
+        left_fields = [f.strip() for f in left.split(' + ')] if left != '0' else []
+        right_fields = [f.strip() for f in right.split(' + ')] if right != '0' else []
+        return left_fields, right_fields, rule_dict.get('confidence', 1.0)
+
+    def _build_rule_dict(self, left_fields: List[str], right_fields: List[str],
+                         confidence: float, priority: str = None) -> Dict:
+        """根据左右字段列表构建规则字典"""
+        left_fields.sort()
+        right_fields.sort()
+        left_expr = ' + '.join(left_fields) if left_fields else '0'
+        right_expr = ' + '.join(right_fields) if right_fields else '0'
+        rule_str = f"{left_expr} = {right_expr}"
+        all_fields = left_fields + right_fields
+        if priority is None:
+            priority = '高' if confidence == 1.0 else '中'
+        return {
+            'rule': rule_str,
+            'fields': all_fields,
+            'confidence': round(confidence, 4),
+            'priority': priority,
+            'relation_type': 'additive',
+            'violation_count': 0,
+            'violation_samples': []
+        }
+
+    def _deduplicate_rules(self, rules: List[Dict]) -> List[Dict]:
+        """基于字段集合去重"""
+        seen = set()
+        result = []
+        for rule in rules:
+            key = frozenset(rule.get('fields', []))
+            if key not in seen:
+                seen.add(key)
+                result.append(rule)
+        return result
+
+    def _normalize_two_field_rule(self, fields: List[str]) -> Tuple[str, List[str]]:
+        """将2字段规则格式化为 小字段 = 大字段，返回 (rule_str, [small, large])"""
+        f1, f2 = fields[0], fields[1]
+        if f1 < f2:
+            return f"{f1} = {f2}", [f1, f2]
+        else:
+            return f"{f2} = {f1}", [f2, f1]
+
+    def _build_replace_map(self, strong_equality: List[Dict]) -> Dict[str, str]:
+        """构建字段替换映射（大字段 -> 小字段）"""
+        replace_map = {}
+        for r in strong_equality:
+            fields = r.get('fields', [])
+            if len(fields) != 2:
+                continue
+            small, large = fields[0], fields[1]
+            replace_map[large] = small
+
+        changed = True
+        while changed:
+            changed = False
+            for k, v in list(replace_map.items()):
+                if v in replace_map and replace_map[v] != v:
+                    replace_map[k] = replace_map[v]
+                    changed = True
+        return replace_map
+
+    # ==================== 行相似度聚类（单归属/多归属） ====================
+
+    def _cluster_rows_single(self, X_binary: np.ndarray, weights: np.ndarray) -> Tuple[List[List[int]], List[np.ndarray]]:
+        """
+        单归属行聚类：每行只归入最相似的一个类
+        返回 (classes, centers)
+        """
+        classes = []
+        centers = []
+
+        for i, row in enumerate(X_binary):
+            weighted_row = row * weights
+            best_class = -1
+            best_sim = -1
+
+            for j, center in enumerate(centers):
+                both = (weighted_row * center).sum()
+                norm_row = np.sqrt((weighted_row ** 2).sum())
+                norm_center = np.sqrt((center ** 2).sum())
+                if norm_row > 0 and norm_center > 0:
+                    sim = both / (norm_row * norm_center)
+                    if sim > best_sim and sim > self.row_similarity_threshold:
+                        best_sim = sim
+                        best_class = j
+
+            if best_class >= 0:
+                classes[best_class].append(i)
+                old_size = len(classes[best_class]) - 1
+                centers[best_class] = (centers[best_class] * old_size + weighted_row) / (old_size + 1)
+            else:
+                classes.append([i])
+                centers.append(weighted_row.copy())
+
+        return classes, centers
+
+    def _cluster_rows_multi(self, X_binary: np.ndarray, weights: np.ndarray) -> Tuple[List[List[int]], List[np.ndarray]]:
+        """
+        多归属行聚类：一行可以属于多个相似度超过阈值的类
+        返回 (classes, centers)
+        """
+        classes = []
+        centers = []
+
+        for i, row in enumerate(X_binary):
+            weighted_row = row * weights
+            assigned_classes = []
+
+            for j, center in enumerate(centers):
+                both = (weighted_row * center).sum()
+                norm_row = np.sqrt((weighted_row ** 2).sum())
+                norm_center = np.sqrt((center ** 2).sum())
+                if norm_row > 0 and norm_center > 0:
+                    sim = both / (norm_row * norm_center)
+                    if sim > self.row_similarity_threshold:
+                        assigned_classes.append(j)
+
+            if assigned_classes:
+                for j in assigned_classes:
+                    classes[j].append(i)
+                    old_size = len(classes[j]) - 1
+                    centers[j] = (centers[j] * old_size + weighted_row) / (old_size + 1)
+            else:
+                classes.append([i])
+                centers.append(weighted_row.copy())
+
+        return classes, centers
+
+    # ==================== 双向剔除（正向/反向） ====================
+
+    def _eliminate_by_weight(self, df: pd.DataFrame, fields: List[str],
+                             weights: np.ndarray, all_numeric_cols: List[str],
+                             direction: str = 'low_first') -> List[Dict]:
+        """
+        按权重方向剔除字段，循环SVD发现规则
+
+        参数:
+        - direction: 'low_first' 先剔除权重低的（保留稀疏字段），'high_first' 先剔除权重高的（保留稠密字段）
+        """
+        if len(fields) < 3:
+            return []
+
+        current_fields = fields.copy()
+        field_weight_dict = {f: weights[all_numeric_cols.index(f)] for f in current_fields if f in all_numeric_cols}
+        if len(field_weight_dict) != len(current_fields):
+            return self._discover_rules_single_svd(df, fields)
+
+        all_rules = []
+        seen_rules = set()
+
+        while len(current_fields) >= 3:
+            rules = self._discover_rules_single_svd(df, current_fields)
+
+            for rule in rules:
+                rule_key = frozenset(rule.get('fields', []))
+                if rule_key not in seen_rules:
+                    seen_rules.add(rule_key)
+                    all_rules.append(rule)
+
+            if len(current_fields) <= 3:
+                break
+
+            if direction == 'low_first':
+                target_field = min(current_fields, key=lambda f: field_weight_dict[f])
+            else:
+                target_field = max(current_fields, key=lambda f: field_weight_dict[f])
+
+            current_fields.remove(target_field)
+
+        return all_rules
+
+    def _bidirectional_elimination(self, df: pd.DataFrame, fields: List[str],
+                                   weights: np.ndarray, all_numeric_cols: List[str]) -> List[Dict]:
+        """
+        双向剔除：同时运行正向剔除和反向剔除，合并结果
+        """
+        low_first_rules = self._eliminate_by_weight(df, fields, weights, all_numeric_cols, 'low_first')
+        high_first_rules = self._eliminate_by_weight(df, fields, weights, all_numeric_cols, 'high_first')
+        all_rules = low_first_rules + high_first_rules
+        return self._deduplicate_rules(all_rules)
+
+    # ==================== 两次发现流程 ====================
+
+    def _discover_rules_on_fields(self, df: pd.DataFrame, fields: List[str],
+                                  cooccur: int, weights: np.ndarray = None,
+                                  all_numeric_cols: List[str] = None) -> List[Dict]:
+        """
+        在指定的字段列表上发现规则（根据共同非空行数和字段数决定是否拆分）
+        """
+        if len(fields) < 3:
+            return []
+
+            # 如果没有权重信息，则直接做一次普通 SVD
+        if weights is None or all_numeric_cols is None:
+            return self._discover_rules_single_svd(df, fields)
+
+        if cooccur >= 100 or len(fields) <= 10:
+            return self._discover_rules_in_subcluster(df, fields, weights=weights, all_numeric_cols=all_numeric_cols)
+        else:
+            subclusters = self._split_by_cooccurrence_ratio(df, fields)
+            rules = []
+            for sub in subclusters:
+                if len(sub) < 3:
+                    continue
+                sub_rules = self._discover_rules_in_subcluster(df, sub, weights=weights,
+                                                               all_numeric_cols=all_numeric_cols)
+                rules.extend(sub_rules)
+            return rules
+
+    # ==================== 备用函数（从注释代码提炼） ====================
+
+    def _calculate_idf_weights(self, X_binary: np.ndarray, numeric_cols: List[str]) -> np.ndarray:
+        """
+        自适应IDF权重映射（备用）：使用指数映射替代IDF³
+        """
+        total_rows, n_fields = X_binary.shape
+        field_freq = X_binary.sum(axis=0)
+        idf = np.log((total_rows + 1) / (field_freq + 1)) + 1
+
+        idf_min = idf.min()
+        idf_max = idf.max()
+        if idf_max == idf_min:
+            return np.ones_like(idf)
+
+        n_fields_count = len(numeric_cols)
+        max_multiplier = min(50, 10 * np.log2(max(n_fields_count, 2)))
+        idf_norm = (idf - idf_min) / (idf_max - idf_min)
+        k = 4.0
+        exp_scale = (np.exp(k * idf_norm) - 1) / (np.exp(k) - 1)
+        weights = 1 + exp_scale * (max_multiplier - 1)
+        return weights
+
+    def _augment_small_sample(self, X_orig: np.ndarray, valid_rows: int, bb: bool):
+        """
+        小样本复制增强（备用）：当有效行数小于阈值时，通过复制和随机缩放增加样本量
+        """
+        if valid_rows < self.small_sample_threshold:
+            repeat = (self.small_sample_threshold + valid_rows - 1) // valid_rows
+            X_repeated = np.repeat(X_orig, repeat, axis=0)
+            row_scales = np.random.uniform(1, 10, size=(X_repeated.shape[0], 1))
+            X_aug = X_repeated * row_scales
+            augmented_rows = X_aug.shape[0]
+            if bb:
+                self._log(
+                    f"        有效行数 {valid_rows} < {self.small_sample_threshold}，复制 {repeat} 倍并添加随机缩放(1~10)，用于 SVD 拟合（共 {augmented_rows} 行）")
+            return X_aug, augmented_rows
+        else:
+            return X_orig, valid_rows
+
+    def _iterative_svd_refinement(self, X: np.ndarray, valid_rows: int, bb: bool):
+        """
+        迭代剔除增强版（备用）：逐次剔除残差最大的行，找到最优系数
+        """
+        min_keep_rows = max(5, int(valid_rows * (1 - self.max_remove_ratio)))
+
+        best_coeffs = None
+        best_inlier_mask = None
+        best_keep_rows_count = 0
+
+        current_X = X.copy()
+        current_indices = np.arange(valid_rows)
+
+        while len(current_indices) >= min_keep_rows:
+            X_sample = current_X
+            rows_count = len(current_indices)
+
+            try:
+                X_centered = X_sample - np.mean(X_sample, axis=0)
+                U, s, Vt = np.linalg.svd(X_centered, full_matrices=False)
+                coeffs = Vt[-1, :]
+
+                if np.all(np.abs(coeffs) < self.precision):
+                    break
+
+                result = X_sample @ coeffs
+                rel_error = np.abs(result) / (np.abs(X_sample[:, 0]) + 1)
+
+                remove_count = max(1, rows_count // 10)
+                largest_error_indices = np.argsort(rel_error)[-remove_count:]
+
+                if rel_error[largest_error_indices[-1]] < self.inlier_error_threshold:
+                    best_coeffs = coeffs
+                    best_keep_rows_count = rows_count
+                    best_inlier_mask = np.zeros(valid_rows, dtype=bool)
+                    best_inlier_mask[current_indices] = True
+                    break
+
+                current_X = np.delete(current_X, largest_error_indices, axis=0)
+                current_indices = np.delete(current_indices, largest_error_indices)
+
+            except Exception as e:
+                if bb:
+                    self._log(f"迭代剔除异常: {e}")
+                break
+        else:
+            if len(current_indices) >= 3:
+                X_sample = current_X
+                X_centered = X_sample - np.mean(X_sample, axis=0)
+                U, s, Vt = np.linalg.svd(X_centered, full_matrices=False)
+                best_coeffs = Vt[-1, :]
+                best_keep_rows_count = len(current_indices)
+                best_inlier_mask = np.zeros(valid_rows, dtype=bool)
+                best_inlier_mask[current_indices] = True
+
+        return best_coeffs, best_inlier_mask, best_keep_rows_count
+
+    # ==================== 核心方法 ====================
 
     def discover_all(self, data: pd.DataFrame, variable_types: Dict[str, str],
                      foreign_keys: List[Dict] = None) -> Dict[str, Any]:
@@ -207,14 +514,7 @@ class AuditRuleDiscoverer:
                             })
                             self._log(f"      发现: {col2} → {col1}")
 
-        seen = set()
-        unique_rules = []
-        for rule in rules:
-            if rule["rule"] not in seen:
-                seen.add(rule["rule"])
-                unique_rules.append(rule)
-
-        return unique_rules
+        return self._deduplicate_rules(rules)
 
     # ==================== 时序关系 ====================
     def _discover_temporal_rules(self, df: pd.DataFrame,
@@ -284,7 +584,7 @@ class AuditRuleDiscoverer:
                         })
                         self._log(f"      发现: {col2} = {col1} + {days}天")
 
-        return rules
+        return self._deduplicate_rules(rules)
 
     # ==================== 主流程 ====================
     def _discover_arithmetic_rules(self, df: pd.DataFrame,
@@ -297,171 +597,73 @@ class AuditRuleDiscoverer:
         if len(numeric_cols) < 3:
             return []
 
-        all_rules = []
+        # 在原始全量数据上发现2字段相等关系
+        strong_equality, weak_equality = self._discover_equality_rules(df, numeric_cols)
 
-        # # 路径四：行相似度聚类
+        all_rules = []
+        all_rules.extend(weak_equality)
+
         self._log("\n  【路径四：行相似度聚类】")
         row_clusters = self._cluster_rows_by_similarity(df, numeric_cols)
 
-        # 调试：打印行聚类结果中是否包含目标字段组（需要检查每个行聚类子集的字段相关性聚类）
         if self.debug and len(row_clusters) > 0:
             self._log(f"路径四行聚类结果（共{len(row_clusters)}个行类）:")
 
         rules4 = []
-        # 调用相关聚类再发现规则
         for i, cluster_df in enumerate(row_clusters):
             self._log(f"处理行聚类{i + 1}: {len(cluster_df)} 行")
             sub_rules = self._cluster_columns_and_rules(
                 cluster_df, numeric_cols,
-                min_nonnull_in_cluster=self.min_cluster_size,  # 全1字段才保留
-                min_nonnull_ratio_in_cluster=0.01  # 或者100%非空
+                min_nonnull_in_cluster=self.min_cluster_size,
+                min_nonnull_ratio_in_cluster=0.01,
+                strong_equality=strong_equality
             )
             rules4.extend(sub_rules)
-
-        #直接规则发现，不先相关的话，效果极差，基本得不到规则
-        # for i, cluster_df in enumerate(row_clusters):
-        #     weights = cluster_df.attrs.get('column_weights', None)
-        #     all_numeric_cols = cluster_df.attrs.get('numeric_cols', numeric_cols)
-        #     self._log(f"处理行聚类{i + 1}: {len(cluster_df)} 行")
-        #
-        #     # 关键修复：只保留在 all_numeric_cols 中的数值字段
-        #     numeric_fields_in_cluster = [col for col in all_numeric_cols if col in cluster_df.columns]
-        #
-        #     if len(numeric_fields_in_cluster) < 3:
-        #         self._log(f"    数值字段不足3个，跳过")
-        #         continue
-        #
-        #     self._log(f"    数值字段数: {len(numeric_fields_in_cluster)}")
-        #
-        #     sub_rules = self._discover_rules_in_subcluster(
-        #         cluster_df,  # 使用行聚类子集
-        #         numeric_fields_in_cluster,  # 只传数值字段
-        #         weights=weights,
-        #         all_numeric_cols=all_numeric_cols
-        #     )
-        #     rules4.extend(sub_rules)
 
         all_rules.extend(rules4)
         self._log(f"    路径四发现规则数: {len(rules4)}")
 
-        # 合并去重
-        seen = set()
-        unique_rules = []
-        for rule in all_rules:
-            key = frozenset(rule["fields"])
-            if key not in seen:
-                seen.add(key)
-                unique_rules.append(rule)
+        all_rules.extend(strong_equality)
 
-        self._log(f"\n    合并后总计1: {len(unique_rules)} 条数值关系:{unique_rules}")
+        # 去重
+        unique_rules = self._deduplicate_rules(all_rules)
+        self._log(f"\n    合并后总计: {len(unique_rules)} 条数值关系")
 
-        # 新增：线性消元简化
-        unique_rules = self.reduce_arithmetic_rules(unique_rules)
-        self._log(f"\n    合并后总计2: {len(unique_rules)} 条数值关系:{unique_rules}")
-        return unique_rules
+        # ========== 新增：用全量数据重新验证所有规则 ==========
+        validated_rules = self._validate_rules_on_full_data(df, unique_rules)
+        self._log(f"    全量验证后总计: {len(validated_rules)} 条数值关系")
+        # ====================================================
+
+        return validated_rules
 
     # ==================== 行相似度聚类 ====================
     def _cluster_rows_by_similarity(self, df: pd.DataFrame, numeric_cols: List[str]) -> List[pd.DataFrame]:
         """
         基于0-1矩阵的行相似度在线聚类（加权余弦相似度，使用IDF权重）
-
-        步骤：
-        1. 将数值字段转换为0-1矩阵（非空=1，空=0）
-        2. 计算每个字段的IDF权重（稀有字段权重大）
-        3. 对0-1矩阵按行进行在线聚类（加权余弦相似度 > 阈值）
-        4. 返回每个聚类的原始DataFrame
         """
         if len(df) < self.min_cluster_size:
             return []
 
-        # 1. 转换为0-1矩阵（非空=1，空=0）
         X_binary = df[numeric_cols].notna().astype(int).values
         total_rows, n_fields = X_binary.shape
 
-        # 2. 计算IDF权重
         field_freq = X_binary.sum(axis=0)
         idf = np.log((total_rows + 1) / (field_freq + 1)) + 1
         self._log(f"    IDF1: {idf}")
 
-        # # 自适应映射
-        # idf_min = idf.min()
-        # idf_max = idf.max()
-        # if idf_max == idf_min:
-        #     weights = np.ones_like(idf)
-        # else:
-        #     n_fields_count = len(numeric_cols)
-        #     max_multiplier = min(50, 10 * np.log2(max(n_fields_count, 2)))
-        #     idf_norm = (idf - idf_min) / (idf_max - idf_min)
-        #     k = 4.0
-        #     exp_scale = (np.exp(k * idf_norm) - 1) / (np.exp(k) - 1)
-        #     weights = 1 + exp_scale * (max_multiplier - 1)
         weights = idf ** 3
-
         self._log(f"    weights：{weights}")
 
-        # 3. 在线聚类（加权余弦相似度）
-        classes = []
-        centers = []
-
-        # 只聚到1类
-        for i, row in enumerate(X_binary):
-            weighted_row = row * weights
-            best_class = -1
-            best_sim = -1
-
-            for j, center in enumerate(centers):
-                both = (weighted_row * center).sum()
-                norm_row = np.sqrt((weighted_row ** 2).sum())
-                norm_center = np.sqrt((center ** 2).sum())
-                if norm_row > 0 and norm_center > 0:
-                    sim = both / (norm_row * norm_center)
-                    if sim > best_sim and sim > self.row_similarity_threshold:
-                        best_sim = sim
-                        best_class = j
-
-            if best_class >= 0:
-                classes[best_class].append(i)
-                old_size = len(classes[best_class]) - 1
-                centers[best_class] = (centers[best_class] * old_size + weighted_row) / (old_size + 1)
-            else:
-                classes.append([i])
-                centers.append(weighted_row.copy())
-
-        # 可同时聚到多类
-        # for i, row in enumerate(X_binary):
-        #     weighted_row = row * weights
-        #     assigned_classes = []  # 记录该行加入的所有类索引
-        #
-        #     for j, center in enumerate(centers):
-        #         both = (weighted_row * center).sum()
-        #         norm_row = np.sqrt((weighted_row ** 2).sum())
-        #         norm_center = np.sqrt((center ** 2).sum())
-        #         if norm_row > 0 and norm_center > 0:
-        #             sim = both / (norm_row * norm_center)
-        #             if sim > self.row_similarity_threshold:
-        #                 assigned_classes.append(j)
-        #
-        #     if assigned_classes:
-        #         # 该行同时加入所有符合条件的类
-        #         for j in assigned_classes:
-        #             classes[j].append(i)
-        #             # 增量更新该类中心（均值）
-        #             old_size = len(classes[j]) - 1
-        #             centers[j] = (centers[j] * old_size + weighted_row) / (old_size + 1)
-        #     else:
-        #         # 没有匹配的类，创建新类
-        #         classes.append([i])
-        #         centers.append(weighted_row.copy())
+        # 使用单归属聚类
+        classes, centers = self._cluster_rows_single(X_binary, weights)
 
         self._log(f"    行相似度聚类（原始）: {len(classes)} 个类")
 
-        # 过滤小类，返回每个类的DataFrame，并附加weights
         result_dfs = []
         filtered_out = []
         for i, class_indices in enumerate(classes):
             if len(class_indices) >= self.min_cluster_size:
                 cluster_df = df.iloc[class_indices].copy()
-                # 将weights存储到attrs中，传递给后续SVD
                 cluster_df.attrs['column_weights'] = weights.copy()
                 cluster_df.attrs['numeric_cols'] = numeric_cols.copy()
                 result_dfs.append(cluster_df)
@@ -475,176 +677,43 @@ class AuditRuleDiscoverer:
         return result_dfs
 
     # ==================== 字段相关聚类与规则发现主函数 ====================
-    def _cluster_columns_and_rules1(self, df: pd.DataFrame, numeric_cols: List[str],
-                              min_nonnull_in_cluster: int = 10,
-                              min_nonnull_ratio_in_cluster: float = 0.05) -> List[Dict]:
-        """
-        执行路径一（相关聚类），在聚类子集上发现关系。
-        增强：利用行聚类时计算的 column_weights 筛选出高权重的稀疏字段，
-        仅对这些字段进行关系发现（不加权 SVD），避免稠密字段干扰。
-        """
-        cluster_rows = len(df)
-
-        # 获取权重（从行聚类传递过来）
-        weights = df.attrs.get('column_weights', None)
-        all_numeric_cols = df.attrs.get('numeric_cols', numeric_cols)
-
-        # # 过滤稀疏字段（在行聚类中非空率太低的字段）
-        # filtered_cols = []
-        # for col in numeric_cols:
-        #     if col not in df.columns:
-        #         continue
-        #     # 同时要求该字段在高权重列表中（如果高权重列表不是全量的话）
-        #     if col not in top_cols:
-        #         continue
-        #     filtered_cols.append(col)
-        #     # nonnull_count = df[col].notna().sum()
-        #     # if nonnull_count >= min_nonnull_in_cluster or nonnull_count / cluster_rows >= min_nonnull_ratio_in_cluster:
-        #     #     filtered_cols.append(col)
-        #
-        # if len(filtered_cols) < 3:
-        #     self._log(f"        过滤后字段不足3个，跳过")
-        #     return []
-
-        rules = []
-        # 相关聚类（使用过滤后的字段）
-        corr_clusters = self._cluster_columns_by_correlation(df, all_numeric_cols)  # filtered_cols)
-        self._log(f"    行类: {len(df)}行,字段聚类结果（共{len(corr_clusters)}个）:")
-
-        for idx, cluster in enumerate(corr_clusters):
-            if len(cluster) < 3:
-                continue
-            self._log(f"        字段聚类: {len(cluster)}个变量 - {cluster}")
-
-            #不拆
-            # sub_rules = self._discover_rules_in_subcluster(df, cluster, weights=weights,
-            #                                                all_numeric_cols=all_numeric_cols)
-            # if len(sub_rules) > 0:
-            #     self._log(f"          规则:{sub_rules}")
-            #     rules.extend(sub_rules)
-
-
-            # 检查所有字段同时非空的行数
-            cooccur = self._check_cooccurrence(df, cluster)
-
-            # 如果共同非空行数 >= 100，或者字段数 <= 10，不拆分
-            if cooccur >= 100 or len(cluster) <= 10:
-                # 🔥 关键：不传递 weights，使用普通 SVD
-                sub_rules = self._discover_rules_in_subcluster(df, cluster, weights=weights,
-                                                               all_numeric_cols=all_numeric_cols)
-                if len(sub_rules) > 0:
-                    self._log(f"          规则:{sub_rules}")
-                    rules.extend(sub_rules)
-            else:
-                # 否则按共同非空比例拆分子类
-                subclusters = self._split_by_cooccurrence_ratio(df, cluster)
-                for sub_idx, sub in enumerate(subclusters):
-                    if len(sub) < 3:
-                        continue
-                    sub_rules = self._discover_rules_in_subcluster(df, sub, weights=weights,
-                                                                   all_numeric_cols=all_numeric_cols)
-                    if len(sub_rules) > 0:
-                        self._log(f"          规则:{sub_rules}")
-                        rules.extend(sub_rules)
-
-        return rules
-
-    # 执行完后再过滤后再次执行
     def _cluster_columns_and_rules(self, df: pd.DataFrame, numeric_cols: List[str],
                                    min_nonnull_in_cluster: int = 10,
-                                   min_nonnull_ratio_in_cluster: float = 0.05) -> List[Dict]:
+                                   min_nonnull_ratio_in_cluster: float = 0.05,
+                                   strong_equality: List[Dict] = None) -> List[Dict]:
         """
-        执行相关聚类，在聚类子集上发现关系。
-        增强：利用行聚类时计算的 column_weights 筛选出高权重的稀疏字段，
-        仅对这些字段进行关系发现（不加权 SVD），避免稠密字段干扰。
-        再增加：第一次发现规则后，对每个字段聚类，剔除规则中与当前聚类重叠 ≥3 的字段，
-           然后在剩余字段上再次发现规则（使用全局规则）。
+        执行相关聚类，在聚类子集上发现关系
         """
         cluster_rows = len(df)
 
-        # 获取权重（从行聚类传递过来）
         weights = df.attrs.get('column_weights', None)
         all_numeric_cols = df.attrs.get('numeric_cols', numeric_cols)
-
-        # ========== 新增：先发现2字段相等关系，并剔除冗余字段 ==========
-        equality_rules = self._discover_equality_rules(df, all_numeric_cols)
-
-        # 记录需要剔除的字段（等号右边的字段，即序号较大的）
-        remove_fields = set()
-        for rule in equality_rules:
-            fields = rule['fields']
-            if len(fields) == 2:
-                # 取序号大的字段剔除（假设字段名包含数字，如 companyfixasset50）
-                # 如果没有数字，按字典序取较大的
-                try:
-                    # 尝试提取数字部分
-                    def extract_num(f):
-                        import re
-                        nums = re.findall(r'\d+', f)
-                        return int(nums[-1]) if nums else 0
-
-                    f1_num = extract_num(fields[0])
-                    f2_num = extract_num(fields[1])
-                    if f1_num > f2_num:
-                        remove_fields.add(fields[0])
-                    else:
-                        remove_fields.add(fields[1])
-                except:
-                    # 无法提取数字，按字典序
-                    if fields[0] > fields[1]:
-                        remove_fields.add(fields[0])
-                    else:
-                        remove_fields.add(fields[1])
-
-        # 过滤掉需要剔除的字段
-        if remove_fields:
-            filtered_numeric_cols = [c for c in all_numeric_cols if c not in remove_fields]
-            self._log(f"    2字段相等关系发现 {len(equality_rules)} 条，剔除字段: {remove_fields}")
-            # 更新 all_numeric_cols 和 df（如果需要）
-            all_numeric_cols = filtered_numeric_cols
-            # 注意：不修改 df 本身，只修改后续使用的字段列表
-        # ============================================================
 
         # 相关聚类
         corr_clusters = self._cluster_columns_by_correlation(df, all_numeric_cols)
         self._log(f"    行类: {len(df)}行,字段聚类结果（共{len(corr_clusters)}个）:")
 
         # ========== 第一阶段：收集所有第一次发现的规则 ==========
-        first_rules_all = []  # 存储所有第一次发现的规则（全局）
-        cluster_info = []  # 存储每个 cluster 的原始字段列表和拆分信息，供第二阶段使用
+        first_rules_all = []
+        cluster_info = []
 
         for idx, cluster in enumerate(corr_clusters):
             if len(cluster) < 3:
                 continue
             self._log(f"        字段聚类: {len(cluster)}个变量 - {cluster}")
 
-            # 检查所有字段同时非空的行数
             cooccur = self._check_cooccurrence(df, cluster)
 
-            # 第一次发现规则
-            first_rules = []
-            if cooccur >= 100 or len(cluster) <= 10:
-                sub_rules = self._discover_rules_in_subcluster(df, cluster, weights=weights,
-                                                               all_numeric_cols=all_numeric_cols)
-                first_rules.extend(sub_rules)
-            else:
-                subclusters = self._split_by_cooccurrence_ratio(df, cluster)
-                for sub in subclusters:
-                    if len(sub) < 3:
-                        continue
-                    sub_rules = self._discover_rules_in_subcluster(df, sub, weights=weights,
-                                                                   all_numeric_cols=all_numeric_cols)
-                    first_rules.extend(sub_rules)
+            first_rules = self._discover_rules_on_fields(df, cluster, cooccur, weights, all_numeric_cols)
 
             if first_rules:
                 self._log(f"          第一次发现规则:{first_rules}")
                 first_rules_all.extend(first_rules)
 
-            # 保存该 cluster 的相关信息，供第二阶段使用
             cluster_info.append({
                 'cluster': cluster,
                 'cooccur': cooccur,
-                'first_rules': first_rules  # 可保留，但第二阶段基于全局规则
+                'first_rules': first_rules
             })
 
         # ========== 第二阶段：基于全局规则，剔除字段后再次发现 ==========
@@ -656,16 +725,8 @@ class AuditRuleDiscoverer:
                 seen_global.add(key)
                 global_rules.append(rule)
 
-        # 🆕 最终结果先包含 equality_rules（2字段相等规则）
-        all_rules = equality_rules[:]
-
-        # 然后将第一次发现的规则也加入
-        existing_keys = {frozenset(r.get('fields', [])) for r in all_rules}
-        for rule in first_rules_all:
-            key = frozenset(rule['fields'])
-            if key not in existing_keys:
-                existing_keys.add(key)
-                all_rules.append(rule)
+        # 结果先包含第一次发现的规则
+        all_rules = first_rules_all[:]
 
         for info in cluster_info:
             cluster = info['cluster']
@@ -680,35 +741,18 @@ class AuditRuleDiscoverer:
                     remove_fields.update(rule_fields)
 
             if not remove_fields:
-                self._log(f"        字段聚类 {cluster} 无剔除字段，跳过第二次发现")
                 continue
 
             remaining_fields = [f for f in cluster if f not in remove_fields]
             self._log(f"        字段聚类 {cluster} 剔除 {remove_fields} 后剩余: {remaining_fields}")
 
             if len(remaining_fields) < 3:
-                self._log(f"          剩余字段不足3个，跳过第二次发现")
                 continue
 
-            # 第二次发现规则（使用相同的拆分策略）
-            second_rules = []
-            if cooccur >= 100 or len(remaining_fields) <= 10:
-                sub_rules = self._discover_rules_in_subcluster(df, remaining_fields,
-                                                               weights=weights,
-                                                               all_numeric_cols=all_numeric_cols)
-                second_rules.extend(sub_rules)
-            else:
-                subclusters = self._split_by_cooccurrence_ratio(df, remaining_fields)
-                for sub in subclusters:
-                    if len(sub) < 3:
-                        continue
-                    sub_rules = self._discover_rules_in_subcluster(df, sub, weights=weights,
-                                                                   all_numeric_cols=all_numeric_cols)
-                    second_rules.extend(sub_rules)
+            second_rules = self._discover_rules_on_fields(df, remaining_fields, cooccur, weights, all_numeric_cols)
 
             if second_rules:
                 self._log(f"          第二次发现规则:{second_rules}")
-                # 合并去重
                 existing_keys = {frozenset(r.get('fields', [])) for r in all_rules}
                 for r in second_rules:
                     key = frozenset(r.get('fields', []))
@@ -730,29 +774,21 @@ class AuditRuleDiscoverer:
         G.add_nodes_from(numeric_cols)
 
         corr_matrix = df[numeric_cols].corr().abs()
-        edge_count = 0
 
-        # 1. 构建直接相连的边（1跳）
         for i, col1 in enumerate(numeric_cols):
             for col2 in numeric_cols[i + 1:]:
                 corr_val = corr_matrix.loc[col1, col2]
                 if not pd.isna(corr_val) and corr_val > self.corr_threshold:
                     G.add_edge(col1, col2)
-                    edge_count += 1
 
-        # 2. 添加2跳连通关系（距离为2的节点也直接连边）
-        # 方法：计算图的平方（graph square）
         nodes = list(G.nodes())
         for i, u in enumerate(nodes):
             for v in nodes[i + 1:]:
-                # 检查是否存在长度为2的路径 u - x - v
                 if nx.has_path(G, u, v) and nx.shortest_path_length(G, u, v) == 2:
                     G.add_edge(u, v)
 
-
         components = list(nx.connected_components(G))
         clusters = [list(comp) for comp in components]
-        #self._log(f"    相关图: {len(numeric_cols)} 节点, {edge_count} 边, 阈值={self.corr_threshold},相关聚类数: {len(clusters)}")
         return clusters
 
     # ==================== 按共同非空比例拆分子类 ====================
@@ -777,11 +813,10 @@ class AuditRuleDiscoverer:
                 co = self._check_cooccurrence(df, test_fields)
                 min_count = min(seed_count, min(nonnull_counts[o] for o in subcluster), nonnull_counts[other])
 
-                if  co >= self.min_cooccurrence_rows: #co >= self.cooccur_ratio * min_count and
+                if co >= self.min_cooccurrence_rows:
                     subcluster.append(other)
 
             if len(subcluster) >= 3:
-                # 去重
                 is_dup = False
                 for existing in subclusters:
                     if set(subcluster) == set(existing):
@@ -793,169 +828,26 @@ class AuditRuleDiscoverer:
         return subclusters
 
     # ==================== 关系发现 ====================
-    #继承权重
     def _discover_rules_in_subcluster(self, df: pd.DataFrame, fields: List[str],
                                       weights: np.ndarray = None,
                                       all_numeric_cols: List[str] = None) -> List[Dict]:
         """
-        在子类中发现关系，支持逐步剔除低权重字段的循环 SVD。
-        每次剔除权重最低的字段，对剩余字段做普通 SVD，收集所有发现的规则。
+        在子类中发现关系，支持逐步剔除低权重字段的循环 SVD
         """
-
         if len(fields) < 3:
             return []
 
-        #self._log(f"调用前: weights= {weights}, all_numeric_cols= {all_numeric_cols}")
-
-        # 如果没有权重信息，则直接做一次普通 SVD
         if weights is None or all_numeric_cols is None:
             return self._discover_rules_single_svd(df, fields)
 
-        # 构建当前字段列表及其对应权重
-        current_fields = fields.copy()
-        # 获取每个字段的权重
-        field_weight_dict = {f: weights[all_numeric_cols.index(f)] for f in current_fields if f in all_numeric_cols}
-        if len(field_weight_dict) != len(current_fields):
-            self._log(f" weights不正常:{weights}，field_weight_dict：{field_weight_dict}，current_fields：{current_fields}")
-            # 权重不全，退回普通 SVD
-            return self._discover_rules_single_svd(df, fields)
+        # 使用双向剔除（正向+反向）
+        #return self._bidirectional_elimination(df, fields, weights, all_numeric_cols)
 
-        all_rules = []  # 收集所有发现的规则
-        seen_rules = set()  # 用于去重（基于字段集合）
-
-        # 逐步剔除权重最低的字段，直到字段数 < 3
-        while len(current_fields) >= 3:
-            # 对当前字段集做普通 SVD（不加权）
-            rules = self._discover_rules_single_svd(df, current_fields)
-
-            for rule in rules:
-                # 使用规则涉及的字段集合作为去重key
-                rule_key = frozenset(rule.get('fields', []))
-                if rule_key not in seen_rules:
-                    seen_rules.add(rule_key)
-                    all_rules.append(rule)
-                    self._log(
-                        f"        发现规则: {rule['rule']} (置信度={rule['confidence']})，当前字段数={len(current_fields)}")
-            #break #只跑一次
-
-            # 如果剩余字段数 <= 3，无法继续剔除（因为至少需要3个字段）
-            if len(current_fields) <= 3:
-                break
-
-            # 找到当前字段集中权重最小的字段（IDF 最小，最稠密）
-            min_weight_field = min(current_fields, key=lambda f: field_weight_dict[f])
-            # 移除该字段
-            current_fields.remove(min_weight_field)
-            # self._log(
-            #     f"        剔除低权重字段: {min_weight_field} (权重={field_weight_dict[min_weight_field]:.3f})，剩余 {len(current_fields)} 个字段")
-
-        # 反向剔除，效果不好
-        # # 逐步剔除权重最高的字段，直到字段数 < 3
-        # while len(current_fields) >= 3:
-        #     # 对当前字段集做普通 SVD（不加权）
-        #     rules = self._discover_rules_single_svd(df, current_fields)
-        #
-        #     for rule in rules:
-        #         # 使用规则涉及的字段集合作为去重key
-        #         rule_key = frozenset(rule.get('fields', []))
-        #         if rule_key not in seen_rules:
-        #             seen_rules.add(rule_key)
-        #             all_rules.append(rule)
-        #             self._log(
-        #                 f"        发现规则: {rule['rule']} (置信度={rule['confidence']})，当前字段数={len(current_fields)}")
-        #     # break #只跑一次
-        #
-        #     # 如果剩余字段数 <= 3，无法继续剔除（因为至少需要3个字段）
-        #     if len(current_fields) <= 3:
-        #         break
-        #
-        #     # 找到当前字段集中权重最大的字段（IDF 最小，最稠密）
-        #     max_weight_field = max(current_fields, key=lambda f: field_weight_dict[f])   ###仅此不同
-        #     # 移除该字段
-        #     current_fields.remove(max_weight_field)  ###
-        #     # self._log(
-        #     #     f"        剔除高权重字段: {min_weight_field} (权重={field_weight_dict[min_weight_field]:.3f})，剩余 {len(current_fields)} 个字段")
-
-        # 返回所有收集到的规则
-        return all_rules
-
-
-    #只对当前类计算权重,没啥用，基本上都是【1 1 1.。。】
-    def _discover_rules_in_subcluster2(self, df: pd.DataFrame, fields: List[str],
-                                      weights: np.ndarray = None,
-                                      all_numeric_cols: List[str] = None) -> List[Dict]:
-        """
-        在子类中发现关系，支持逐步剔除低权重字段的循环 SVD。
-        每次剔除权重最低的字段，对剩余字段做普通 SVD，收集所有发现的规则。
-
-        注意：权重基于当前 df（行聚类子集）重新计算，不使用传入的 weights 参数。
-        """
-        if len(fields) < 3:
-            return []
-
-        # ========== 新增：基于当前类重新计算权重 ==========
-        # 获取当前类中的数值字段（只取 fields 中存在于 df 的列）
-        available_fields = [f for f in fields if f in df.columns]
-        if len(available_fields) < 3:
-            return []
-
-        # 构建当前类的0-1缺失矩阵
-        X_binary = df[available_fields].notna().astype(int).values
-        total_rows = X_binary.shape[0]
-
-        if total_rows < self.min_cluster_size:
-            return []
-
-        # 计算当前类的IDF权重
-        field_freq = X_binary.sum(axis=0)
-        idf = np.log((total_rows + 1) / (field_freq + 1)) + 1
-        # 使用三次方放大稀疏字段权重
-        local_weights = idf
-
-        # 构建当前字段的权重字典
-        current_fields = available_fields.copy()
-        field_weight_dict = {current_fields[i]: local_weights[i] for i in range(len(current_fields))}
-
-        self._log(
-            f"        基于当前类重新计算权重（{local_weights}）")
-        # ================================================
-
-        all_rules = []  # 收集所有发现的规则
-        seen_rules = set()  # 用于去重（基于字段集合）
-
-        # 逐步剔除权重最低的字段，直到字段数 < 3
-        while len(current_fields) >= 3:
-            # 对当前字段集做普通 SVD（不加权）
-            rules = self._discover_rules_single_svd(df, current_fields)
-
-            for rule in rules:
-                # 使用规则涉及的字段集合作为去重key
-                rule_key = frozenset(rule.get('fields', []))
-                if rule_key not in seen_rules:
-                    seen_rules.add(rule_key)
-                    all_rules.append(rule)
-                    self._log(
-                        f"        发现规则: {rule['rule']} (置信度={rule['confidence']})，当前字段数={len(current_fields)}")
-
-            # 如果剩余字段数 <= 3，无法继续剔除（因为至少需要3个字段）
-            if len(current_fields) <= 3:
-                break
-
-            # 找到当前字段集中权重最小的字段（IDF 最小，最稠密）
-            min_weight_field = min(current_fields, key=lambda f: field_weight_dict[f])
-            # 移除该字段
-            current_fields.remove(min_weight_field)
-            self._log(
-                f"        剔除低权重字段: {min_weight_field} (权重={field_weight_dict[min_weight_field]:.3f})，剩余 {len(current_fields)} 个字段")
-
-        # 返回所有收集到的规则
-        return all_rules
-
+        return self._eliminate_by_weight(df, fields, weights, all_numeric_cols, 'low_first')
 
     def _discover_rules_single_svd(self, df: pd.DataFrame, fields: List[str]) -> List[Dict]:
         """
-        对指定的字段集合做一次普通 SVD（不加权），返回发现的规则列表。
-        优先使用迭代剔除增强版，如果失败则回退到原始 SVD 逻辑。
+        对指定的字段集合做一次普通 SVD（不加权），返回发现的规则列表
         """
         if len(fields) < 3:
             return []
@@ -965,147 +857,26 @@ class AuditRuleDiscoverer:
         if valid_rows < self.min_cooccurrence_rows:
             return []
 
-        # ========== 调试输出：当目标规则字段同时出现时 ==========
-        bb = False
-        target_fields = ['companyfixasset50', 'companyfixasset51', 'companyfixasset52', 'companyfixasset53']
-        if all(f in fields for f in target_fields):
-            bb = True
-            self._log(f"        [DEBUG] 目标规则字段 {target_fields} 全部存在于当前字段集！")
-            self._log(f"        [DEBUG] 有效数据行数: {valid_rows}")
-            if valid_rows > 0:
-                self._log(f"        [DEBUG] 原始数据前5行:\n{valid_df[target_fields].head()}")
-            else:
-                self._log(f"        [DEBUG] 无有效数据行")
-        # =====================================================
-
         X_orig = valid_df[fields].values
-        n_cols = len(fields)
 
-        # ========== 小样本复制增强 ==========
-        #X_aug, augmented_rows = self._augment_small_sample(X_orig, valid_rows, bb)
-        # =================================
-        X_aug, augmented_rows=X_orig,valid_rows
+        best_coeffs, best_inlier_mask, _ = self._basic_svd_fit(X_orig, valid_rows)
 
-        # # ========== 尝试迭代剔除增强版 ==========
-        # best_coeffs, best_inlier_mask, best_keep_rows_count = self._iterative_svd_refinement(X_aug, augmented_rows, bb)
-        #
-        # # 如果迭代剔除失败，回退到原始 SVD（全量数据）
-        # if best_coeffs is None:
-        #     if bb:
-        #         self._log("        迭代剔除失败，回退到原始 SVD")
-        #     best_coeffs, best_inlier_mask, best_keep_rows_count = self._basic_svd_fit(X_aug, augmented_rows, bb)
-
-        best_coeffs, best_inlier_mask, best_keep_rows_count = self._basic_svd_fit(X_aug, augmented_rows, bb)
         if best_coeffs is None:
             return []
 
-        # 使用最终确定的系数，在原始数据上计算内点（注意：用原始数据，不是增强后的）
-        X = X_orig
-        result = X @ best_coeffs
-        rel_error = np.abs(result) / (np.abs(X[:, 0]) + 1)
-        final_inlier_mask = rel_error < 0.01
+        result = X_orig @ best_coeffs
+        rel_error = np.abs(result) / (np.abs(X_orig[:, 0]) + 1)
+        final_inlier_mask = rel_error < self.inlier_error_threshold
         final_inlier_count = final_inlier_mask.sum()
 
-        if bb:
-            self._log(f"        最终内点 {final_inlier_count}/{valid_rows}")
-
         if final_inlier_count < valid_rows * self.min_final_inlier_ratio:
-            if bb:
-                self._log("内点不足")
             return []
 
-        # 共用后续处理（分组、生成规则）
-        return self._extract_rules_from_svd(X, fields, final_inlier_mask, bb)
+        return self._extract_rules_from_svd(X_orig, fields, final_inlier_mask)
 
-    def _augment_small_sample(self, X_orig: np.ndarray, valid_rows: int, bb: bool):
+    def _basic_svd_fit(self, X: np.ndarray, valid_rows: int):
         """
-        小样本复制增强：当有效行数小于阈值时，通过复制和随机缩放增加样本量。
-        返回 (augmented_X, augmented_rows)
-        """
-        REPEAT_THRESHOLD = 50
-        if valid_rows < REPEAT_THRESHOLD:
-            repeat = (REPEAT_THRESHOLD + valid_rows - 1) // valid_rows
-            X_repeated = np.repeat(X_orig, repeat, axis=0)
-            row_scales = np.random.uniform(1, 10, size=(X_repeated.shape[0], 1))
-            # 可选添加微小噪声（当前注释掉）
-            # noise = np.random.uniform(0, 0.0001 * np.abs(X_repeated), size=X_repeated.shape)
-            X_aug = X_repeated * row_scales  # + noise
-            augmented_rows = X_aug.shape[0]
-            if bb:
-                self._log(
-                    f"        有效行数 {valid_rows} < {REPEAT_THRESHOLD}，复制 {repeat} 倍并添加随机缩放(1~10)，用于 SVD 拟合（共 {augmented_rows} 行）")
-            return X_aug, augmented_rows
-        else:
-            return X_orig, valid_rows
-
-    def _iterative_svd_refinement(self, X: np.ndarray, valid_rows: int, bb: bool):
-        """
-        迭代剔除增强版：逐次剔除残差最大的行，找到最优系数。
-        返回 (best_coeffs, best_inlier_mask, best_keep_rows_count)
-        注意：这里的 X 可能是经过小样本增强后的数据，valid_rows 是增强后的行数。
-        """
-        MAX_REMOVE_RATIO = 0.3
-        min_keep_rows = max(5, int(valid_rows * (1 - MAX_REMOVE_RATIO)))
-
-        best_coeffs = None
-        best_inlier_mask = None
-        best_keep_rows_count = 0
-
-        current_X = X.copy()
-        current_indices = np.arange(valid_rows)
-
-        while len(current_indices) >= min_keep_rows:
-            X_sample = current_X
-            rows_count = len(current_indices)
-
-            try:
-                X_centered = X_sample - np.mean(X_sample, axis=0)
-                U, s, Vt = np.linalg.svd(X_centered, full_matrices=False)
-                coeffs = Vt[-1, :]
-
-                if np.all(np.abs(coeffs) < self.precision):
-                    break
-
-                result = X_sample @ coeffs
-                rel_error = np.abs(result) / (np.abs(X_sample[:, 0]) + 1)
-
-                remove_count = max(1, rows_count // 10)
-                largest_error_indices = np.argsort(rel_error)[-remove_count:]
-
-                # 如果最大误差已经很小，停止剔除
-                if rel_error[largest_error_indices[-1]] < 0.01:
-                    best_coeffs = coeffs
-                    best_keep_rows_count = rows_count
-                    best_inlier_mask = np.zeros(valid_rows, dtype=bool)
-                    best_inlier_mask[current_indices] = True
-                    break
-
-                # 剔除误差最大的行
-                current_X = np.delete(current_X, largest_error_indices, axis=0)
-                current_indices = np.delete(current_indices, largest_error_indices)
-
-            except Exception as e:
-                if bb:
-                    self._log(f"迭代剔除异常: {e}")
-                break
-        else:
-            # while 正常结束，使用最后一次的结果
-            if len(current_indices) >= 3:
-                X_sample = current_X
-                X_centered = X_sample - np.mean(X_sample, axis=0)
-                U, s, Vt = np.linalg.svd(X_centered, full_matrices=False)
-                best_coeffs = Vt[-1, :]
-                best_keep_rows_count = len(current_indices)
-                best_inlier_mask = np.zeros(valid_rows, dtype=bool)
-                best_inlier_mask[current_indices] = True
-
-        return best_coeffs, best_inlier_mask, best_keep_rows_count
-
-    def _basic_svd_fit(self, X: np.ndarray, valid_rows: int, bb: bool):
-        """
-        原始 SVD 拟合：全量数据，RANSAC 迭代（虽然目前是全量采样）。
-        返回 (best_coeffs, best_inlier_mask, best_keep_rows_count)
-        注意：这里的 X 可能是经过小样本增强后的数据，valid_rows 是增强后的行数。
+        原始 SVD 拟合：全量数据，RANSAC 迭代
         """
         best_coeffs = None
         best_inlier_mask = None
@@ -1125,7 +896,7 @@ class AuditRuleDiscoverer:
 
                 result = X @ coeffs
                 rel_error = np.abs(result) / (np.abs(X[:, 0]) + 1)
-                inlier_mask = rel_error < 0.01
+                inlier_mask = rel_error < self.inlier_error_threshold
                 inlier_count = inlier_mask.sum()
 
                 if inlier_count > best_inlier_count:
@@ -1141,86 +912,41 @@ class AuditRuleDiscoverer:
         if best_coeffs is None:
             return None, None, 0
 
-        return best_coeffs, best_inlier_mask, valid_rows
+        return best_coeffs, best_inlier_mask, best_inlier_count
 
-    def _extract_rules_from_svd(self, X: np.ndarray, fields: List[str], inlier_mask: np.ndarray, bb: bool) -> List[
-        Dict]:
+    def _extract_rules_from_svd(self, X: np.ndarray, fields: List[str],
+                                inlier_mask: np.ndarray) -> List[Dict]:
         """
-        共用后续处理：基于内点重新 SVD，分组，生成规则。
-        X 必须是原始数据（未增强），inlier_mask 是基于原始数据的。
+        共用后续处理：基于内点重新 SVD，分组，生成规则
         """
-        # 用内点重新 SVD
         inlier_X = X[inlier_mask]
         if len(inlier_X) < 3:
             return []
+
+        total_valid_rows = X.shape[0]
+        satisfied_rows = inlier_mask.sum()
 
         inlier_X_centered = inlier_X - np.mean(inlier_X, axis=0)
         U, s, Vt = np.linalg.svd(inlier_X_centered, full_matrices=False)
         coeffs = Vt[-1, :]
 
-        coeffs_sign = np.zeros(len(coeffs), dtype=int)
-        for i, c in enumerate(coeffs):
-            if c > self.precision:
-                coeffs_sign[i] = 1
-            elif c < -self.precision:
-                coeffs_sign[i] = -1
-
-        if bb:
-            self._log("7")
-
-        nonzero_indices = [i for i, c in enumerate(coeffs_sign) if c != 0]
-        if len(nonzero_indices) < 3:
-            if bb:
-                self._log("8")
-            return []
-
-        groups = []
-        used = set()
-        for i in nonzero_indices:
-            if i in used:
-                continue
-            target_abs = abs(coeffs[i])
-            if bb:
-                self._log(f"target_abs:{target_abs}")
-            group = [i]
-            for j in nonzero_indices:
-                if j != i and j not in used:
-                    current_abs = abs(coeffs[j])
-                    if bb:
-                        self._log(f"current_abs:{current_abs}")
-                    if target_abs > 0 and abs(current_abs - target_abs) / target_abs <self.coeff_group_tolerance: #默认0.2
-                        group.append(j)
-            if bb:
-                self._log(f"group:{group}")
-            if len(group) >= 3:
-                groups.append(group)
-                used.update(group)
-
-        if bb:
-            self._log("9")
+        groups = self._group_coefficients(coeffs, fields)
 
         if not groups:
-            if bb:
-                self._log("10")
             return []
 
         rules = []
         for group in groups:
-            subset_fields = [fields[i] for i in group]
-            subset_coeffs = np.array([coeffs_sign[i] for i in group])
-            subset_X = X[:, group]
+            subset_fields = group['fields']
+            subset_coeffs = group['coeffs']
+            subset_X = X[:, [fields.index(f) for f in subset_fields]]
 
             result = subset_X @ subset_coeffs
             scale = np.max(np.abs(subset_X), axis=1)
             scale = np.maximum(scale, 1)
             confidence = (np.abs(result) / scale < 1e-4).mean()
 
-            if bb:
-                self._log(f"11:confidence:{confidence},min_confidence:{self.min_confidence}")
-
             if confidence < self.min_confidence:
-                if bb:
-                    self._log("11")
                 continue
 
             left_parts = []
@@ -1240,190 +966,358 @@ class AuditRuleDiscoverer:
             right_expr = " + ".join(right_parts)
             expr = f"{left_expr} = {right_expr}"
 
-            rules.append({
-                "rule": expr,
-                "confidence": round(confidence, 4),
-                "priority": "高" if confidence == 1.0 else "中",
-                "fields": subset_fields,
-                "relation_type": "additive",
-                "violation_count": 0,
-                "violation_samples": []
-            })
+            satisfied_rows_calc = int(round(confidence * total_valid_rows))
 
-        if bb:
-            self._log(f"12:{rules}")
+            rules.append({
+                'rule': expr,
+                'confidence': round(confidence, 4),
+                'priority': '高' if confidence == 1.0 else '中',
+                'fields': subset_fields,
+                'relation_type': 'additive',
+                'violation_count': total_valid_rows - satisfied_rows_calc,
+                'violation_samples': [],
+                'valid_rows': total_valid_rows,
+                'satisfied_rows': satisfied_rows_calc
+            })
 
         return rules
 
-    def reduce_arithmetic_rules(self, rules: List[Dict]) -> List[Dict]:
+    def _group_coefficients(self, coeffs: np.ndarray, fields: List[str]) -> List[Dict]:
         """
-        对加法规则列表进行线性消元简化，去除冗余规则，保留最小不可约集合。
-
-        规则：所有规则（2字段、3字段、4+字段）都参与消元，
-              消元后保留所有长度≥2的线性无关规则。
+        对系数进行符号化和分组
         """
-        import math
+        coeffs_sign = np.zeros(len(coeffs), dtype=int)
+        for i, c in enumerate(coeffs):
+            if c > self.precision:
+                coeffs_sign[i] = 1
+            elif c < -self.precision:
+                coeffs_sign[i] = -1
 
-        # ========== 辅助函数 ==========
-        def rule_to_dict(rule):
-            """将规则转为系数字典 {field: ±1}"""
-            expr = rule['rule']
-            left, right = expr.split(' = ')
-            left_fields = [f.strip() for f in left.split(' + ')] if left != '0' else []
-            right_fields = [f.strip() for f in right.split(' + ')] if right != '0' else []
-            coeffs = {}
-            for f in left_fields:
-                coeffs[f] = coeffs.get(f, 0) - 1
-            for f in right_fields:
-                coeffs[f] = coeffs.get(f, 0) + 1
-            # 标准化：使第一个非零系数为正
-            if coeffs:
-                first = min(coeffs.keys())
-                if coeffs[first] < 0:
-                    coeffs = {f: -c for f, c in coeffs.items()}
-            return coeffs
-
-        def dict_to_rule(coeffs, confidence=1.0, priority='高'):
-            """系数字典转回规则字符串"""
-            left = []
-            right = []
-            for field, c in coeffs.items():
-                if c == 0:
-                    continue
-                if c > 0:
-                    right.append(field)
-                else:
-                    left.append(field)
-            left.sort()
-            right.sort()
-            left_expr = ' + '.join(left) if left else '0'
-            right_expr = ' + '.join(right) if right else '0'
-            rule_str = f"{left_expr} = {right_expr}"
-            return {
-                'rule': rule_str,
-                'fields': list(coeffs.keys()),
-                'confidence': confidence,
-                'priority': priority,
-                'relation_type': 'additive',
-                'violation_count': 0,
-                'violation_samples': []
-            }
-
-        # ========== 1. 所有规则参与消元 ==========
-        if not rules:
+        nonzero_indices = [i for i, c in enumerate(coeffs_sign) if c != 0]
+        if len(nonzero_indices) < 3:
             return []
 
-        # 转换所有规则为系数向量
-        vecs = []
-        for r in rules:
-            vecs.append(rule_to_dict(r))
-
-        # 按长度排序（短的优先作为基）
-        vecs.sort(key=lambda v: len(v))
-
-        # 消元基
-        basis = []
-
-        for v in vecs:
-            cur = v.copy()
-            changed = True
-            iter_count = 0
-            max_iter = 50
-
-            while changed and iter_count < max_iter:
-                changed = False
-                iter_count += 1
-                for b in basis:
-                    # 寻找公共字段
-                    common = None
-                    for f in cur:
-                        if f in b:
-                            common = f
-                            break
-                    if common is None:
-                        continue
-                    # 消去 common
-                    if cur[common] == -b[common]:
-                        for f, coeff in b.items():
-                            cur[f] = cur.get(f, 0) + coeff
-                    elif cur[common] == b[common]:
-                        for f, coeff in b.items():
-                            cur[f] = cur.get(f, 0) - coeff
-                    else:
-                        continue
-                    # 移除系数为0的项
-                    cur = {f: c for f, c in cur.items() if c != 0}
-                    changed = True
-                    break
-
-            if not cur:
+        groups = []
+        used = set()
+        for i in nonzero_indices:
+            if i in used:
                 continue
+            target_abs = abs(coeffs[i])
+            group = [i]
+            for j in nonzero_indices:
+                if j != i and j not in used:
+                    current_abs = abs(coeffs[j])
+                    if target_abs > 0 and abs(current_abs - target_abs) / target_abs < self.coeff_group_tolerance:
+                        group.append(j)
+            if len(group) >= 3:
+                groups.append({
+                    'fields': [fields[idx] for idx in group],
+                    'coeffs': [coeffs_sign[idx] for idx in group]
+                })
+                used.update(group)
 
-            # 归一化系数（除以最大公约数）
-            coeff_values = list(cur.values())
-            gcd_val = abs(coeff_values[0])
-            for c in coeff_values[1:]:
-                gcd_val = math.gcd(gcd_val, abs(c))
-            if gcd_val > 1:
-                cur = {f: c // gcd_val for f, c in cur.items()}
+        return groups
 
-            # 标准化：使第一个非零系数为正
-            first_field = min(cur.keys())
-            if cur[first_field] < 0:
-                cur = {f: -c for f, c in cur.items()}
-
-            # 长度检查：只保留2字段及以上的规则
-            if len(cur) < 2:
-                continue
-
-            # 检查是否已在基中
-            already = False
-            for b in basis:
-                if set(cur.keys()) == set(b.keys()) and all(cur[f] == b[f] for f in cur):
-                    already = True
-                    break
-            if already:
-                continue
-
-            basis.append(cur)
-
-        # 转换基向量为规则
-        result = [dict_to_rule(vec) for vec in basis]
-
-        return result
-
-    def _discover_equality_rules(self, df: pd.DataFrame, numeric_cols: List[str]) -> List[Dict]:
+    # ==================== 2字段相等规则发现 ====================
+    def _discover_equality_rules(self, df: pd.DataFrame, numeric_cols: List[str]):
         """
         发现2字段相等关系：A = B
+        注意：valid_rows/satisfied_rows 等由后续全量验证重新计算
         """
-        rules = []
+        strong_rules = []
+        weak_rules = []
         n = len(numeric_cols)
+
+        nonnull_counts = {col: df[col].notna().sum() for col in numeric_cols}
 
         for i in range(n):
             for j in range(i + 1, n):
                 col1 = numeric_cols[i]
                 col2 = numeric_cols[j]
 
-                # 取两字段都非空的行
+                n1 = nonnull_counts[col1]
+                n2 = nonnull_counts[col2]
+
                 valid_mask = df[col1].notna() & df[col2].notna()
-                if valid_mask.sum() < self.min_cooccurrence_rows:
+                common_nonnull = valid_mask.sum()
+
+                if common_nonnull < self.min_cooccurrence_rows:
                     continue
 
-                # 检查是否所有行都满足 col1 == col2
-                if (df.loc[valid_mask, col1] == df.loc[valid_mask, col2]).all():
-                    rules.append({
-                        'rule': f"{col1} = {col2}",
-                        'fields': [col1, col2],
-                        'confidence': 1.0,
-                        'priority': '高',
-                        'relation_type': 'additive',
-                        'violation_count': 0,
-                        'violation_samples': []
+                equal_mask = df.loc[valid_mask, col1] == df.loc[valid_mask, col2]
+                equal_count = equal_mask.sum()
+                equal_ratio = equal_count / common_nonnull
+
+                if equal_ratio < self.equality_ratio_threshold:
+                    continue
+
+                rule_str, fields = self._normalize_two_field_rule([col1, col2])
+
+                rule = {
+                    'rule': rule_str,
+                    'fields': fields,
+                    'confidence': round(equal_ratio, 4),
+                    'priority': '高' if equal_ratio == 1.0 else '中',
+                    'relation_type': 'additive',
+                    'violation_count': 0,
+                    'violation_samples': [],
+                    'valid_rows': 0,
+                    'satisfied_rows': 0
+                }
+
+                if (common_nonnull >= self.strong_coverage_threshold * n1 and
+                        common_nonnull >= self.strong_coverage_threshold * n2):
+                    strong_rules.append(rule)
+                else:
+                    weak_rules.append(rule)
+
+        return strong_rules, weak_rules
+
+    def _validate_rule_on_full_data(self, df: pd.DataFrame, rule: Dict) -> Dict:
+        """
+        在全量数据上重新验证单条规则，更新 valid_rows、satisfied_rows、confidence、violation_count
+        """
+        fields = rule.get('fields', [])
+        if len(fields) < 2:
+            return rule
+
+        # 获取全量数据中所有字段都非空的行
+        valid_mask = df[fields].notna().all(axis=1)
+        valid_rows = valid_mask.sum()
+
+        if valid_rows == 0:
+            rule['valid_rows'] = 0
+            rule['satisfied_rows'] = 0
+            rule['confidence'] = 0.0
+            rule['violation_count'] = 0
+            rule['priority'] = '低'
+            return rule
+
+        # 解析规则，计算满足条件的行数
+        rule_str = rule['rule']
+        left, right = rule_str.split(' = ')
+        left_fields = [f.strip() for f in left.split(' + ')] if left != '0' else []
+        right_fields = [f.strip() for f in right.split(' + ')] if right != '0' else []
+
+        # 计算左值和右值
+        if left_fields:
+            left_sum = df.loc[valid_mask, left_fields].sum(axis=1)
+        else:
+            left_sum = 0
+
+        if right_fields:
+            right_sum = df.loc[valid_mask, right_fields].sum(axis=1)
+        else:
+            right_sum = 0
+
+        # 计算误差
+        diff = np.abs(left_sum - right_sum)
+        scale = np.maximum(np.abs(left_sum), np.abs(right_sum))
+        scale = np.maximum(scale, 1)
+        satisfied_mask = (diff / scale < 1e-4)
+        satisfied_rows = satisfied_mask.sum()
+
+        confidence = satisfied_rows / valid_rows if valid_rows > 0 else 0
+
+        # 更新规则
+        rule['valid_rows'] = int(valid_rows)
+        rule['satisfied_rows'] = int(satisfied_rows)
+        rule['confidence'] = round(confidence, 4)
+        rule['violation_count'] = int(valid_rows - satisfied_rows)
+        rule['priority'] = '高' if confidence == 1.0 else '中'
+
+        return rule
+
+    def _validate_rules_on_full_data(self, df: pd.DataFrame, rules: List[Dict]) -> List[Dict]:
+        """
+        在全量数据上重新验证所有规则
+        """
+        validated_rules = []
+        for rule in rules:
+            validated_rule = self._validate_rule_on_full_data(df, rule)
+            # 重新计算后的置信度必须大于等于最小置信度阈值
+            if validated_rule.get('confidence', 0) >= self.min_confidence:
+                validated_rules.append(validated_rule)
+        return validated_rules
+
+    # ==================== 规则简化（保留备用） ====================
+    def reduce_arithmetic_rules(self, rules: List[Dict]) -> List[Dict]:
+        """
+        对加法规则列表进行分层简化（保留备用，当前未使用）
+
+        注意：2字段规则不参与消元，只作为结果输出
+        消元只发生在3+字段规则之间
+        """
+        from copy import deepcopy
+
+        def parse_rule(rule_dict):
+            expr = rule_dict['rule']
+            left, right = expr.split(' = ')
+            left_fields = [f.strip() for f in left.split(' + ')] if left != '0' else []
+            right_fields = [f.strip() for f in right.split(' + ')] if right != '0' else []
+            return left_fields, right_fields, rule_dict.get('confidence', 1.0)
+
+        def build_rule(left_fields, right_fields, confidence):
+            left_fields.sort()
+            right_fields.sort()
+            left_expr = ' + '.join(left_fields) if left_fields else '0'
+            right_expr = ' + '.join(right_fields) if right_fields else '0'
+            rule_str = f"{left_expr} = {right_expr}"
+            all_fields = left_fields + right_fields
+            return {
+                'rule': rule_str,
+                'fields': all_fields,
+                'confidence': confidence,
+                'priority': '高' if confidence == 1.0 else '中',
+                'relation_type': 'additive',
+                'violation_count': 0,
+                'violation_samples': []
+            }
+
+        # 分离2字段规则
+        two_field_rules = []
+        other_rules = []
+
+        for r in rules:
+            if len(r.get('fields', [])) == 2:
+                two_field_rules.append(r)
+            else:
+                other_rules.append(r)
+
+        if not other_rules:
+            return two_field_rules
+
+        # 按字段数分组
+        rules_by_len = {}
+        for r in other_rules:
+            field_count = len(r.get('fields', []))
+            if field_count not in rules_by_len:
+                rules_by_len[field_count] = []
+            rules_by_len[field_count].append(r)
+
+        # 3字段规则去重
+        if 3 in rules_by_len:
+            seen = set()
+            unique_3 = []
+            for r in rules_by_len[3]:
+                left, right, conf = parse_rule(r)
+                key = frozenset(left + right)
+                if key not in seen:
+                    seen.add(key)
+                    unique_3.append({
+                        'left': left,
+                        'right': right,
+                        'confidence': conf
+                    })
+            rules_by_len[3] = unique_3
+
+        # 构建3字段规则索引
+        three_field_index = {}
+        if 3 in rules_by_len:
+            for r in rules_by_len[3]:
+                key = frozenset(r['left'] + r['right'])
+                three_field_index[key] = r
+
+        # 逐层消元
+        for field_count in sorted(rules_by_len.keys()):
+            if field_count <= 3:
+                continue
+
+            simplified_rules = []
+            for r in rules_by_len[field_count]:
+                left, right, conf = parse_rule(r)
+                changed = False
+                new_left, new_right = left[:], right[:]
+
+                for three_key, three_rule in three_field_index.items():
+                    three_left = three_rule['left']
+                    three_right = three_rule['right']
+                    three_fields = three_left + three_right
+
+                    current_fields = set(left + right)
+                    if not three_key.issubset(current_fields):
+                        continue
+
+                    if set(three_left).issubset(set(left)) and set(three_right).issubset(set(left)):
+                        new_left = [f for f in left if f not in three_fields]
+                        new_left.append(three_right[0])
+                        new_left = list(set(new_left))
+                        new_right = right[:]
+                        conf = min(conf, three_rule['confidence'])
+                        changed = True
+                        break
+                    elif set(three_left).issubset(set(right)) and set(three_right).issubset(set(left)):
+                        new_left = [f for f in left if f not in three_right]
+                        new_right = [f for f in right if f not in three_left]
+                        new_left.append(three_left[0])
+                        new_left = list(set(new_left))
+                        new_right = list(set(new_right))
+                        conf = min(conf, three_rule['confidence'])
+                        changed = True
+                        break
+                    elif set(three_left).issubset(set(left)) and set(three_right).issubset(set(right)):
+                        new_left = [f for f in left if f not in three_left]
+                        new_right = [f for f in right if f not in three_right]
+                        conf = min(conf, three_rule['confidence'])
+                        changed = True
+                        break
+                    elif set(three_left).issubset(set(right)) and set(three_right).issubset(set(right)):
+                        new_left = left[:]
+                        new_right = [f for f in right if f not in three_fields]
+                        new_right.append(three_left[0])
+                        new_right = list(set(new_right))
+                        conf = min(conf, three_rule['confidence'])
+                        changed = True
+                        break
+
+                if changed:
+                    new_field_count = len(new_left + new_right)
+                    if new_field_count == 3:
+                        new_left, new_right = new_left[:], new_right[:]
+                        new_left.sort()
+                        new_right.sort()
+                        new_key = frozenset(new_left + new_right)
+                        if new_key not in three_field_index:
+                            three_field_index[new_key] = {
+                                'left': new_left,
+                                'right': new_right,
+                                'confidence': conf
+                            }
+                            if 3 not in rules_by_len:
+                                rules_by_len[3] = []
+                            rules_by_len[3].append({
+                                'left': new_left,
+                                'right': new_right,
+                                'confidence': conf
+                            })
+                    else:
+                        new_left.sort()
+                        new_right.sort()
+                        simplified_rules.append({
+                            'left': new_left,
+                            'right': new_right,
+                            'confidence': conf
+                        })
+                else:
+                    simplified_rules.append({
+                        'left': left,
+                        'right': right,
+                        'confidence': conf
                     })
 
-        return rules
+            if simplified_rules:
+                rules_by_len[field_count] = simplified_rules
 
+        # 构建最终结果
+        result = two_field_rules[:]
 
+        for field_count in sorted(rules_by_len.keys()):
+            for r in rules_by_len[field_count]:
+                result.append(build_rule(r['left'], r['right'], r['confidence']))
+
+        return self._deduplicate_rules(result)
+
+    # ==================== 辅助方法 ====================
     def _get_valid_data(self, df: pd.DataFrame, fields: List[str]) -> pd.DataFrame:
         """获取指定字段都非空的数据"""
         valid_mask = df[fields].notna().all(axis=1)
@@ -1435,6 +1329,7 @@ class AuditRuleDiscoverer:
             return 0
         valid_mask = df[fields].notna().all(axis=1)
         return valid_mask.sum()
+
 
 def discover_audit_rules(data: pd.DataFrame, variable_types: Dict[str, str],
                          foreign_keys: List[Dict] = None,
@@ -1449,13 +1344,6 @@ def verify_audit_rules(data: pd.DataFrame,
                        debug: bool = False) -> List[Dict]:
     """
     便捷函数：验证指定的勾稽规则
-
-    参数:
-    - data: 数据框
-    - rules: 规则列表，每个元素为 (fields, coeffs)
-             例如: (['A', 'B', 'C', 'D'], [1, 1, -1, -1]) 表示 A + B = C + D
-
-    返回: 验证结果列表
     """
     results = []
     for fields, coeffs in rules:

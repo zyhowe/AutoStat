@@ -362,24 +362,32 @@
         <h2>🔗 勾稽规则（数据一致性校验）</h2>
 
         {% if quality_report.audit_rules.arithmetic_rules %}
-        <h3>📐 数值关系</h3>
+        <h3>📐 数值关系（共 {{ quality_report.audit_rules.arithmetic_rules|length }} 个规则）</h3>
         <table style="width:100%; margin-bottom:20px;">
             <thead>
-                <tr><th>规则</th><th>置信度</th><th>优先级</th><th>违反记录</th></tr>
+                <tr>
+                    <th>规则</th>
+                    <th>置信度</th>
+                    <th>优先级</th>
+                    <th>有效行数</th>
+                    <th>满足行数</th>
+                    <th>违反记录</th>
+                </tr>
             </thead>
             <tbody>
                 {% for rule in quality_report.audit_rules.arithmetic_rules %}
                 <tr>
-                    <td><code>{{ rule.rule }}</code></td>
+                    <td>
+                        <div style="cursor:help;"
+                             title="{% for f in rule.fields %}{{ f }}: 非空数 {{ field_nonnull_lookup.get(f, {}).nonnull_count|default('?') }}{% if not loop.last %}, {% endif %}{% endfor %}">
+                            <code>{{ rule.rule }}</code>
+                        </div>
+                    </td>
                     <td>{{ "%.1f"|format(rule.confidence * 100) }}%</td>
                     <td>{% if rule.priority == '高' %}🔴 高{% elif rule.priority == '中' %}🟠 中{% else %}🟢 低{% endif %}</td>
-                    <td>
-                        {% if rule.violation_count > 0 %}
-                        ⚠️ {{ rule.violation_count }} 条
-                        {% else %}
-                        ✅ 0 条
-                        {% endif %}
-                    </td>
+                    <td>{{ rule.valid_rows|default(rule.violation_count|default(0) + rule.satisfied_rows|default(0), true) }}</td>
+                    <td>{{ rule.satisfied_rows|default(rule.valid_rows|default(0) - rule.violation_count|default(0), true) }}</td>
+                    <td>{% if rule.violation_count > 0 %}⚠️ {{ rule.violation_count }} 条{% else %}✅ 0 条{% endif %}</td>
                 </tr>
                 {% endfor %}
             </tbody>
@@ -387,10 +395,16 @@
         {% endif %}
 
         {% if quality_report.audit_rules.functional_dependencies %}
-        <h3>🏷️ 函数依赖</h3>
+        <h3>🏷️ 函数依赖（共 {{ quality_report.audit_rules.functional_dependencies|length }} 个规则）</h3>
         <table style="width:100%; margin-bottom:20px;">
             <thead>
-                <tr><th>规则</th><th>置信度</th><th>优先级</th></tr>
+                <tr>
+                    <th>规则</th>
+                    <th>置信度</th>
+                    <th>优先级</th>
+                    <th>有效行数</th>
+                    <th>满足行数</th>
+                </tr>
             </thead>
             <tbody>
                 {% for rule in quality_report.audit_rules.functional_dependencies %}
@@ -398,6 +412,8 @@
                     <td><code>{{ rule.rule }}</code></td>
                     <td>{{ "%.1f"|format(rule.confidence * 100) }}%</td>
                     <td>{% if rule.priority == '高' %}🔴 高{% elif rule.priority == '中' %}🟠 中{% else %}🟢 低{% endif %}</td>
+                    <td>{{ rule.valid_rows|default('-') }}</td>
+                    <td>{{ rule.satisfied_rows|default('-') }}</td>
                 </tr>
                 {% endfor %}
             </tbody>
@@ -405,10 +421,16 @@
         {% endif %}
 
         {% if quality_report.audit_rules.temporal_rules %}
-        <h3>📅 时序约束</h3>
+        <h3>📅 时序约束（共 {{ quality_report.audit_rules.temporal_rules|length }} 个规则）</h3>
         <table style="width:100%; margin-bottom:20px;">
             <thead>
-                <tr><th>规则</th><th>置信度</th><th>优先级</th></tr>
+                <tr>
+                    <th>规则</th>
+                    <th>置信度</th>
+                    <th>优先级</th>
+                    <th>有效行数</th>
+                    <th>满足行数</th>
+                </tr>
             </thead>
             <tbody>
                 {% for rule in quality_report.audit_rules.temporal_rules %}
@@ -416,6 +438,8 @@
                     <td><code>{{ rule.rule }}</code></td>
                     <td>{{ "%.1f"|format(rule.confidence * 100) }}%</td>
                     <td>{% if rule.priority == '高' %}🔴 高{% elif rule.priority == '中' %}🟠 中{% else %}🟢 低{% endif %}</td>
+                    <td>{{ rule.valid_rows|default('-') }}</td>
+                    <td>{{ rule.satisfied_rows|default('-') }}</td>
                 </tr>
                 {% endfor %}
             </tbody>
@@ -423,10 +447,17 @@
         {% endif %}
 
         {% if quality_report.audit_rules.foreign_keys %}
-        <h3>🔗 外键约束</h3>
+        <h3>🔗 外键约束（共 {{ quality_report.audit_rules.foreign_keys|length }} 个规则）</h3>
         <table style="width:100%; margin-bottom:20px;">
             <thead>
-                <tr><th>规则</th><th>置信度</th><th>优先级</th><th>违反记录</th></tr>
+                <tr>
+                    <th>规则</th>
+                    <th>置信度</th>
+                    <th>优先级</th>
+                    <th>有效行数</th>
+                    <th>满足行数</th>
+                    <th>违反记录</th>
+                </tr>
             </thead>
             <tbody>
                 {% for rule in quality_report.audit_rules.foreign_keys %}
@@ -434,6 +465,8 @@
                     <td><code>{{ rule.from_table }}.{{ rule.from_col }} → {{ rule.to_table }}.{{ rule.to_col }}</code></td>
                     <td>{{ "%.1f"|format(rule.confidence * 100) }}%</td>
                     <td>{% if rule.priority == '高' %}🔴 高{% elif rule.priority == '中' %}🟠 中{% else %}🟢 低{% endif %}</td>
+                    <td>{{ rule.valid_rows|default('-') }}</td>
+                    <td>{{ rule.satisfied_rows|default('-') }}</td>
                     <td>{% if rule.violation_count %}{{ rule.violation_count }}{% else %}0{% endif %} 条</td>
                 </tr>
                 {% endfor %}
