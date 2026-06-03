@@ -13,56 +13,88 @@ class AuditRuleDiscoverer:
     """勾稽规则发现器 - 四条路径"""
 
     def __init__(self,
-                 precision: float = 1e-6,
-                 min_confidence: float = 0.5,
-                 corr_threshold: float = 0.9,
-                 min_nonnull_count: int = 10,
-                 min_nonnull_rate: float = 0.01,
-                 cooccur_ratio: float = 0.9,
-                 min_cooccurrence_rows: int = 10,
-                 nonnull_diff_ratio: float = 0.2,
-                 row_similarity_threshold: float = 0.99,
-                 min_cluster_size: int = 3,
-                 max_numeric_fields: int = 100,
-                 ransac_iter: int = 50,
-                 ransac_sample_size: int = 20,
-                 inlier_ratio: float = 0.7,
-                 min_final_inlier_ratio: float = 0.5,
-                 coeff_group_tolerance: float = 0.5,
-                 # ========== 新增可配置参数 ==========
-                 equality_ratio_threshold: float = 0.8,      # 2字段相等比例阈值
-                 strong_coverage_threshold: float = 0.8,     # 强相等覆盖比例阈值
-                 inlier_error_threshold: float = 0.01,       # 内点误差阈值
-                 max_remove_ratio: float = 0.3,              # 迭代剔除最大比例
-                 small_sample_threshold: int = 50,           # 小样本复制阈值
-                 # ==================================
-                 debug: bool = False):
+                 # ========== 1. 基础参数 ==========
+                 debug: bool = False,  # 是否开启调试模式，输出详细日志
+
+                 # ========== 2. 数值精度参数 ==========
+                 precision: float = 1e-6,  # 数值比较精度，判断两个数值是否相等
+
+                 # ========== 3. 置信度参数 ==========
+                 min_confidence: float = 0.5,  # 最小置信度阈值，低于此值的规则不输出
+
+                 # ========== 4. 字段筛选参数 ==========
+                 corr_threshold: float = 0.9,  # 相关性阈值，用于筛选强相关字段对
+                 min_nonnull_count: int = 10,  # 最小非空值数量，字段非空值少于此时不考虑
+                 min_nonnull_rate: float = 0.01,  # 最小非空率，字段非空率低于此值不考虑
+                 cooccur_ratio: float = 0.9,  # 共现比例阈值，两字段同时非空的比例需达到此值
+                 min_cooccurrence_rows: int = 10,  # 最小共现行数，两字段同时非空的行数需大于此值
+                 max_numeric_fields: int = 100,  # 最大数值字段数量，限制分析的字段数量
+
+                 # ========== 5. 聚类分析参数 ==========
+                 nonnull_diff_ratio: float = 0.2,  # 非空差异比例，用于聚类分析
+                 row_similarity_threshold: float = 0.99,  # 行相似度阈值，用于判断数据模式是否相同
+                 min_cluster_size: int = 3,  # 最小聚类大小，聚类至少需要包含的行数
+
+                 # ========== 6. 相等关系参数 ==========
+                 equality_ratio_threshold: float = 0.8,  # 两字段相等比例阈值，判断是否满足相等关系
+                 strong_coverage_threshold: float = 0.8,  # 强相等覆盖比例阈值，用于验证强相等关系
+
+                 # ========== 7. RANSAC拟合参数 ==========
+                 ransac_iter: int = 50,  # RANSAC迭代次数，用于线性关系拟合
+                 ransac_sample_size: int = 20,  # RANSAC采样大小，每次迭代随机抽取的样本数
+                 inlier_ratio: float = 0.7,  # 内点比例阈值，RANSAC拟合时的内点比例要求
+
+                 # ========== 8. 线性关系验证参数 ==========
+                 min_final_inlier_ratio: float = 0.5,  # 最终最小内点比例，验证规则时的内点比例要求
+                 coeff_group_tolerance: float = 0.5,  # 系数分组容差，将相近系数归为同一组的容差范围
+                 inlier_error_threshold: float = 0.01,  # 内点误差阈值，判断拟合是否准确的误差上限
+
+                 # ========== 9. 异常处理参数 ==========
+                 max_remove_ratio: float = 0.3,  # 迭代剔除最大比例，最大可剔除的异常值比例
+                 small_sample_threshold: int = 50  # 小样本复制阈值，小于此值视为小样本，采用复制策略
+                 ):
         """
         勾稽规则发现器初始化
         """
+        # 1. 基础参数
+        self.debug = debug
+
+        # 2. 数值精度参数
         self.precision = precision
+
+        # 3. 置信度参数
         self.min_confidence = min_confidence
+
+        # 4. 字段筛选参数
         self.corr_threshold = corr_threshold
         self.min_nonnull_count = min_nonnull_count
         self.min_nonnull_rate = min_nonnull_rate
         self.cooccur_ratio = cooccur_ratio
         self.min_cooccurrence_rows = min_cooccurrence_rows
+        self.max_numeric_fields = max_numeric_fields
+
+        # 5. 聚类分析参数
         self.nonnull_diff_ratio = nonnull_diff_ratio
         self.row_similarity_threshold = row_similarity_threshold
         self.min_cluster_size = min_cluster_size
-        self.max_numeric_fields = max_numeric_fields
+
+        # 6. 相等关系参数
+        self.equality_ratio_threshold = equality_ratio_threshold
+        self.strong_coverage_threshold = strong_coverage_threshold
+
+        # 7. RANSAC拟合参数
         self.ransac_iter = ransac_iter
         self.ransac_sample_size = ransac_sample_size
         self.inlier_ratio = inlier_ratio
+
+        # 8. 线性关系验证参数
         self.min_final_inlier_ratio = min_final_inlier_ratio
         self.coeff_group_tolerance = coeff_group_tolerance
-        # 新增参数
-        self.equality_ratio_threshold = equality_ratio_threshold
-        self.strong_coverage_threshold = strong_coverage_threshold
         self.inlier_error_threshold = inlier_error_threshold
+
+        # 9. 异常处理参数
         self.max_remove_ratio = max_remove_ratio
         self.small_sample_threshold = small_sample_threshold
-        self.debug = debug
 
     def _log(self, msg: str):
         if self.debug:
@@ -270,7 +302,12 @@ class AuditRuleDiscoverer:
 
         # ========== 新增：用全量数据重新验证所有规则 ==========
         validated_rules = self._validate_rules_on_full_data(df, unique_rules)
-        self._log(f"    全量验证后总计: {len(validated_rules)} 条数值关系")
+
+        if self.debug:
+            self._log("\n  【全量验证后的规则列表】")
+            for i, rule in enumerate(validated_rules, 1):
+                self._log(
+                    f"    {i}. {rule['rule']} (置信度={rule['confidence']}, 有效行数={rule['valid_rows']}, 满足行数={rule['satisfied_rows']})")
         # ====================================================
 
         #线性消元简化（2字段规则不参与消元，只对3+字段规则进行）
@@ -355,7 +392,7 @@ class AuditRuleDiscoverer:
 
         # 使用单归属聚类
         classes, centers = self._cluster_rows_single(X_binary, weights)
-        #classes, centers = self._cluster_rows_multi(X_binary, weights) 多归属聚类
+        #classes, centers = self._cluster_rows_multi(X_binary, weights)  #多归属聚类
 
         self._log(f"    行相似度聚类（原始）: {len(classes)} 个类")
 
@@ -733,7 +770,18 @@ class AuditRuleDiscoverer:
         # ========== 尝试迭代剔除增强版 ==========
         #best_coeffs, best_inlier_mask, best_keep_rows_count = self._iterative_svd_refinement(X_orig, valid_rows, True)
 
-        best_coeffs, best_inlier_mask, _ = self._basic_svd_fit(X_orig, valid_rows)
+        # 场景1：数据较干净，追求速度 - 不使用采样
+        #best_coeffs, best_inlier_mask, count = self._fit_linear_relation(X_orig, valid_rows, use_ransac=False)
+
+        # # 场景2：数据有异常值，追求鲁棒性 - 使用RANSAC采样 通不过
+        # best_coeffs, best_inlier_mask, count = self._fit_linear_relation(X_orig, valid_rows, use_ransac=True)
+        #
+        # # 场景3：小样本数据（小于采样大小）- 自动降级为不采样
+        if valid_rows < self.ransac_sample_size:
+            best_coeffs, best_inlier_mask, count = self._fit_linear_relation(X_orig, valid_rows, use_ransac=False)
+        else:
+            best_coeffs, best_inlier_mask, count = self._fit_linear_relation(X_orig, valid_rows, use_ransac=True)
+
 
         if best_coeffs is None:
             return []
@@ -824,14 +872,36 @@ class AuditRuleDiscoverer:
 
     def _basic_svd_fit(self, X: np.ndarray, valid_rows: int):
         """
-        原始 SVD 拟合：全量数据，RANSAC 迭代
+        原始 SVD 拟合：全量数据，不采样（一次性计算）
+        """
+        try:
+            X_centered = X - np.mean(X, axis=0)
+            U, s, Vt = np.linalg.svd(X_centered, full_matrices=False)
+            coeffs = Vt[-1, :]
+
+            if np.all(np.abs(coeffs) < self.precision):
+                return None, None, 0
+
+            result = X @ coeffs
+            rel_error = np.abs(result) / (np.abs(X[:, 0]) + 1)
+            inlier_mask = rel_error < self.inlier_error_threshold
+            inlier_count = inlier_mask.sum()
+
+            return coeffs, inlier_mask, inlier_count
+        except Exception:
+            return None, None, 0
+
+    def _ransac_svd_fit(self, X: np.ndarray, valid_rows: int):
+        """
+        RANSAC SVD 拟合：迭代采样，提高鲁棒性
         """
         best_coeffs = None
         best_inlier_mask = None
         best_inlier_count = 0
 
         for _ in range(self.ransac_iter):
-            sample_idx = np.arange(valid_rows)
+            # 随机采样
+            sample_idx = np.random.choice(valid_rows, size=self.ransac_sample_size, replace=False)
             X_sample = X[sample_idx]
 
             try:
@@ -852,6 +922,7 @@ class AuditRuleDiscoverer:
                     best_coeffs = coeffs
                     best_inlier_mask = inlier_mask
 
+                    # 提前终止：已达到要求的内点比例
                     if best_inlier_count >= valid_rows * self.inlier_ratio:
                         break
             except Exception:
@@ -861,6 +932,35 @@ class AuditRuleDiscoverer:
             return None, None, 0
 
         return best_coeffs, best_inlier_mask, best_inlier_count
+
+    def _fit_linear_relation(self, X: np.ndarray, valid_rows: int, use_ransac: bool = True):
+        """
+        线性关系拟合（统一入口）
+
+        Parameters
+        ----------
+        X : np.ndarray
+            输入数据矩阵，每列为一个字段
+        valid_rows : int
+            有效行数
+        use_ransac : bool, default=True
+            是否使用 RANSAC 采样拟合
+            - True: 使用 RANSAC 迭代采样（适合有异常值的数据）
+            - False: 使用全量 SVD 拟合（适合干净数据，速度更快）
+
+        Returns
+        -------
+        coeffs : np.ndarray
+            拟合系数
+        inlier_mask : np.ndarray
+            内点掩码
+        inlier_count : int
+            内点数量
+        """
+        if use_ransac:
+            return self._ransac_svd_fit(X, valid_rows)
+        else:
+            return self._basic_svd_fit(X, valid_rows)
 
     def _extract_rules_from_svd(self, X: np.ndarray, fields: List[str],
                                 inlier_mask: np.ndarray) -> List[Dict]:

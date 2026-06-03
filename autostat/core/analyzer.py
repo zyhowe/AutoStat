@@ -543,61 +543,51 @@ class AutoStatisticalAnalyzer:
         try:
             from autostat.core.audit import discover_audit_rules, verify_audit_rules
 
-            # 自动发现
+            # 自动发现勾稽规则
             audit_rules = discover_audit_rules(
-                data=self.data,
-                variable_types=self.variable_types,
-                foreign_keys=[],
-                debug=True,
-                precision=1e-6,
-                min_confidence=0.7,
-                corr_threshold=0.3,
-                min_nonnull_count=10,
-                min_nonnull_rate=0.01,
-                cooccur_ratio=0.5,
-                min_cooccurrence_rows=5,
-                nonnull_diff_ratio=0.2,  # 新增：非空数相差比例阈值
-                max_numeric_fields=100,
-                ransac_iter=1,
-                ransac_sample_size=50,
-                inlier_ratio=0.7,
-                min_cluster_size=3
-            )
+                # ========== 1. 基础参数 ==========
+                data=self.data,  # 输入数据，DataFrame格式
+                variable_types=self.variable_types,  # 变量类型字典，标识每个字段是数值型还是分类型
+                foreign_keys=[],  # 外键列表，用于关联表之间的勾稽关系
+                debug=True,  # 是否开启调试模式，输出详细日志
 
-            # 强制测试已知规则（仅打印）
-            # known_rules = [
-            #     (['companyfixasset17', 'companyfixasset4', 'companyfixasset5', 'companyfixasset11'], [1, -1, -1, 1]),
-            #     (['companyfixasset31', 'companyfixasset18', 'companyfixasset19', 'companyfixasset25'], [1, -1, -1, 1]),
-            #     (['companyfixasset35', 'companyfixasset32', 'companyfixasset33', 'companyfixasset34'], [1, -1, -1, 1]),
-            #     (['companyfixasset49', 'companyfixasset36', 'companyfixasset37', 'companyfixasset43'], [1, -1, -1, 1]),
-            #     (['companyfixasset53', 'companyfixasset50', 'companyfixasset51', 'companyfixasset52'], [1, -1, -1, 1]),
-            # ]
-            #
-            # print("\n  【强制测试已知规则】")
-            # for fields, coeffs in known_rules:
-            #     # 手动验证
-            #     valid_mask = self.data[fields].notna().all(axis=1)
-            #     valid_df = self.data[valid_mask][fields]
-            #     valid_rows = len(valid_df)
-            #
-            #     if valid_rows == 0:
-            #         print(f"    ❌ {fields}: 无有效数据")
-            #         continue
-            #
-            #     X = valid_df.values
-            #     result = X @ np.array(coeffs)
-            #     scale = np.max(np.abs(X), axis=1)
-            #     scale = np.maximum(scale, 1)
-            #     confidence = (np.abs(result) / scale < 1e-4).mean()
-            #     violations = (np.abs(result) / scale >= 1e-4).sum()
-            #
-            #     status = "✅" if confidence >= 0.95 else "⚠️"
-            #     # 构建表达式
-            #     left = [f for f, c in zip(fields, coeffs) if c < 0]
-            #     right = [f for f, c in zip(fields, coeffs) if c > 0]
-            #     expr = f"{' + '.join(left)} = {' + '.join(right)}"
-            #     print(f"    {status} {expr}")
-            #     print(f"       置信度: {confidence:.4f}, 有效行数: {valid_rows}, 违反数: {violations}")
+                # ========== 2. 数值精度参数 ==========
+                precision=1e-6,  # 数值比较精度，判断两个数值是否相等
+
+                # ========== 3. 置信度参数 ==========
+                min_confidence=0.5,  # 最小置信度阈值，低于此值的规则不输出
+
+                # ========== 4. 字段筛选参数 ==========
+                corr_threshold=0.3,  # 相关性阈值，用于筛选强相关字段对
+                min_nonnull_count=10,  # 最小非空值数量，字段非空值少于此时不考虑
+                min_nonnull_rate=0.01,  # 最小非空率，字段非空率低于此值不考虑
+                cooccur_ratio=0.5,  # 共现比例阈值，两字段同时非空的比例需达到此值
+                min_cooccurrence_rows=5,  # 最小共现行数，两字段同时非空的行数需大于此值
+                max_numeric_fields=100,  # 最大数值字段数量，限制分析的字段数量
+
+                # ========== 5. 聚类分析参数 ==========
+                nonnull_diff_ratio=0.2,  # 非空差异比例，用于聚类分析
+                row_similarity_threshold=0.99,  # 行相似度阈值，用于判断数据模式是否相同
+                min_cluster_size=3,  # 最小聚类大小，聚类至少需要包含的行数
+
+                # ========== 6. 相等关系参数 ==========
+                equality_ratio_threshold=0.8,  # 两字段相等比例阈值，判断是否满足相等关系
+                strong_coverage_threshold=0.8,  # 强相等覆盖比例阈值，用于验证强相等关系
+
+                # ========== 7. RANSAC拟合参数 ==========
+                ransac_iter=50,  # RANSAC迭代次数，用于线性关系拟合
+                ransac_sample_size=20,  # RANSAC采样大小，每次迭代随机抽取的样本数
+                inlier_ratio=0.7,  # 内点比例阈值，RANSAC拟合时的内点比例要求
+
+                # ========== 8. 线性关系验证参数 ==========
+                min_final_inlier_ratio=0.5,  # 最终最小内点比例，验证规则时的内点比例要求
+                coeff_group_tolerance=0.5,  # 系数分组容差，将相近系数归为同一组的容差范围
+                inlier_error_threshold=0.01,  # 内点误差阈值，判断拟合是否准确的误差上限
+
+                # ========== 9. 异常处理参数 ==========
+                max_remove_ratio=0.3,  # 迭代剔除最大比例，最大可剔除的异常值比例
+                small_sample_threshold=50  # 小样本复制阈值，小于此值视为小样本，采用复制策略
+            )
 
             if 'audit_rules' not in self.quality_report:
                 self.quality_report['audit_rules'] = {}
