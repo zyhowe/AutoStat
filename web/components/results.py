@@ -225,9 +225,9 @@ def render_ai_tab():
     st.divider()
 
     if is_database:
-        sub_tab_labels = ["💬 智能解读", "🎯 场景推荐", "🔍 自然查询", "📝 SQL生成", "🔮 推理预测"]
+        sub_tab_labels = ["💬 智能解读", "🎯 场景推荐", "🔍 自然查询", "📝 SQL生成", "🔮 推理预测", "🔗 勾稽校验"]
     else:
-        sub_tab_labels = ["💬 智能解读", "🎯 场景推荐", "🔍 自然查询", "🔮 推理预测"]
+        sub_tab_labels = ["💬 智能解读", "🎯 场景推荐", "🔍 自然查询", "🔮 推理预测", "🔗 勾稽校验"]
 
     sub_tabs = st.tabs(sub_tab_labels)
 
@@ -262,6 +262,12 @@ def render_ai_tab():
             else:
                 st.session_state.chat_mode = "prediction"
                 render_agent_inference()
+        with sub_tabs[5]:
+            if st.session_state.llm_client is None:
+                st.warning("请先在侧边栏配置大模型")
+            else:
+                from web.components.audit_rule import render_audit_rule_tab
+                render_audit_rule_tab()
     else:
         with sub_tabs[3]:
             if st.session_state.llm_client is None:
@@ -269,6 +275,12 @@ def render_ai_tab():
             else:
                 st.session_state.chat_mode = "prediction"
                 render_agent_inference()
+        with sub_tabs[4]:
+            if st.session_state.llm_client is None:
+                st.warning("请先在侧边栏配置大模型")
+            else:
+                from web.components.audit_rule import render_audit_rule_tab
+                render_audit_rule_tab()
 
 
 def render_context_selector():

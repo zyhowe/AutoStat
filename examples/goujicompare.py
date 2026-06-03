@@ -145,14 +145,18 @@ if __name__ == "__main__":
         "formulas_output8.csv"
     ]
 
-    csv_files = [
+    csv_files4 = [
         "formulas_output7.csv",
         "formulas_output8.csv"
+    ]
+    csv_files = [
+        "formulas_output8.csv",
+        "formulas_output9.csv"
     ]
 
     # 检查文件是否存在
     if all(os.path.exists(f) for f in csv_files):
-        result = analyze_partial_common(csv_files, "partial_common_analysis4.csv")
+        result = analyze_partial_common(csv_files, "partial_common_analysis5.csv")
     else:
         print("请确保所有CSV文件存在")
         print("当前目录下的CSV文件：", [f for f in os.listdir('.') if f.endswith('.csv')])

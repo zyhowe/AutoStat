@@ -19,7 +19,7 @@ from web.components.value_preview import render_value_preview
 from web.components.progress_stage import ProgressStage, render_simple_progress
 from web.components.term_tooltip import render_term_with_tooltip, apply_term_tooltips_to_html
 from web.components.tips import TipsManager
-
+from web.components.audit_rule import render_audit_rule_tab
 __all__ = [
     # 原有导出
     'render_sidebar',
@@ -45,5 +45,6 @@ __all__ = [
     'render_simple_progress',
     'render_term_with_tooltip',
     'apply_term_tooltips_to_html',
-    'TipsManager'
+    'TipsManager',
+    'render_audit_rule_tab'
 ]
