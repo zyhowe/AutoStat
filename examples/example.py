@@ -6,6 +6,8 @@ import pandas as pd
 import numpy as np
 import sys
 import os
+#import time
+from datetime import timedelta
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -428,8 +430,230 @@ def example_cli_equivalent():
     print("  autostat sample_data.csv --auto-clean")
 
 
+# ==================== 新增：日期关系发现测试 ====================
+
+def example_date_rule_discovery():
+    """测试日期关系发现模块（使用中国节假日库）"""
+    print("=" * 60)
+    print("示例11: 日期关系发现测试（使用中国节假日库）")
+    print("=" * 60)
+
+    from datetime import timedelta
+    import pandas as pd
+    import numpy as np
+
+    try:
+        from autostat.core.date_rules import discover_date_rules
+    except ImportError:
+        print("⚠️ 未找到 date_rules 模块")
+        return
+
+    # 更精确的工作日计算函数
+    def is_workday(d):
+        """判断是否为工作日（周一至周五）"""
+        return d.weekday() < 5
+
+    def add_workdays(start_date, days):
+        """精确添加工作日（跳过周末）"""
+        result = start_date
+        added = 0
+        while added < days:
+            result += timedelta(days=1)
+            if is_workday(result):
+                added += 1
+        return result
+
+    # 生成连续的工作日序列
+    start_date = pd.Timestamp('2024-01-01')
+    workday_sequence = []
+    current = start_date
+    while len(workday_sequence) < 100:
+        if is_workday(current):
+            workday_sequence.append(current)
+        current += timedelta(days=1)
+
+    # 创建 DataFrame
+    n = len(workday_sequence)
+
+    # 使用精确的工作日间隔
+    order_dates = workday_sequence
+    payment_dates = [add_workdays(d, 2) for d in order_dates]  # 固定2个工作日
+    ship_dates = [add_workdays(d, 1) for d in payment_dates]  # 固定1个工作日
+    complete_dates = [add_workdays(d, 2) for d in ship_dates]  # 固定2个工作日
+
+    # 验证没有跨周末问题：确保所有日期都是工作日
+    for i, d in enumerate(payment_dates):
+        if not is_workday(d):
+            print(f"警告: payment_date[{i}] = {d} 不是工作日")
+
+    categories = ['A'] * (n // 3) + ['B'] * (n // 3) + ['C'] * (n - 2 * (n // 3))
+
+    df = pd.DataFrame({
+        'order_date': order_dates,
+        'payment_date': payment_dates,
+        'ship_date': ship_dates,
+        'complete_date': complete_dates,
+        'category': categories
+    })
+
+    print(f"数据形状: {df.shape}")
+    print("\n测试数据预览（前10行）:")
+    print(df.head(10))
+
+    # 验证工作日间隔
+    print("\n验证工作日间隔计算:")
+    for i in range(5):
+        order = df.loc[i, 'order_date']
+        payment = df.loc[i, 'payment_date']
+        # 手动计算工作日间隔
+        cnt = 0
+        d = order
+        while d < payment:
+            d += timedelta(days=1)
+            if is_workday(d):
+                cnt += 1
+        print(f"  {order.strftime('%Y-%m-%d')} → {payment.strftime('%Y-%m-%d')}: 工作日间隔={cnt}")
+
+    date_columns = ['order_date', 'payment_date', 'ship_date', 'complete_date']
+
+    print("\n开始发现日期关系...")
+
+    rules = discover_date_rules(
+        df,
+        date_columns=date_columns,
+        categorical_columns=['category'],
+        debug=True,
+        min_confidence=0.8,
+        min_nonnull=5,
+        use_chinese_calendar=False,  # 暂时不使用，避免干扰
+        consider_workday=True,
+        consider_shifted=False,  # 暂时关闭顺延关系
+        consider_conditional=True
+    )
+
+    print("\n" + "=" * 60)
+    print(f"发现 {len(rules)} 条日期关系规则:")
+    print("=" * 60)
+
+    # 分类输出
+    workday_rules = [r for r in rules if '个工作日' in r['rule']]
+    basic_rules = [r for r in rules if '个工作日' not in r['rule'] and '当' not in r['rule']]
+    cond_rules = [r for r in rules if '当' in r['rule']]
+
+    if workday_rules:
+        print("\n✅ 工作日间隔规则:")
+        for r in workday_rules:
+            print(f"  {r['rule']} (置信度: {r['confidence']})")
+    else:
+        print("\n❌ 未发现工作日间隔规则")
+
+    if basic_rules:
+        print("\n基本时序规则:")
+        for r in basic_rules[:10]:
+            print(f"  {r['rule']}")
+
+    # 验证已知业务关系
+    print("\n" + "=" * 60)
+    print("验证已知业务关系:")
+    expected_relations = [
+        ("payment_date = order_date + 2个工作日", "工作日间隔"),
+        ("ship_date = payment_date + 1个工作日", "工作日间隔"),
+        ("complete_date = ship_date + 2个工作日", "工作日间隔"),
+    ]
+
+    found_rules_str = [r['rule'] for r in rules]
+    for expected, rel_type in expected_relations:
+        if any(expected in s for s in found_rules_str):
+            print(f"  ✅ {expected}")
+        else:
+            print(f"  ❌ {expected}")
+            # 打印相似规则帮助调试
+            similar = [s for s in found_rules_str if s.split('=')[0].strip() == expected.split('=')[0].strip()]
+            if similar:
+                print(f"     实际发现: {similar}")
+
+
+def example_date_rule_with_precise_data():
+    """使用精确数据测试日期关系发现（无跨周末问题）"""
+    print("=" * 60)
+    print("示例12: 精确数据测试（无跨周末）")
+    print("=" * 60)
+
+    from datetime import timedelta
+
+    try:
+        from autostat.core.date_rules import discover_date_rules
+    except ImportError:
+        print("⚠️ 未找到 date_rules 模块")
+        return
+
+    # 创建简单的测试数据，确保没有跨周末问题
+    # 使用连续的日期，确保所有日期都是工作日
+
+    def is_workday(d):
+        return d.weekday() < 5
+
+    # 生成工作日序列
+    start = pd.Timestamp('2024-01-01')
+    workdays = []
+    current = start
+    while len(workdays) < 50:
+        if is_workday(current):
+            workdays.append(current)
+        current += timedelta(days=1)
+
+    # 创建测试数据（所有日期都是工作日，没有跨周末）
+    df = pd.DataFrame({
+        'date1': workdays[:30],
+        'date2': workdays[2:32],  # +2个工作日
+        'date3': workdays[3:33],  # +3个工作日
+        'category': ['X'] * 30
+    })
+
+    print("测试数据:")
+    print(df.head(10))
+
+    # 手动验证工作日间隔
+    print("\n验证工作日间隔:")
+    for i in range(5):
+        d1 = df.loc[i, 'date1']
+        d2 = df.loc[i, 'date2']
+        # 计算工作日间隔
+        cnt = 0
+        d = d1
+        while d < d2:
+            d += timedelta(days=1)
+            if is_workday(d):
+                cnt += 1
+        print(f"  {d1.strftime('%Y-%m-%d')} → {d2.strftime('%Y-%m-%d')}: 工作日间隔={cnt}")
+
+    rules = discover_date_rules(
+        df,
+        date_columns=['date1', 'date2', 'date3'],
+        categorical_columns=['category'],
+        debug=True,
+        min_confidence=0.8,
+        min_nonnull=5,
+        use_chinese_calendar=False,
+        consider_workday=True,
+        consider_shifted=False,
+        consider_conditional=False
+    )
+
+    print("\n" + "=" * 60)
+    print("发现规则:")
+    for r in rules:
+        print(f"  {r['rule']} (置信度: {r['confidence']})")
+
+
 if __name__ == "__main__":
-    # 运行示例（根据需要取消注释）
+    # 测试精确数据
+    example_date_rule_with_precise_data()
+
+    print("\n" + "=" * 60 + "\n")
+
+    # 测试原始数据
+    example_date_rule_discovery()
 
     # 单表分析
     #example_single_table()
@@ -452,7 +676,7 @@ if __name__ == "__main__":
     # 数据库分析（需要配置）
     #example_database()
 
-    example_database_single_table()
+    #example_database_single_table()
 
     # 单表分析（从CSV文件加载）
     # example_single_table_from_file()
