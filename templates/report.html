@@ -446,6 +446,31 @@
         </table>
         {% endif %}
 
+        <!-- 日期关系（工作日间隔、条件时序） -->
+        {% if quality_report.audit_rules.date_rules %}
+        <h3>📅 日期关系（共 {{ quality_report.audit_rules.date_rules|length }} 个规则）</h3>
+        <table style="width:100%; margin-bottom:20px;">
+            <thead>
+                <tr>
+                    <th>规则</th>
+                    <th>置信度</th>
+                    <th>优先级</th>
+                    <th>关联字段</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for rule in quality_report.audit_rules.date_rules %}
+                <tr>
+                    <td><code>{{ rule.rule }}</code></td>
+                    <td>{{ "%.1f"|format(rule.confidence * 100) }}%</td>
+                    <td>{% if rule.priority == '高' %}🔴 高{% elif rule.priority == '中' %}🟠 中{% else %}🟢 低{% endif %}</td>
+                    <td>{{ rule.fields|join(', ') }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% endif %}
+
         {% if quality_report.audit_rules.foreign_keys %}
         <h3>🔗 外键约束（共 {{ quality_report.audit_rules.foreign_keys|length }} 个规则）</h3>
         <table style="width:100%; margin-bottom:20px;">

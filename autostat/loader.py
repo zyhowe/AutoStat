@@ -37,7 +37,7 @@ class DataLoader:
         'tmstamp', 'entrydt', 'transferdt', 'entrydate', 'entrytime',
         'examine', 'isdel', 'synchronize', 'isdelete', 'deleted',
         'createuser', 'updateuser', 'createip', 'updateip',
-        'temp', 'tmp', 'bak', 'backup', 'sys', 'system'
+        'temp', 'tmp', 'bak', 'backup', 'sys', 'system','fwdate','updatedate'
     ]
 
     @staticmethod

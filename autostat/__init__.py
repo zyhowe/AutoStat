@@ -29,6 +29,8 @@ from autostat.core.plots import (
     plot_categorical_correlation,
     plot_numeric_categorical_eta
 )
+from autostat.core.audit import AuditRuleDiscoverer, discover_audit_rules
+from autostat.core.date_rules import DateRuleDiscoverer, discover_date_rules
 
 __all__ = [
     # 原有导出
@@ -50,5 +52,9 @@ __all__ = [
     "plot_timeseries",
     "plot_correlation",
     "plot_categorical_correlation",
-    "plot_numeric_categorical_eta"
+    "plot_numeric_categorical_eta",
+    "AuditRuleDiscoverer",
+    "discover_audit_rules",
+    "DateRuleDiscoverer",
+    "discover_date_rules"
 ]

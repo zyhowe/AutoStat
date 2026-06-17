@@ -242,15 +242,19 @@ class AuditRuleDiscoverer:
             self._log(f"发现 {len(fd_rules)} 条函数依赖")
 
         # 时序关系发现
-        date_cols = [col for col, typ in variable_types.items()
-                     if typ == 'datetime' and col in data.columns
-                     and col in self._keep_cols]
-        self._log(f"日期变量: {len(date_cols)} 个")
+        # date_cols = [col for col, typ in variable_types.items()
+        #              if typ == 'datetime' and col in data.columns
+        #              and col in self._keep_cols]
+        # self._log(f"日期变量: {len(date_cols)} 个")
+        #
+        # if len(date_cols) >= 2:
+        #     temporal_rules = self._discover_temporal_rules(data, date_cols)
+        #     rules["temporal_rules"] = temporal_rules
+        #     self._log(f"发现 {len(temporal_rules)} 条时序关系")
 
-        if len(date_cols) >= 2:
-            temporal_rules = self._discover_temporal_rules(data, date_cols)
-            rules["temporal_rules"] = temporal_rules
-            self._log(f"发现 {len(temporal_rules)} 条时序关系")
+        # 时序关系发现（已由 date_rules.py 负责，此处跳过）
+        # 保留空列表，避免后续报错
+        rules["temporal_rules"] = []
 
         self._log("=" * 60)
         return rules

@@ -607,6 +607,70 @@ class AutoStatisticalAnalyzer:
                 import traceback
                 traceback.print_exc()
 
+    def _discover_date_rules(self):
+        """发现日期关系规则（工作日间隔、条件时序）"""
+        if not self.quiet:
+            print("\n【日期关系发现】")
+
+        try:
+            from autostat.core.date_rules import discover_date_rules
+            from autostat.loader import DataLoader
+
+            # 获取所有日期列
+            date_cols = [col for col, typ in self.variable_types.items()
+                             if typ == 'datetime' and col in self.data.columns]
+
+            if len(date_cols) < 2:
+                if not self.quiet:
+                    print("  ⚠️ 日期列不足2个")
+                return
+
+            # 复用 DataLoader 的排除逻辑
+            # date_cols = [col for col in all_date_cols if not DataLoader._should_exclude_column(col)]
+            #
+            # if len(date_cols) < 2:
+            #     if not self.quiet:
+            #         print(f"  ⚠️ 剔除关键词匹配字段后，有效日期列不足2个")
+            #         print(f"  📅 可用日期列: {date_cols}")
+            #     return
+
+            if not self.quiet:
+                print(f"  📅 使用日期列: {date_cols}")
+
+            categorical_cols = [col for col, typ in self.variable_types.items()
+                                if typ in ['categorical', 'categorical_numeric', 'ordinal']]
+
+            rules = discover_date_rules(
+                self.data,
+                date_columns=date_cols,
+                categorical_columns=categorical_cols if categorical_cols else None,
+                debug=not self.quiet,
+                min_confidence=0.7,
+                min_nonnull=10,
+                min_cooccurrence=100,
+                use_chinese_calendar=True,
+                consider_workday=True,
+                consider_conditional=True
+            )
+
+            # 追加到 temporal_rules
+            if 'audit_rules' not in self.quality_report:
+                self.quality_report['audit_rules'] = {}
+            if 'temporal_rules' not in self.quality_report['audit_rules']:
+                self.quality_report['audit_rules']['temporal_rules'] = []
+
+            self.quality_report['audit_rules']['temporal_rules'].extend(rules)
+
+            if not self.quiet:
+                print(f"  ✅ 发现 {len(rules)} 条日期关系规则")
+
+        except ImportError as e:
+            if not self.quiet:
+                print(f"  ⚠️ 日期关系模块导入失败: {e}")
+        except Exception as e:
+            if not self.quiet:
+                print(f"  ⚠️ 日期关系发现失败: {e}")
+
     def generate_full_report(self, show_outlier_details=False):
         """生成完整报告"""
         print("\n" + "=" * 70)
@@ -635,6 +699,7 @@ class AutoStatisticalAnalyzer:
 
         # 🆕 勾稽关系发现（在时间序列和关系分析之后）
         self._discover_audit_rules()
+        self._discover_date_rules()
 
         self.recommend_scenarios()
 

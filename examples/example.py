@@ -350,7 +350,7 @@ def example_database_single_table():
         'trusted_connection': False
     }
 
-    TABLE_NAMES = ['CompanyFixAsset']
+    TABLE_NAMES = ['Bondip'] #CompanyFixAsset']
     RELATIONSHIPS = [
     ]
 
@@ -646,14 +646,368 @@ def example_date_rule_with_precise_data():
         print(f"  {r['rule']} (置信度: {r['confidence']})")
 
 
+def example_date_rule_discovery_with_anomalies():
+    """测试日期关系发现（不同分类不同规则 + 异常数据）"""
+    print("=" * 60)
+    print("示例13: 不同分类不同规则 + 异常数据测试")
+    print("=" * 60)
+
+    from datetime import timedelta
+    import pandas as pd
+    import random
+
+    try:
+        from autostat.core.date_rules import discover_date_rules
+    except ImportError:
+        print("⚠️ 未找到 date_rules 模块")
+        return
+
+    # 工作日判断函数
+    def is_workday(d):
+        return d.weekday() < 5
+
+    def add_workdays(start_date, days):
+        """添加工作日（正确处理顺序）"""
+        if days <= 0:
+            return start_date
+        result = start_date
+        added = 0
+        while added < days:
+            result += timedelta(days=1)
+            if is_workday(result):
+                added += 1
+        return result
+
+    # 生成连续的工作日序列
+    start_date = pd.Timestamp('2024-01-01')
+    workday_sequence = []
+    current = start_date
+    while len(workday_sequence) < 150:
+        if is_workday(current):
+            workday_sequence.append(current)
+        current += timedelta(days=1)
+
+    n = len(workday_sequence)
+
+    # 设置不同分类的规则（不同的工作日间隔）
+    # 分类A: 快速通道 - 付款1个工作日，发货1个工作日
+    # 分类B: 标准通道 - 付款2个工作日，发货1个工作日
+    # 分类C: 慢速通道 - 付款3个工作日，发货2个工作日
+
+    categories = []
+    order_dates = []
+    payment_dates = []
+    ship_dates = []
+    complete_dates = []
+
+    # 统计异常注入
+    anomaly_count = {'A': 0, 'B': 0, 'C': 0}
+
+    for i, d in enumerate(workday_sequence):
+        # 分配分类（确保每个分类约50个样本）
+        if i < 50:
+            cat = 'A'  # 快速
+            payment_gap = 1
+            ship_gap = 1
+            complete_gap = 2
+        elif i < 100:
+            cat = 'B'  # 标准
+            payment_gap = 2
+            ship_gap = 1
+            complete_gap = 2
+        else:
+            cat = 'C'  # 慢速
+            payment_gap = 3
+            ship_gap = 2
+            complete_gap = 2
+
+        order = d
+
+        # 决定是否注入异常（10%异常率）
+        is_anomaly = random.random() < 0.1
+
+        if is_anomaly and anomaly_count[cat] < 5:  # 每个分类最多5个异常
+            # 随机选择不同的间隔
+            wrong_gap = random.choice([g for g in [1, 2, 3, 4, 5] if g != payment_gap])
+            payment = add_workdays(order, wrong_gap)
+            anomaly_count[cat] += 1
+            if anomaly_count[cat] == 1:
+                print(f"  注入异常: 分类={cat}, 期望付款间隔={payment_gap}, 实际间隔={wrong_gap}")
+        else:
+            payment = add_workdays(order, payment_gap)
+
+        ship = add_workdays(payment, ship_gap)
+        complete = add_workdays(ship, complete_gap)
+
+        categories.append(cat)
+        order_dates.append(order)
+        payment_dates.append(payment)
+        ship_dates.append(ship)
+        complete_dates.append(complete)
+
+    # 创建DataFrame
+    df = pd.DataFrame({
+        'order_date': order_dates,
+        'payment_date': payment_dates,
+        'ship_date': ship_dates,
+        'complete_date': complete_dates,
+        'category': categories
+    })
+
+    print(f"\n数据形状: {df.shape}")
+    print(f"分类分布:\n{df['category'].value_counts()}")
+    print(f"异常注入统计: {anomaly_count}")
+
+    print("\n测试数据预览（前15行）:")
+    print(df.head(15))
+
+    # 验证各分类的实际工作日间隔
+    print("\n验证各分类的实际工作日间隔:")
+    for cat in ['A', 'B', 'C']:
+        subset = df[df['category'] == cat]
+        print(f"\n【分类 {cat}】样本数: {len(subset)}")
+
+        # 计算间隔分布
+        gaps = []
+        for _, row in subset.iterrows():
+            order = row['order_date']
+            payment = row['payment_date']
+            cnt = 0
+            d = order
+            while d < payment:
+                d += timedelta(days=1)
+                if is_workday(d):
+                    cnt += 1
+            gaps.append(cnt)
+
+        from collections import Counter
+        gap_dist = Counter(gaps)
+        print(f"  付款间隔分布: {dict(sorted(gap_dist.items()))}")
+
+    # 开始发现日期关系
+    date_columns = ['order_date', 'payment_date', 'ship_date', 'complete_date']
+
+    print("\n" + "=" * 60)
+    print("开始发现日期关系（不同分类不同规则 + 异常数据）")
+    print("=" * 60)
+
+    rules = discover_date_rules(
+        df,
+        date_columns=date_columns,
+        categorical_columns=['category'],
+        debug=True,
+        min_confidence=0.65,  # 降低阈值以容忍异常数据
+        min_nonnull=5,
+        use_chinese_calendar=False,
+        consider_workday=True,
+        consider_shifted=False,
+        consider_conditional=True
+    )
+
+    print("\n" + "=" * 60)
+    print(f"发现 {len(rules)} 条日期关系规则:")
+    print("=" * 60)
+
+    # 分类输出
+    unconditional_rules = [r for r in rules if '当' not in r['rule']]
+    conditional_rules = [r for r in rules if '当' in r['rule']]
+
+    print(f"\n无条件规则: {len(unconditional_rules)} 条")
+    for r in unconditional_rules:
+        if '个工作日' in r['rule']:
+            print(f"  ✅ {r['rule']} (置信度: {r['confidence']})")
+        else:
+            print(f"  {r['rule']} (置信度: {r['confidence']})")
+
+    # 按分类分组显示条件规则
+    print(f"\n条件规则: {len(conditional_rules)} 条")
+    for cat in ['A', 'B', 'C']:
+        cat_rules = [r for r in conditional_rules if f"category = {cat}" in r['rule']]
+        if cat_rules:
+            print(f"\n  【分类 {cat}】:")
+            for r in cat_rules:
+                relation = r['rule'].split('时，')[1]
+                if '个工作日' in relation:
+                    print(f"    ✅ {relation} (置信度: {r['confidence']})")
+                else:
+                    print(f"    {relation} (置信度: {r['confidence']})")
+
+    # 验证已知业务关系
+    print("\n" + "=" * 60)
+    print("验证已知业务关系:")
+
+    expected_by_category = {
+        'A': [
+            ('payment_date = order_date + 1个工作日', '付款间隔1天'),
+            ('ship_date = payment_date + 1个工作日', '发货间隔1天'),
+        ],
+        'B': [
+            ('payment_date = order_date + 2个工作日', '付款间隔2天'),
+            ('ship_date = payment_date + 1个工作日', '发货间隔1天'),
+        ],
+        'C': [
+            ('payment_date = order_date + 3个工作日', '付款间隔3天'),
+            ('ship_date = payment_date + 2个工作日', '发货间隔2天'),
+        ]
+    }
+
+    found_rules_str = [r['rule'] for r in rules]
+
+    for cat, expectations in expected_by_category.items():
+        print(f"\n【分类 {cat}】:")
+        for expected, desc in expectations:
+            found = False
+            for rule in found_rules_str:
+                if f"category = {cat} 时，{expected}" in rule:
+                    found = True
+                    break
+            if found:
+                print(f"  ✅ {desc}: {expected}")
+            else:
+                print(f"  ❌ {desc}: {expected} 未发现")
+                # 查找相似规则
+                similar = [s for s in found_rules_str if f"category = {cat}" in s and '个工作日' in s]
+                if similar:
+                    print(f"     实际发现: {similar}")
+
+
+def example_date_rule_robustness_test():
+    """鲁棒性测试：高比例异常数据"""
+    print("=" * 60)
+    print("示例14: 鲁棒性测试（高比例异常数据）")
+    print("=" * 60)
+
+    from datetime import timedelta
+    import pandas as pd
+    import random
+
+    try:
+        from autostat.core.date_rules import discover_date_rules
+    except ImportError:
+        print("⚠️ 未找到 date_rules 模块")
+        return
+
+    def is_workday(d):
+        return d.weekday() < 5
+
+    def add_workdays(start_date, days):
+        if days <= 0:
+            return start_date
+        result = start_date
+        added = 0
+        while added < days:
+            result += timedelta(days=1)
+            if is_workday(result):
+                added += 1
+        return result
+
+    # 生成数据
+    start_date = pd.Timestamp('2024-01-01')
+    workday_sequence = []
+    current = start_date
+    while len(workday_sequence) < 200:
+        if is_workday(current):
+            workday_sequence.append(current)
+        current += timedelta(days=1)
+
+    n = len(workday_sequence)
+
+    # 正常规则：payment = order + 2个工作日
+    order_dates = workday_sequence
+    payment_dates = []
+
+    anomaly_count = 0
+    for i, d in enumerate(workday_sequence):
+        if i < n * 0.15:  # 15%异常数据
+            # 随机间隔（排除2）
+            wrong_gap = random.choice([1, 3, 4, 5])
+            payment_dates.append(add_workdays(d, wrong_gap))
+            anomaly_count += 1
+        else:
+            payment_dates.append(add_workdays(d, 2))
+
+    categories = ['normal'] * n
+
+    df = pd.DataFrame({
+        'order_date': order_dates,
+        'payment_date': payment_dates,
+        'category': categories
+    })
+
+    print(f"数据形状: {df.shape}")
+    print(f"异常数据比例: {anomaly_count}/{n} = {anomaly_count / n * 100:.1f}%")
+
+    # 计算实际工作日间隔分布
+    gaps = []
+    for i in range(n):
+        order = df.loc[i, 'order_date']
+        payment = df.loc[i, 'payment_date']
+        cnt = 0
+        d = order
+        while d < payment:
+            d += timedelta(days=1)
+            if is_workday(d):
+                cnt += 1
+        gaps.append(cnt)
+
+    from collections import Counter
+    gap_dist = Counter(gaps)
+    print(f"\n工作日间隔分布: {dict(sorted(gap_dist.items()))}")
+
+    # 主要规则的比例
+    main_rule_ratio = gap_dist.get(2, 0) / n * 100
+    print(f"主要规则(间隔=2)占比: {main_rule_ratio:.1f}%")
+
+    rules = discover_date_rules(
+        df,
+        date_columns=['order_date', 'payment_date'],
+        categorical_columns=None,  # 不使用分类
+        debug=True,
+        min_confidence=0.6,
+        min_nonnull=5,
+        use_chinese_calendar=False,
+        consider_workday=True,
+        consider_shifted=False,
+        consider_conditional=False
+    )
+
+    print("\n" + "=" * 60)
+    print("发现规则:")
+    found = False
+    for r in rules:
+        if '个工作日' in r['rule']:
+            print(f"  ✅ {r['rule']} (置信度: {r['confidence']})")
+            found = True
+        else:
+            print(f"  {r['rule']} (置信度: {r['confidence']})")
+
+    if found:
+        print("\n✅ 成功发现核心规则: payment_date = order_date + 2个工作日")
+    else:
+        print("\n❌ 未发现核心规则")
+        print("   提示: 主要规则占比需要高于 min_confidence 阈值")
+        print(f"   当前主要规则占比: {main_rule_ratio:.1f}%, 阈值: 60%")
+
+
+
+
+
 if __name__ == "__main__":
-    # 测试精确数据
-    example_date_rule_with_precise_data()
+    # # 测试精确数据
+    # example_date_rule_with_precise_data()
+    #
+    # print("\n" + "=" * 60 + "\n")
+    #
+    # # 测试原始数据
+    # example_date_rule_discovery()
 
-    print("\n" + "=" * 60 + "\n")
-
-    # 测试原始数据
-    example_date_rule_discovery()
+    # # 测试1: 不同分类不同规则 + 异常数据
+    # example_date_rule_discovery_with_anomalies()
+    #
+    # print("\n" + "=" * 100 + "\n")
+    #
+    # # 测试2: 鲁棒性测试
+    # example_date_rule_robustness_test()
 
     # 单表分析
     #example_single_table()
@@ -676,7 +1030,7 @@ if __name__ == "__main__":
     # 数据库分析（需要配置）
     #example_database()
 
-    #example_database_single_table()
+    example_database_single_table()
 
     # 单表分析（从CSV文件加载）
     # example_single_table_from_file()

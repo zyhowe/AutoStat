@@ -7,7 +7,8 @@ from autostat.core.timeseries import TimeSeriesAnalyzer
 from autostat.core.relationship import RelationshipAnalyzer
 from autostat.core.recommendation import RecommendationAnalyzer
 from autostat.core.report_data import ReportDataBuilder
-from autostat.core.audit import AuditRuleDiscoverer, discover_audit_rules  # 新增
+from autostat.core.audit import AuditRuleDiscoverer, discover_audit_rules
+from autostat.core.date_rules import DateRuleDiscoverer, discover_date_rules
 
 __all__ = [
     "AutoStatisticalAnalyzer",
@@ -16,6 +17,8 @@ __all__ = [
     "RelationshipAnalyzer",
     "RecommendationAnalyzer",
     "ReportDataBuilder",
-    "AuditRuleDiscoverer",      # 新增
-    "discover_audit_rules"       # 新增
+    "AuditRuleDiscoverer",
+    "discover_audit_rules",
+    "DateRuleDiscoverer",
+    "discover_date_rules"
 ]
