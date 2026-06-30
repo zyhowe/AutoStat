@@ -26,11 +26,15 @@ from web.services.agent_service import (
     build_agent_system_prompt,
     process_agent_response
 )
-
-# 新增服务
 from web.services.insight_service import InsightService
 from web.services.recommendation_service import RecommendationService
 from web.services.feature_flags import FeatureFlags
+
+# 新增服务
+from web.services.quality_service import QualityService
+from web.services.decision_service import DecisionService
+from web.services.explore_service import ExploreService
+from web.services.forecast_service import ForecastService
 
 __all__ = [
     # 原有
@@ -50,14 +54,18 @@ __all__ = [
     'delete_model',
     'load_model_for_inference',
     'execute_inference',
-    # Agent服务
     'AgentService',
     'get_agent_tools_description',
     'build_data_context',
     'build_agent_system_prompt',
     'process_agent_response',
-    # 新增
     'InsightService',
     'RecommendationService',
-    'FeatureFlags'
+    'FeatureFlags',
+
+    # 新增
+    'QualityService',
+    'DecisionService',
+    'ExploreService',
+    'ForecastService',
 ]

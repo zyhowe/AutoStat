@@ -169,7 +169,8 @@ def execute_training(
                 missing_features.append(f)
 
         if missing_features:
-            st.warning(f"以下特征列不存在，已跳过: {missing_features}")
+            import logging
+            logging.getLogger(__name__).warning(f"以下特征列不存在，已跳过: {missing_features}")
 
         if not available_features:
             return False, {"error": "没有有效的特征列"}
@@ -210,7 +211,8 @@ def execute_training(
 
             preprocessor = None
 
-            st.info(f"时间序列数据: 总样本 {n}, 训练集 {len(X_train)}")
+            import logging
+            logging.getLogger(__name__).info(f"时间序列数据: 总样本 {n}, 训练集 {len(X_train)}")
 
         elif task_type == "clustering":
             # 聚类任务：无监督，不需要y，随机切分
@@ -266,7 +268,8 @@ def execute_training(
             else:
                 y_clean = None
 
-            st.info(f"数据清洗: 原始样本 {len(X)} -> 清洗后 {len(X_clean)}")
+            import logging
+            logging.getLogger(__name__).info(f"数据清洗: 原始样本 {len(X)} -> 清洗后 {len(X_clean)}")
 
             if len(X_clean) == 0:
                 return False, {"error": "清洗后没有有效样本"}

@@ -43,6 +43,9 @@ dependencies = [
     "snownlp>=0.12.3",
     "wordcloud>=1.9.0",
     "langdetect>=1.0.9",
+    # 🆕 扩展模块依赖
+    "plotly>=5.0.0",      # 交互式图表
+    "python-dateutil>=2.8.0",
 ]
 
 [project.optional-dependencies]
@@ -52,6 +55,16 @@ text = [
     "snownlp>=0.12.3",
     "wordcloud>=1.9.0",
     "langdetect>=1.0.9",
+]
+# 🆕 预测模块可选依赖
+forecast = [
+    "prophet>=1.1.0",
+    "statsmodels>=0.13.0",
+]
+# 🆕 深度学习可选依赖
+dl = [
+    "tensorflow>=2.8.0",
+    "transformers>=4.20.0",
 ]
 
 [project.scripts]
