@@ -31,26 +31,22 @@ def render_analysis():
     if 'scroll_to_top' not in st.session_state:
         st.session_state.scroll_to_top = False
 
-    # ==================== 修复标签页被遮挡 ====================
+    # ==================== CSS 样式（保留） ====================
     st.markdown("""
     <style>
-        /* 减少页面顶部空白 */
         .block-container {
             padding-top: 1.5rem !important;
             padding-bottom: 0rem !important;
         }
-        /* 调整 header 高度 */
         header {
             height: 1.5rem !important;
         }
         header .stDecoration {
             display: none !important;
         }
-        /* 调整 main 区域 */
         .main > div {
             padding-top: 0rem !important;
         }
-        /* 标签页样式 - 更紧凑 */
         .stTabs [data-baseweb="tab-list"] {
             gap: 0px !important;
             background-color: #f0f2f6;
@@ -68,11 +64,9 @@ def render_analysis():
             background-color: white !important;
             box-shadow: 0 1px 3px rgba(0,0,0,0.1) !important;
         }
-        /* 侧边栏样式 */
         section[data-testid="stSidebar"] {
             padding-top: 0.5rem !important;
         }
-        /* 减少标题区域空白 */
         .stApp > header {
             background-color: transparent !important;
         }
@@ -86,7 +80,7 @@ def render_analysis():
     if st.session_state.scroll_to_top:
         st.session_state.scroll_to_top = False
 
-    # ==================== 5标签页 ====================
+    # ==================== 5标签页（去掉“大模型智能解读”） ====================
     tab_names = [
         "📁 数据准备",
         "📄 预览报告",
@@ -95,7 +89,6 @@ def render_analysis():
         "🔍 项目对比"
     ]
 
-    # 使用 st.tabs，标签页会更紧凑
     tabs = st.tabs(tab_names)
 
     with tabs[0]:
