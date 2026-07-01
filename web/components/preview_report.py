@@ -78,7 +78,7 @@ def render_preview_report():
 
     st.divider()
 
-    # ==================== 核心结论 - 横向卡片（截断字段名） ====================
+    # ==================== 核心结论 - 横向卡片 ====================
     _render_core_conclusions(json_data)
 
     st.divider()
@@ -111,8 +111,10 @@ def render_preview_report():
         _render_cleaning_suggestions_section(json_data)
 
 
+# ==================== 核心结论渲染 ====================
+
 def _render_core_conclusions(json_data: dict):
-    """核心结论 - 横向卡片（字段名截断）"""
+    """核心结论 - 横向卡片，统一高度，每张显示4行"""
     conclusions = InsightService.extract_top_conclusions(json_data)
 
     if not conclusions:
@@ -128,10 +130,28 @@ def _render_core_conclusions(json_data: dict):
         with cols[i]:
             icon = c.get("icon", "📌")
             title = c.get("title", "")
-            desc = c.get("description", "")
+            raw_desc = c.get("description", "")
 
-            # 截断字段名列表
-            desc = _truncate_field_list(desc)
+            # 第4个卡片（索引3）特殊处理：字段列表在title里
+            if i == 3:
+                full_text = title + " " + raw_desc
+                desc = _truncate_predict_field_list(full_text)
+                title="建立可预测模型"
+            else:
+                desc = _truncate_field_list(raw_desc)
+
+            # 按换行符分割，取前4行
+            lines = desc.split('\n') if desc else []
+            if len(lines) > 4:
+                lines = lines[:4]
+                if lines and not lines[-1].endswith('...'):
+                    lines[-1] = lines[-1] + '...'
+                desc_display = '\n'.join(lines)
+            else:
+                desc_display = desc
+
+            if not desc_display.strip():
+                desc_display = "—"
 
             st.markdown(f"""
             <div style="
@@ -140,58 +160,99 @@ def _render_core_conclusions(json_data: dict):
                 padding: 12px 16px;
                 text-align: center;
                 height: 100%;
+                min-height: 120px;
                 border-left: 3px solid #1f77b4;
+                display: flex;
+                flex-direction: column;
+                justify-content: flex-start;
             ">
                 <div style="font-size: 20px; margin-bottom: 4px;">{icon}</div>
-                <div style="font-weight: bold; font-size: 13px; color: #333;">{title}</div>
-                <div style="font-size: 11px; color: #666; margin-top: 4px;">{desc}</div>
+                <div style="font-weight: bold; font-size: 13px; color: #333; margin-bottom: 6px;">{title}</div>
+                <div style="font-size: 11px; color: #666; line-height: 1.4; flex: 1;">{desc_display}</div>
             </div>
             """, unsafe_allow_html=True)
 
 
+# ==================== 截断函数 ====================
+
 def _truncate_field_list(text: str, max_display: int = 3) -> str:
     """
-    截断描述中的字段名列表
-    将 "A、B、C、D、E等5个字段 后缀" 截断为 "A、B、C等5个字段 后缀"
-    也处理 "A、B、C、D、E等5个后缀" 无空格的情况
+    通用截断函数 - 用于卡片0和卡片1
+    输入: "A、B、C、D、E 后缀文字"
+    输出: "A、B、C等5个 后缀文字"
     """
     if not text:
         return text
 
-    # 查找顿号分隔的列表 + "等N个" 或 "等N对"
-    # 匹配模式：以字母数字或中文开头，后面跟顿号分隔的多个词
-    pattern = r'^((?:[^\s、]+(?:、[^\s、]+)*))(等\d+个|等\d+对)'
+    # 匹配字段列表（顿号或逗号分隔）
+    pattern = r'^((?:[^\s、，,;；]+(?:[、，,;；]\s*[^\s、，,;；]+)*))'
     match = re.match(pattern, text)
 
     if not match:
         return text
 
     full_list = match.group(1)
-    total_part = match.group(2)
-    parts = full_list.split('、')
+    suffix = text[len(full_list):]
+
+    parts = re.split(r'[、，,;；]\s*', full_list)
+    parts = [p.strip() for p in parts if p.strip()]
 
     if len(parts) <= max_display:
         return text
 
-    # 取前N个
+    # 检测单位
+    unit = "个"
+    if "对" in suffix[:30]:
+        unit = "对"
+
     display_parts = parts[:max_display]
     display_str = '、'.join(display_parts)
 
-    # 提取总数量
-    total_match = re.search(r'(\d+)', total_part)
-    total = total_match.group(1) if total_match else len(parts)
+    return f"{display_str}等{len(parts)}{unit}{suffix}"
 
-    # 提取后缀（"个" 或 "对"）
-    suffix_unit = "个" if "个" in total_part else "对"
 
-    # 构建新的列表部分
-    new_list = f"{display_str}等{total}{suffix_unit}"
+def _truncate_predict_field_list(text: str, max_display: int = 3) -> str:
+    """
+    专门处理第4个卡片 "可预测"
+    输入: "可预测 A、B、C、D、E... 基于关联特征可建立预测模型"
+    输出: "可预测 A、B、C等42个 基于关联特征可建立预测模型"
+    """
+    if not text:
+        return text
 
-    # 替换原文本中的列表部分（从开头到 "等N个" 或 "等N对" 结束）
-    end_pos = match.end()
-    suffix = text[end_pos:]  # 剩余文字（可能包含空格或无空格）
-    return new_list + suffix
+    prefix = "可预测"
+    suffix = "基于关联特征可建立预测模型"
 
+    # 检查是否以 "可预测" 开头
+    if not text.startswith(prefix):
+        return text
+
+    # 去掉前缀
+    remaining = text[len(prefix):].strip()
+
+    # 检查是否包含后缀
+    if suffix not in remaining:
+        return text
+
+    # 分割字段和后缀
+    idx = remaining.index(suffix)
+    field_part = remaining[:idx].strip()
+    suffix_part = remaining[idx:]
+
+    # 提取字段（顿号分隔）
+    parts = re.split(r'[、，,]\s*', field_part)
+    parts = [p.strip() for p in parts if p.strip()]
+
+    if len(parts) <= max_display:
+        return text
+
+    display_parts = parts[:max_display]
+    display_str = '、'.join(display_parts)
+
+    return f"{prefix} {display_str}等{len(parts)}个 {suffix_part}"
+
+
+# ==================== 折叠区块函数 ====================
 
 def _render_overview_section(json_data: dict):
     """数据概览"""
