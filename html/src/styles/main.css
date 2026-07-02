@@ -1,0 +1,71 @@
+/* 全局样式 */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  background-color: #f5f7fa;
+  color: #2c3e50;
+}
+
+#app {
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* 滚动条 */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #f0f2f6;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb {
+  background: #c0c4cc;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #a8abb2;
+}
+
+/* 通用 */
+.text-center {
+  text-align: center;
+}
+.text-muted {
+  color: #909399;
+}
+.mt-10 {
+  margin-top: 10px;
+}
+.mb-10 {
+  margin-bottom: 10px;
+}
+.mt-20 {
+  margin-top: 20px;
+}
+.mb-20 {
+  margin-bottom: 20px;
+}
+
+/* Element Plus 覆盖 */
+.el-menu-item.is-active {
+  background-color: #ecf5ff !important;
+}
+.el-menu-item:hover {
+  background-color: #ecf5ff !important;
+}
+.el-card {
+  border-radius: 8px;
+}
+.el-card__body {
+  padding: 16px;
+}
+.el-progress-bar__outer {
+  background-color: #e4e7ed;
+}

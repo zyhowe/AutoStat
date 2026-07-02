@@ -1,5 +1,4 @@
-"""模型存储模块 - 管理模型的保存和加载"""
-
+"""模型存储模块"""
 import os
 import json
 import pickle
@@ -12,42 +11,28 @@ from pathlib import Path
 class ModelStorage:
     """模型存储管理器"""
 
-    # 基础存储路径
-    BASE_PATH = Path.home() / ".autostat" / "models"
+    BASE_PATH = Path.home() / ".autostat" / "data"
 
     @classmethod
     def _get_model_path(cls, session_id: str, model_key: str) -> Path:
-        """获取模型存储路径"""
-        path = cls.BASE_PATH / session_id / model_key
+        """获取模型存储路径: data/{session_id}/models/{model_key}/"""
+        path = cls.BASE_PATH / session_id / "models" / model_key
         path.mkdir(parents=True, exist_ok=True)
         return path
 
     @classmethod
     def save_model(cls, session_id: str, model_key: str, model, preprocessor,
                    metrics: Dict[str, Any], config: Dict[str, Any]):
-        """
-        保存模型及元信息
-
-        参数:
-        - session_id: 会话ID
-        - model_key: 模型标识
-        - model: 训练好的模型
-        - preprocessor: 预处理器
-        - metrics: 评估指标
-        - config: 训练配置
-        """
+        """保存模型"""
         model_path = cls._get_model_path(session_id, model_key)
 
-        # 保存模型
         with open(model_path / "model.pkl", 'wb') as f:
             pickle.dump(model, f)
 
-        # 保存预处理器
         if preprocessor:
             with open(model_path / "preprocessor.pkl", 'wb') as f:
                 pickle.dump(preprocessor, f)
 
-        # 保存元信息
         metadata = {
             "model_key": model_key,
             "session_id": session_id,
@@ -63,30 +48,27 @@ class ModelStorage:
 
     @classmethod
     def load_model(cls, session_id: str, model_key: str):
-        """加载模型"""
+        """加载模型，返回 (model, preprocessor, metadata)"""
         model_path = cls._get_model_path(session_id, model_key)
 
-        # 加载模型
         with open(model_path / "model.pkl", 'rb') as f:
             model = pickle.load(f)
 
-        # 加载预处理器
         preprocessor_path = model_path / "preprocessor.pkl"
         preprocessor = None
         if preprocessor_path.exists():
             with open(preprocessor_path, 'rb') as f:
                 preprocessor = pickle.load(f)
 
-        # 加载元信息
         with open(model_path / "metadata.json", 'r', encoding='utf-8') as f:
             metadata = json.load(f)
 
         return model, preprocessor, metadata
 
     @classmethod
-    def list_models(cls, session_id: str) -> List[Dict[str, Any]]:
+    def list_models(cls, session_id: str) -> List[Dict]:
         """列出指定会话的所有模型"""
-        session_path = cls.BASE_PATH / session_id
+        session_path = cls.BASE_PATH / session_id / "models"
         if not session_path.exists():
             return []
 
@@ -99,7 +81,6 @@ class ModelStorage:
                         metadata = json.load(f)
                     models.append(metadata)
 
-        # 按创建时间排序
         models.sort(key=lambda x: x.get("created_at", ""), reverse=True)
         return models
 
@@ -134,7 +115,7 @@ class ModelStorage:
     @classmethod
     def delete_session(cls, session_id: str) -> bool:
         """删除会话的所有模型"""
-        session_path = cls.BASE_PATH / session_id
+        session_path = cls.BASE_PATH / session_id / "models"
         if session_path.exists():
             shutil.rmtree(session_path)
             return True

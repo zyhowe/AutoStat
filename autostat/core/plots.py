@@ -1,6 +1,8 @@
 """
 统一绘图模块 - 所有图表生成逻辑的唯一来源
 """
+import matplotlib
+matplotlib.use('Agg')  # 默认使用非交互式后端
 
 import matplotlib.pyplot as plt
 import numpy as np
