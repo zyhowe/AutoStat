@@ -1,0 +1,8 @@
+# api_server 依赖
+# 在安装项目原有依赖后，额外安装本文件内容：
+# pip install -r api_server/requirements.txt
+
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+python-multipart>=0.0.6
+pydantic>=2.0.0
