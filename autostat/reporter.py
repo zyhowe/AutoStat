@@ -1,26 +1,26 @@
-"""
-报告生成器模块
-生成HTML格式的分析报告和JSON格式结果
-"""
+"""报告生成器模块 - 生成完整的 HTML 报告，不依赖任何前端功能开关"""
 
 import json
 import os
-from datetime import datetime
+from datetime import datetime, date
 from typing import Dict, List, Any, Optional
 import pandas as pd
 
 from jinja2 import Template
 from autostat.core.base import BaseAnalyzer
+from autostat.core.insight import InsightService
+
+HAS_INSIGHT = True
 
 
 class Reporter:
-    """报告生成器 - 生成HTML和JSON格式的分析报告"""
+    """报告生成器 - 生成 HTML 和 JSON 格式的分析报告"""
 
     def __init__(self, analyzer):
         self.analyzer = analyzer
 
     def to_html(self, output_file=None, title="数据分析报告"):
-        """生成HTML报告"""
+        """生成 HTML 报告"""
         try:
             html = self._build_html(title)
 
@@ -42,15 +42,11 @@ class Reporter:
             return error_html
 
     def to_json(self, output_file=None, indent=2, ensure_ascii=False):
-        """
-        生成JSON格式结果
-
-        直接复用 analyzer.to_json() 方法，确保输出内容完整
-        """
+        """生成 JSON 格式结果"""
         return self.analyzer.to_json(output_file, indent, ensure_ascii)
 
     def to_markdown(self, output_file=None):
-        """生成Markdown格式报告"""
+        """生成 Markdown 格式报告"""
         data = self.analyzer.data
         quality = self.analyzer.quality_report
 
@@ -90,12 +86,11 @@ class Reporter:
         return md
 
     def to_excel(self, output_file):
-        """生成Excel格式报告"""
+        """生成 Excel 格式报告"""
         data = self.analyzer.data
         quality = self.analyzer.quality_report
 
         with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
-            # Sheet 1: 数据概览
             summary_df = pd.DataFrame({
                 '指标': ['总行数', '总列数', '缺失率>20%字段', '重复记录数'],
                 '数值': [
@@ -107,7 +102,6 @@ class Reporter:
             })
             summary_df.to_excel(writer, sheet_name='数据概览', index=False)
 
-            # Sheet 2: 变量详情
             var_data = []
             for col, typ in self.analyzer.variable_types.items():
                 var_data.append({
@@ -118,7 +112,6 @@ class Reporter:
                 })
             pd.DataFrame(var_data).to_excel(writer, sheet_name='变量详情', index=False)
 
-            # Sheet 3: 清洗建议
             if self.analyzer.cleaning_suggestions:
                 pd.DataFrame({'建议': self.analyzer.cleaning_suggestions}).to_excel(
                     writer, sheet_name='清洗建议', index=False)
@@ -127,7 +120,7 @@ class Reporter:
         return output_file
 
     def _get_error_html(self, title, error_msg):
-        """生成错误HTML"""
+        """生成错误 HTML"""
         return f"""<!DOCTYPE html>
 <html>
 <head>
@@ -153,133 +146,143 @@ class Reporter:
 </html>"""
 
     def _build_html(self, title):
-        """构建HTML内容（包含图表和解读）"""
-        # 尝试导入功能开关和洞察服务
-        try:
-            from web.services.feature_flags import FeatureFlags
-            from web.services.insight_service import InsightService
-            HAS_INSIGHT = True
-        except ImportError:
-            HAS_INSIGHT = False
-            FeatureFlags = None
-            InsightService = None
-
+        """构建 HTML 内容 - 完整展示所有分析结果，不依赖任何前端开关"""
         data = self.analyzer.data
         quality = self.analyzer.quality_report
         source_table = getattr(self.analyzer, 'source_table_name', '未知')
         dup_info = quality.get('duplicates', {})
+        print("1:", self.analyzer.variable_types.items())
         date_cols = [col for col, typ in self.analyzer.variable_types.items() if typ == 'datetime']
-
-        # 生成图表（调用 analyzer 的方法）
+        print("2:",date_cols)
+        # 生成图表
         plots = {}
-
         try:
-            # 连续变量图表
             for col, typ in self.analyzer.variable_types.items():
                 if typ == 'continuous':
                     img = self.analyzer.get_plot_base64('continuous', col)
                     if img:
                         plots[f'{col}_continuous'] = img
 
-            # 分类变量图表
+            print("3:")
+
             for col, typ in self.analyzer.variable_types.items():
                 if typ in ['categorical', 'categorical_numeric', 'ordinal']:
                     img = self.analyzer.get_plot_base64('categorical', col)
                     if img:
                         plots[f'{col}_categorical'] = img
 
-            # 时间序列图表 - 为每个数值变量生成，使用日期列
+            print("4:")
+
             if date_cols:
+                print("5:")
                 date_col = date_cols[0]
                 numeric_cols = [col for col, typ in self.analyzer.variable_types.items() if typ == 'continuous']
+                print("6:",numeric_cols)
                 for col in numeric_cols:
                     try:
-                        # 按日期聚合
                         ts_data = data.groupby(date_col)[col].mean().reset_index()
                         ts_data = ts_data.dropna()
                         if len(ts_data) >= 3:
                             img = self.analyzer.get_plot_base64('timeseries', col)
                             if img:
                                 plots[f'{col}_timeseries'] = img
-                    except Exception as e:
-                        if not hasattr(self.analyzer, 'quiet') or not self.analyzer.quiet:
-                            print(f"⚠️ 生成 {col} 时间序列图失败: {e}")
+                    except Exception:
+                        pass
+                print("7:")
 
-            # 数值变量相关性热力图
             img = self.analyzer.get_numeric_correlation_base64()
             if img:
                 plots['numeric_correlation'] = img
 
-            # 分类变量关联热力图
             img = self.analyzer.get_categorical_correlation_base64()
             if img:
                 plots['categorical_correlation'] = img
 
-            # 数值-分类变量关联热力图
             img = self.analyzer.get_numeric_categorical_eta_base64()
             if img:
                 plots['numeric_categorical_eta'] = img
 
+            print("8:")
+
         except Exception as e:
             print(f"⚠️ 生成图表时出错: {e}")
+            print("9:",e)
 
-        # ========== 新增：生成图表解读 ==========
+        # ========== 图表解读（完整展示，不依赖任何开关） ==========
         chart_insights = {}
+        insight_service = InsightService()
 
-        if HAS_INSIGHT and FeatureFlags and FeatureFlags.is_enabled("natural_language_insight"):
-            try:
-                # 1. 连续变量图表解读
-                for col, typ in self.analyzer.variable_types.items():
-                    if typ == 'continuous':
-                        plot_key = f'{col}_continuous'
-                        if plot_key in plots:
-                            series = data[col].dropna()
-                            if len(series) > 0:
-                                insight_data = {
-                                    'name': col,
-                                    'mean': float(series.mean()),
-                                    'median': float(series.median()),
-                                    'skew': float(series.skew()),
-                                    'min': float(series.min()),
-                                    'max': float(series.max())
-                                }
-                                insight = InsightService.generate_natural_language_insight('continuous', insight_data)
-                                chart_insights[plot_key] = insight
+        try:
+            # 1. 连续变量图表解读
+            print("10:")
+            for col, typ in self.analyzer.variable_types.items():
+                if typ == 'continuous':
+                    plot_key = f'{col}_continuous'
+                    if plot_key in plots:
+                        series = data[col].dropna()
+                        if len(series) > 0:
+                            insight_data = {
+                                'name': col,
+                                'mean': float(series.mean()),
+                                'median': float(series.median()),
+                                'skew': float(series.skew()),
+                                'min': float(series.min()),
+                                'max': float(series.max())
+                            }
+                            insight = insight_service.generate_natural_language_insight('continuous', insight_data)
+                            chart_insights[plot_key] = insight
 
-                # 2. 分类变量图表解读
-                for col, typ in self.analyzer.variable_types.items():
-                    if typ in ['categorical', 'categorical_numeric', 'ordinal']:
-                        plot_key = f'{col}_categorical'
-                        if plot_key in plots:
-                            vc = data[col].value_counts()
-                            if len(vc) > 0:
-                                insight_data = {
-                                    'name': col,
-                                    'value_counts': {str(k): int(v) for k, v in vc.head(10).items()}
-                                }
-                                insight = InsightService.generate_natural_language_insight('categorical', insight_data)
-                                chart_insights[plot_key] = insight
+            # 2. 分类变量图表解读
+            print("11:")
+            for col, typ in self.analyzer.variable_types.items():
+                if typ in ['categorical', 'categorical_numeric', 'ordinal']:
+                    plot_key = f'{col}_categorical'
+                    if plot_key in plots:
+                        vc = data[col].value_counts()
+                        if len(vc) > 0:
+                            insight_data = {
+                                'name': col,
+                                'value_counts': {str(k): int(v) for k, v in vc.head(10).items()}
+                            }
+                            insight = insight_service.generate_natural_language_insight('categorical', insight_data)
+                            chart_insights[plot_key] = insight
 
-                # 3. 相关性热力图解读
-                if 'numeric_correlation' in plots:
-                    numeric_vars = [col for col, typ in self.analyzer.variable_types.items() if typ == 'continuous']
-                    high_corrs = self._get_high_correlations(numeric_vars, threshold=0.5)
-                    if high_corrs:
-                        insight = InsightService.generate_natural_language_insight('correlation', high_corrs[0])
-                        chart_insights['numeric_correlation'] = insight
+            # 3. 相关性热力图解读
+            print("12:")
+            if 'numeric_correlation' in plots:
 
-            except Exception as e:
-                print(f"⚠️ 生成图表解读时出错: {e}")
+                numeric_vars = [col for col, typ in self.analyzer.variable_types.items() if typ == 'continuous']
+                print("13:",numeric_vars)
+                high_corrs = self._get_high_correlations(numeric_vars, threshold=0.5)
+                if high_corrs:
+                    insight = insight_service.generate_natural_language_insight('correlation', high_corrs[0])
+                    chart_insights['numeric_correlation'] = insight
+
+        except Exception as e:
+            print(f"⚠️ 生成图表解读时出错: {e}")
+            print("14:")
 
         # 日期范围
         date_range = None
         if date_cols:
+            print("15:")
             min_date = data[date_cols[0]].min()
             max_date = data[date_cols[0]].max()
             if pd.notna(min_date) and pd.notna(max_date):
-                date_range = {'start': str(min_date.date()), 'end': str(max_date.date())}
+                try:
+                    # 统一转换为 pandas Timestamp，再取日期
+                    min_dt = pd.to_datetime(min_date)
+                    max_dt = pd.to_datetime(max_date)
+                    date_range = {
+                        'start': min_dt.strftime('%Y-%m-%d'),
+                        'end': max_dt.strftime('%Y-%m-%d')
+                    }
+                except Exception as e:
+                    print(f"⚠️ 日期范围解析失败: {e}")
+                    date_range = None
 
-        # 变量类型统计（使用中文描述）
+        # 变量类型统计
+        print("16:")
         type_counts = {}
         type_display_map = {
             'continuous': '连续变量',
@@ -292,11 +295,13 @@ class Reporter:
             'other': '其他',
             'empty': '空变量'
         }
+        print("17:")
         for typ in self.analyzer.variable_types.values():
             display_name = type_display_map.get(typ, typ)
             type_counts[display_name] = type_counts.get(display_name, 0) + 1
 
-        # 变量详情列表
+        # 变量详情
+        print("18:")
         variables = []
         for col in list(data.columns)[:30]:
             var_type = self.analyzer.variable_types.get(col, 'unknown')
@@ -312,7 +317,6 @@ class Reporter:
                 center = '-'
                 spread = '-'
 
-            # 确定图表key
             plot_key = None
             if var_type == 'continuous':
                 plot_key = f'{col}_continuous'
@@ -332,6 +336,7 @@ class Reporter:
             })
 
         # 质量告警
+        print("19:")
         quality_alerts = []
         for item in quality.get('missing', [])[:5]:
             if item['percent'] > 20:
@@ -340,17 +345,17 @@ class Reporter:
             if info.get('percent', 0) > 5:
                 quality_alerts.append(f"⚠️ {col} 异常值比例 {info['percent']:.1f}%")
 
-        # 偏态变量 - 使用 BaseAnalyzer
+        # 偏态变量
+        print("20:")
         skewed_vars = BaseAnalyzer.get_skewed_vars(data, self.analyzer.variable_types, threshold=2)
 
-        # 不平衡分类变量 - 使用 BaseAnalyzer
+        # 不平衡分类变量
         imbalanced_vars = BaseAnalyzer.get_imbalanced_vars(data, self.analyzer.variable_types, threshold=0.8)
 
-        # 强相关对 - 使用 BaseAnalyzer，阈值 0.7
+        # 强相关对
         numeric_vars = [col for col, typ in self.analyzer.variable_types.items() if typ == 'continuous']
-        high_correlations = BaseAnalyzer.get_high_correlations(data, numeric_vars,
-                                                               threshold=0.7) if numeric_vars else []
-
+        high_correlations = BaseAnalyzer.get_high_correlations(data, numeric_vars, threshold=0.7) if numeric_vars else []
+        print("21:",numeric_vars)
         # 时间序列洞察
         time_series_insight = None
         time_series_diagnostics = getattr(self.analyzer, 'time_series_diagnostics', {})
@@ -363,10 +368,11 @@ class Reporter:
         elif date_cols and numeric_vars:
             time_series_insight = "📊 检测到日期和数值变量，建议进行时间序列分析"
 
-        # 获取模型推荐
+        # 模型推荐
         model_recommendations = self._get_model_recommendations()
 
         # 清洗建议
+        print("22:")
         cleaning_suggestions = []
         for item in quality.get('missing', []):
             if item['percent'] > 20:
@@ -376,6 +382,7 @@ class Reporter:
                     'columns': item['column'],
                     'method': '删除列' if item['percent'] > 80 else '中位数/众数填充'
                 })
+        print("23:")
         for col, info in quality.get('outliers', {}).items():
             if info.get('percent', 0) > 10:
                 cleaning_suggestions.append({
@@ -384,6 +391,7 @@ class Reporter:
                     'columns': col,
                     'method': '截尾或对数变换'
                 })
+        print("24:")
         if dup_info.get('count', 0) > 0:
             cleaning_suggestions.append({
                 'priority': '中',
@@ -393,6 +401,7 @@ class Reporter:
             })
 
         # 核心洞察
+        print("25:")
         key_insights = []
         if skewed_vars:
             skewed_names = ', '.join([v['name'] for v in skewed_vars[:3]])
@@ -408,64 +417,60 @@ class Reporter:
             key_insights.append("数据分布较为均匀，可直接进行分析")
 
         # 下一步行动
+        print("26:")
         next_actions = []
         if quality.get('missing'):
             next_actions.append("优先处理高缺失率字段")
         if quality.get('outliers'):
             next_actions.append("检查异常值是否为数据错误")
-        if numeric_vars and [c for c in self.analyzer.variable_types if
-                             self.analyzer.variable_types[c] in ['categorical', 'categorical_numeric', 'ordinal']]:
+        if numeric_vars and [c for c in self.analyzer.variable_types if self.analyzer.variable_types[c] in ['categorical', 'categorical_numeric', 'ordinal']]:
             next_actions.append("探索数值变量与分类变量的关系")
         if date_cols and numeric_vars:
             next_actions.append("进行时间序列趋势分析")
         if not next_actions:
             next_actions.append("数据质量良好，可直接进行建模分析")
 
-        # ========== 新增：字段非空统计（用于勾稽规则卡片，只统计数值类型字段） ==========
-        if 'audit_rules' not in quality:
-            quality['audit_rules'] = {}
+        # ========== 核心结论 ==========
+        json_data = json.loads(self.analyzer.to_json())
+        conclusions = insight_service.extract_top_conclusions(json_data)
+        print("27:")
+        # 🆕 强制安全转换，确保没有 datetime 对象进入模板
+        for c in conclusions:
+            for k, v in c.items():
+                if isinstance(v, (datetime, date, pd.Timestamp)):
+                    c[k] = v.strftime('%Y-%m-%d')
+                elif v is None:
+                    c[k] = ''
+                elif isinstance(v, dict):
+                    c[k] = {str(kk): str(vv) if not isinstance(vv, (int, float, bool)) else vv for kk, vv in v.items()}
+                elif isinstance(v, list):
+                    c[k] = [str(item) if not isinstance(item, (int, float, bool)) else item for item in v]
+                else:
+                    # ✅ 关键修复：任何其他类型都转为字符串
+                    c[k] = str(v)
 
-        # 获取所有数值类型字段
-        numeric_fields = {col for col, typ in self.analyzer.variable_types.items() if typ == 'continuous'}
-
-        if 'field_nonnull_stats' not in quality['audit_rules']:
-            field_stats = []
-            for col in data.columns:
-                if col not in numeric_fields:
-                    continue
-                nonnull_count = data[col].notna().sum()
-                nonnull_rate = nonnull_count / len(data) if len(data) > 0 else 0
-                field_stats.append({
-                    'field': col,
-                    'nonnull_count': nonnull_count,
-                    'nonnull_rate': nonnull_rate
-                })
-            field_stats.sort(key=lambda x: x['nonnull_count'], reverse=True)
-            quality['audit_rules']['field_nonnull_stats'] = field_stats
-
-        # 构建字段非空查找字典，用于鼠标悬停显示
-        field_nonnull_lookup = {}
-        for stat in quality['audit_rules']['field_nonnull_stats']:
-            field_nonnull_lookup[stat['field']] = stat
-        # ==========================================================
-
-        # ========== 新增：对算术规则排序（按字段数，再按规则字符串） ==========
-        if 'audit_rules' in quality and 'arithmetic_rules' in quality['audit_rules']:
-            quality['audit_rules']['arithmetic_rules'].sort(
-                key=lambda r: (len(r.get('fields', [])), r.get('rule', ''))
-            )
-        # ==========================================================
-
-        # 使用Jinja2模板渲染
+        # 使用 Jinja2 模板渲染
+        print("28:")
         template_path = os.path.join(os.path.dirname(__file__), '..', 'templates', 'report.html')
 
         if not os.path.exists(template_path):
             return self._get_error_html(title, f"模板文件不存在: {template_path}")
 
         try:
+            print("29:")
             with open(template_path, 'r', encoding='utf-8') as f:
                 template_content = f.read()
             template = Template(template_content)
+
+            # 计算每个字段的非空统计
+            field_nonnull_lookup = {}
+            for col in data.columns:
+                nonnull_count = data[col].notna().sum()
+                nonnull_rate = data[col].notna().mean()
+                field_nonnull_lookup[col] = {
+                    'nonnull_count': nonnull_count,
+                    'nonnull_rate': nonnull_rate
+                }
 
             return template.render(
                 title=title,
@@ -491,22 +496,22 @@ class Reporter:
                 key_insights=key_insights[:3],
                 next_actions=next_actions[:3],
                 plots=plots,
-                chart_insights=chart_insights,  # 新增：图表解读
+                chart_insights=chart_insights,
                 time_series_diagnostics=time_series_diagnostics,
                 quality_report=quality,
-                field_nonnull_lookup=field_nonnull_lookup  # 新增：字段非空查找字典
+                conclusions=conclusions,
+                field_nonnull_lookup=field_nonnull_lookup
             )
         except Exception as e:
+            print("30:",e)
             return self._get_error_html(title, f"模板渲染失败: {str(e)}")
 
     def _get_high_correlations(self, numeric_vars, threshold=0.7):
-        """获取强相关对 - 调用 BaseAnalyzer 静态方法"""
         if not numeric_vars:
             return []
         return BaseAnalyzer.get_high_correlations(self.analyzer.data, numeric_vars, threshold)
 
     def _get_model_recommendations(self):
-        """获取基于实际字段的模型推荐（调用 recommendation_analyzer）"""
         if hasattr(self.analyzer, 'recommendation_analyzer'):
             numeric_vars = [col for col, typ in self.analyzer.variable_types.items() if typ == 'continuous']
             categorical_vars = [col for col, typ in self.analyzer.variable_types.items()

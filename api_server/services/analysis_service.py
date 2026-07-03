@@ -1,15 +1,26 @@
-# api_server/services/analysis_service.py
-
 """分析服务 - 不依赖 web/"""
 import json
+import sys
+import io
 import traceback
-import pandas as pd
+
+import logging
+import warnings
+warnings.filterwarnings('ignore')
+
+# 设置 matplotlib 日志级别为 WARNING
 import matplotlib
-matplotlib.use('Agg')  # 🆕 使用非交互式后端，不弹窗
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+logging.getLogger('matplotlib').setLevel(logging.WARNING)
+logging.getLogger('matplotlib.category').setLevel(logging.WARNING)
+
 from typing import Dict, Any, Optional
 
 from autostat.core.analyzer import AutoStatisticalAnalyzer
 from autostat.loader import DataLoader
+from autostat.core.base import BaseAnalyzer
+from autostat.reporter import Reporter
 from api_server.services.session_service import SessionService
 
 
@@ -23,29 +34,18 @@ class AnalysisService:
         from api_server.routers.analysis import task_status
 
         try:
-            task_status[task_id] = {
-                "status": "running",
-                "progress": 10,
-                "message": "加载数据中..."
-            }
+            task_status[task_id] = {"status": "running", "progress": 10, "message": "加载数据中..."}
 
             df = DataLoader.load_from_file(file_path)
 
-            task_status[task_id] = {
-                "status": "running",
-                "progress": 30,
-                "message": "分析数据中..."
-            }
+            task_status[task_id] = {"status": "running", "progress": 30, "message": "分析数据中..."}
 
-            # 🆕 过滤：只保留存在于 df 中的字段
             filtered_types = {}
             for k, v in variable_types.items():
                 if v != 'exclude' and k in df.columns:
                     filtered_types[k] = v
 
-            # 如果没有有效的类型，自动推断
             if not filtered_types:
-                from autostat.core.base import BaseAnalyzer
                 base = BaseAnalyzer(df, quiet=True)
                 base._infer_variable_types()
                 filtered_types = base.variable_types
@@ -58,27 +58,31 @@ class AnalysisService:
                 quiet=True
             )
 
-            task_status[task_id] = {
-                "status": "running",
-                "progress": 60,
-                "message": "生成报告中..."
-            }
+            task_status[task_id] = {"status": "running", "progress": 60, "message": "生成报告中..."}
 
-            import matplotlib
-            matplotlib.use('Agg')
-            import matplotlib.pyplot as plt
-            plt.switch_backend('Agg')
+            # 捕获日志
+            log_capture = io.StringIO()
+            old_stdout = sys.stdout
+            sys.stdout = log_capture
 
-            analyzer.generate_full_report()
+            try:
+                analyzer.generate_full_report()
+                log_content = log_capture.getvalue()
+            finally:
+                sys.stdout = old_stdout
+                log_capture.close()
+
+            self.session_service.save_log(session_id, log_content)
+
+            # 保存 JSON 结果
             json_result = json.loads(analyzer.to_json())
-
-            task_status[task_id] = {
-                "status": "running",
-                "progress": 80,
-                "message": "保存结果中..."
-            }
-
             self.session_service.save_analysis_result(session_id, json_result)
+
+            # 🆕 生成并保存 HTML 报告（一次生成，导出直接返回）
+            reporter = Reporter(analyzer)
+            html_content = reporter.to_html()
+            self.session_service.save_html(session_id, html_content)
+
             self.session_service.save_variable_types(session_id, analyzer.variable_types)
             self.session_service.save_analyzer(session_id, analyzer)
 

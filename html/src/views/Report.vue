@@ -7,6 +7,7 @@
         <el-button size="small" @click="collapseAll">📁 全部折叠</el-button>
         <el-button size="small" type="primary" plain @click="handleExport('html')">📄 导出HTML</el-button>
         <el-button size="small" type="success" plain @click="handleExport('json')">📋 导出JSON</el-button>
+        <el-button size="small" type="info" plain @click="handleExportLog">📝 导出日志</el-button>
       </div>
     </div>
 
@@ -157,14 +158,14 @@
               <span>🔗 勾稽规则</span>
             </template>
             <div class="detail-content">
-              <div v-if="auditRulesCount > 0">
+              <div v-if="auditRulesCount.arithmetic + auditRulesCount.functional + auditRulesCount.temporal > 0">
                 <el-descriptions :column="3" border>
                   <el-descriptions-item label="数值关系">{{ auditRulesCount.arithmetic || 0 }}</el-descriptions-item>
                   <el-descriptions-item label="函数依赖">{{ auditRulesCount.functional || 0 }}</el-descriptions-item>
                   <el-descriptions-item label="时序约束">{{ auditRulesCount.temporal || 0 }}</el-descriptions-item>
                 </el-descriptions>
                 <div v-if="auditRulesList.length > 0" style="margin-top: 12px;">
-                  <el-table :data="auditRulesList.slice(0, 5)" border size="small">
+                  <el-table :data="auditRulesList" border size="small">
                     <el-table-column prop="rule" label="规则" />
                     <el-table-column prop="confidence" label="置信度" width="100">
                       <template #default="{ row }">
@@ -344,7 +345,7 @@ const variableList = computed(() => {
     missing_pct: info.missing_pct || 0,
     center: info.mean !== undefined ? info.mean.toFixed(2) : (info.mode || '-'),
     spread: info.std !== undefined ? `±${info.std.toFixed(2)}` : (info.n_unique ? `${info.n_unique}个类别` : '-')
-  })).slice(0, 20)
+  }))
 })
 
 const highCorrelations = computed(() => {
@@ -382,7 +383,7 @@ const auditRulesList = computed(() => {
     ...(rules.arithmetic_rules || []),
     ...(rules.functional_dependencies || []),
     ...(rules.temporal_rules || [])
-  ].slice(0, 20)
+  ]
 })
 
 const cleaningSuggestions = computed(() => {
@@ -419,6 +420,29 @@ async function handleExport(format) {
     ElMessage.success(`导出成功: ${format.toUpperCase()}`)
   } catch (err) {
     ElMessage.error('导出失败: ' + err.message)
+  }
+}
+
+// 在 <script setup> 中添加方法
+async function handleExportLog() {
+  const sessionId = currentSessionId.value
+  if (!sessionId) {
+    ElMessage.warning('没有可导出的会话')
+    return
+  }
+  try {
+    const blob = await reportApi.exportLog(sessionId)
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `analysis_log_${sessionId}.txt`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+    ElMessage.success('日志导出成功')
+  } catch (err) {
+    ElMessage.error('日志导出失败: ' + err.message)
   }
 }
 

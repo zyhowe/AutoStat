@@ -4,6 +4,12 @@
 import matplotlib
 matplotlib.use('Agg')  # 默认使用非交互式后端
 
+import logging
+import warnings
+warnings.filterwarnings('ignore')
+logging.getLogger('matplotlib').setLevel(logging.WARNING)
+logging.getLogger('matplotlib.category').setLevel(logging.WARNING)
+
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd

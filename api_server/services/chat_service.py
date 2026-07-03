@@ -3,7 +3,7 @@ import json
 from typing import Dict, Any, List, Generator, Optional
 
 from autostat.llm_client import LLMClient
-from api_server.services.insight_service import InsightService
+from autostat.core.insight import InsightService
 from api_server.services.config_service import ConfigService
 
 

@@ -1,19 +1,32 @@
-"""报告服务 - 不依赖 web/"""
+"""报告服务 - 不依赖 web/ 或 api_server/services/insight_service"""
+import math
+import numpy as np
 from typing import Dict, Any, List
 
 from autostat.reporter import Reporter
-from api_server.services.insight_service import InsightService
+from autostat.core.insight import InsightService
+
+
+def clean_nan(obj):
+    if isinstance(obj, dict):
+        return {k: clean_nan(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [clean_nan(v) for v in obj]
+    elif isinstance(obj, float) and math.isnan(obj):
+        return None
+    elif isinstance(obj, np.ndarray):
+        return [clean_nan(v) for v in obj.tolist()]
+    else:
+        return obj
 
 
 class ReportService:
-    """报告服务"""
-
     def __init__(self):
         self.insight_service = InsightService()
 
     def get_full_report(self, analysis_result: Dict) -> Dict:
-        """获取完整报告"""
-        return {
+        # quality_report 完整透传，不做任何过滤
+        return clean_nan({
             "analysis_time": analysis_result.get("analysis_time"),
             "source_table": analysis_result.get("source_table"),
             "data_shape": analysis_result.get("data_shape"),
@@ -25,20 +38,16 @@ class ReportService:
             "model_recommendations": analysis_result.get("model_recommendations"),
             "cleaning_suggestions": analysis_result.get("cleaning_suggestions"),
             "distribution_insights": analysis_result.get("distribution_insights")
-        }
+        })
 
     def get_summary(self, analysis_result: Dict) -> List[Dict]:
-        """获取核心结论"""
-        return self.insight_service.extract_top_conclusions(analysis_result)
+        return clean_nan(self.insight_service.extract_top_conclusions(analysis_result))
 
     def get_insights(self, analysis_result: Dict) -> Dict:
-        """获取智能解读"""
-        return {
+        return clean_nan({
             "findings": self.insight_service.generate_rule_based_insights(analysis_result),
             "conclusions": self.insight_service.extract_top_conclusions(analysis_result)
-        }
+        })
 
     def get_html(self, analyzer) -> str:
-        """获取HTML报告"""
-        reporter = Reporter(analyzer)
-        return reporter.to_html()
+        return Reporter(analyzer).to_html()
