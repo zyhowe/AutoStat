@@ -7,12 +7,12 @@ import * as ElementPlusIconsVue from '@element-plus/icons-vue'
 import App from './App.vue'
 import router from './router'
 import './styles/main.css'
+import { useAnalysisStore } from './stores/analysis'
 
 const app = createApp(App)
 
-// 注册 Element Plus 图标
 for (const [key, component] of Object.entries(ElementPlusIconsVue)) {
-    app.component(key, component)
+  app.component(key, component)
 }
 
 app.use(createPinia())
@@ -20,3 +20,7 @@ app.use(router)
 app.use(ElementPlus)
 
 app.mount('#app')
+
+// 将 router 注入到 analysis store
+const analysisStore = useAnalysisStore()
+analysisStore.setRouter(router)

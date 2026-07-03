@@ -259,12 +259,14 @@
 </template>
 
 <script setup>
-import { ref, onMounted, nextTick } from 'vue'
+import { ref, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { useSessionStore } from '../stores/session'
 import { chatApi } from '../api/chat'
 import { modelsApi } from '../api/models'
 
+const route = useRoute()
 const sessionStore = useSessionStore()
 
 // ==================== 状态 ====================
@@ -315,7 +317,34 @@ onMounted(async () => {
     await loadScenarios()
     await loadModels()
   }
+
+  // 监听来自气泡组件的问题
+  window.addEventListener('ai-ask-question', handleAiAskQuestion)
+
+  // 处理 URL 参数中的问题
+  if (route.query.question) {
+    inputQuestion.value = route.query.question
+    await nextTick()
+    handleSend()
+  }
 })
+
+onBeforeUnmount(() => {
+  window.removeEventListener('ai-ask-question', handleAiAskQuestion)
+})
+
+// ==================== 事件处理 ====================
+function handleAiAskQuestion(e) {
+  const question = e.detail?.question
+  if (question) {
+    inputQuestion.value = question
+    // 清空 URL 参数，防止刷新后重复发送
+    const newUrl = new URL(window.location)
+    newUrl.searchParams.delete('question')
+    window.history.replaceState({}, '', newUrl)
+    handleSend()
+  }
+}
 
 // ==================== 加载数据 ====================
 async function loadDataFeatures() {
@@ -554,7 +583,7 @@ function formatMessage(content) {
   font-weight: 500;
 }
 
-/* 🆕 按钮统一容器 - 解决对齐问题 */
+/* 按钮统一容器 - 解决对齐问题 */
 .button-group {
   display: flex;
   flex-direction: column;

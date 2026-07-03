@@ -1,0 +1,251 @@
+<template>
+  <div class="data-validation">
+    <h2>📋 数据核验</h2>
+    <p class="subtitle">检查数据一致性，查看勾稽规则、异常值和缺失值明细</p>
+
+    <div v-if="loading" class="loading-container">
+      <el-skeleton :rows="10" animated />
+    </div>
+
+    <div v-else-if="reportData" class="validation-content">
+      <el-tabs v-model="activeTab">
+        <!-- 勾稽规则 -->
+        <el-tab-pane label="勾稽规则" name="rules">
+          <div v-if="auditRulesTotal === 0" class="empty-tip">
+            ✅ 未发现勾稽规则违反，数据一致性良好
+          </div>
+          <template v-else>
+            <!-- 数值关系 -->
+            <div v-if="arithmeticRules.length > 0" class="rule-section">
+              <h4>📐 数值关系（{{ arithmeticRules.length }} 条）</h4>
+              <el-table :data="arithmeticRules" border size="small">
+                <el-table-column prop="rule" label="规则" />
+                <el-table-column prop="confidence" label="置信度" width="100">
+                  <template #default="{ row }">
+                    {{ (row.confidence * 100).toFixed(1) }}%
+                  </template>
+                </el-table-column>
+                <el-table-column label="优先级" width="80">
+                  <template #default="{ row }">
+                    <el-tag :type="row.priority === '高' ? 'danger' : row.priority === '中' ? 'warning' : 'info'" size="small">
+                      {{ row.priority }}
+                    </el-tag>
+                  </template>
+                </el-table-column>
+                <el-table-column prop="violation_count" label="违反数" width="80" />
+              </el-table>
+            </div>
+
+            <!-- 函数依赖 -->
+            <div v-if="functionalRules.length > 0" class="rule-section">
+              <h4>🏷️ 函数依赖（{{ functionalRules.length }} 条）</h4>
+              <el-table :data="functionalRules" border size="small">
+                <el-table-column prop="rule" label="规则" />
+                <el-table-column prop="confidence" label="置信度" width="100">
+                  <template #default="{ row }">
+                    {{ (row.confidence * 100).toFixed(1) }}%
+                  </template>
+                </el-table-column>
+                <el-table-column label="优先级" width="80">
+                  <template #default="{ row }">
+                    <el-tag :type="row.priority === '高' ? 'danger' : row.priority === '中' ? 'warning' : 'info'" size="small">
+                      {{ row.priority }}
+                    </el-tag>
+                  </template>
+                </el-table-column>
+              </el-table>
+            </div>
+
+            <!-- 时序约束 -->
+            <div v-if="temporalRules.length > 0" class="rule-section">
+              <h4>📅 时序约束（{{ temporalRules.length }} 条）</h4>
+              <el-table :data="temporalRules" border size="small">
+                <el-table-column prop="rule" label="规则" />
+                <el-table-column prop="confidence" label="置信度" width="100">
+                  <template #default="{ row }">
+                    {{ (row.confidence * 100).toFixed(1) }}%
+                  </template>
+                </el-table-column>
+                <el-table-column label="优先级" width="80">
+                  <template #default="{ row }">
+                    <el-tag :type="row.priority === '高' ? 'danger' : row.priority === '中' ? 'warning' : 'info'" size="small">
+                      {{ row.priority }}
+                    </el-tag>
+                  </template>
+                </el-table-column>
+              </el-table>
+            </div>
+          </template>
+        </el-tab-pane>
+
+        <!-- 异常值 -->
+        <el-tab-pane label="异常值" name="outliers">
+          <div v-if="outlierList.length === 0" class="empty-tip">
+            ✅ 未发现异常值
+          </div>
+          <el-table v-else :data="outlierList" border size="small">
+            <el-table-column prop="field" label="字段" width="150" />
+            <el-table-column prop="count" label="异常数量" width="120" />
+            <el-table-column prop="percent" label="异常比例" width="120">
+              <template #default="{ row }">
+                {{ row.percent.toFixed(1) }}%
+              </template>
+            </el-table-column>
+            <el-table-column prop="lower_bound" label="下界" width="120" />
+            <el-table-column prop="upper_bound" label="上界" width="120" />
+          </el-table>
+        </el-tab-pane>
+
+        <!-- 缺失值 -->
+        <el-tab-pane label="缺失值" name="missing">
+          <div v-if="missingList.length === 0" class="empty-tip">
+            ✅ 无缺失值
+          </div>
+          <el-table v-else :data="missingList" border size="small">
+            <el-table-column prop="column" label="字段" width="150" />
+            <el-table-column prop="count" label="缺失数量" width="120" />
+            <el-table-column prop="percent" label="缺失比例" width="120">
+              <template #default="{ row }">
+                {{ row.percent.toFixed(1) }}%
+              </template>
+            </el-table-column>
+          </el-table>
+        </el-tab-pane>
+
+        <!-- 重复记录 -->
+        <el-tab-pane label="重复记录" name="duplicates">
+          <div v-if="duplicateCount === 0" class="empty-tip">
+            ✅ 无重复记录
+          </div>
+          <div v-else>
+            <el-alert
+              :title="`发现 ${duplicateCount} 条重复记录（占比 ${duplicateRate.toFixed(1)}%）`"
+              type="warning"
+              show-icon
+              :closable="false"
+            />
+          </div>
+        </el-tab-pane>
+      </el-tabs>
+    </div>
+
+    <div v-else class="empty-state">
+      <el-empty description="请先完成数据分析">
+        <el-button type="primary" @click="goToUpload">去上传数据</el-button>
+      </el-empty>
+    </div>
+  </div>
+</template>
+
+<script setup>
+import { ref, computed, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
+import { ElMessage } from 'element-plus'
+import { useSessionStore } from '../stores/session'
+import { reportApi } from '../api/report'
+
+const router = useRouter()
+const sessionStore = useSessionStore()
+
+const loading = ref(false)
+const reportData = ref(null)
+const activeTab = ref('rules')
+
+const auditRules = computed(() => {
+  return reportData.value?.quality_report?.audit_rules || {}
+})
+
+const arithmeticRules = computed(() => auditRules.value.arithmetic_rules || [])
+const functionalRules = computed(() => auditRules.value.functional_dependencies || [])
+const temporalRules = computed(() => auditRules.value.temporal_rules || [])
+const auditRulesTotal = computed(() => {
+  return arithmeticRules.value.length + functionalRules.value.length + temporalRules.value.length
+})
+
+const outlierList = computed(() => {
+  const outliers = reportData.value?.quality_report?.outliers || {}
+  return Object.entries(outliers).map(([field, info]) => ({
+    field,
+    count: info.count || 0,
+    percent: info.percent || 0,
+    lower_bound: info.lower_bound,
+    upper_bound: info.upper_bound
+  }))
+})
+
+const missingList = computed(() => {
+  return reportData.value?.quality_report?.missing || []
+})
+
+const duplicateCount = computed(() => {
+  return reportData.value?.quality_report?.duplicates?.count || 0
+})
+
+const duplicateRate = computed(() => {
+  return reportData.value?.quality_report?.duplicates?.percent || 0
+})
+
+async function loadData() {
+  let sessionId = sessionStore.currentSessionId
+  if (!sessionId) {
+    sessionId = localStorage.getItem('lastSessionId')
+  }
+  if (!sessionId) {
+    router.push('/')
+    return
+  }
+  if (!sessionStore.currentSessionId) {
+    sessionStore.currentSessionId = sessionId
+  }
+
+  loading.value = true
+  try {
+    const result = await reportApi.get(sessionId)
+    reportData.value = result
+  } catch (err) {
+    ElMessage.error('加载数据失败: ' + err.message)
+  } finally {
+    loading.value = false
+  }
+}
+
+function goToUpload() {
+  router.push('/upload')
+}
+
+onMounted(() => {
+  loadData()
+})
+</script>
+
+<style scoped>
+.data-validation {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 20px;
+}
+.subtitle {
+  color: #909399;
+  margin-bottom: 24px;
+}
+.loading-container {
+  padding: 40px 0;
+}
+.empty-state {
+  padding: 60px 0;
+}
+.empty-tip {
+  padding: 40px;
+  text-align: center;
+  color: #67c23a;
+  font-size: 16px;
+}
+.rule-section {
+  margin-bottom: 24px;
+}
+.rule-section h4 {
+  margin-bottom: 12px;
+  color: #555;
+  font-size: 14px;
+}
+</style>

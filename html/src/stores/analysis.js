@@ -14,14 +14,19 @@ export const useAnalysisStore = defineStore('analysis', () => {
   const summary = ref(null)
   const insights = ref(null)
   const error = ref(null)
-  const analysisSessionId = ref(null)  // 🆕 单独存储分析用的 session_id
+  const analysisSessionId = ref(null)
+  let router = null
+
+  function setRouter(routerInstance) {
+    router = routerInstance
+  }
 
   async function runAnalysis(sessionId, variableTypes = {}) {
     isLoading.value = true
     progress.value = 0
     statusMessage.value = '提交分析任务...'
     error.value = null
-    analysisSessionId.value = sessionId  // 🆕 保存
+    analysisSessionId.value = sessionId
 
     try {
       const result = await analysisApi.run({
@@ -30,17 +35,18 @@ export const useAnalysisStore = defineStore('analysis', () => {
       })
 
       taskId.value = result.task_id
-
       await pollStatus()
       await loadResults(sessionId)
 
-      // 🆕 确保 session store 中的 session_id 正确
       const sessionStore = useSessionStore()
       if (sessionStore.currentSessionId !== sessionId) {
-        console.log('修复 session_id:', sessionId)
         sessionStore.currentSessionId = sessionId
-        // 重新加载会话信息
         await sessionStore.loadSession(sessionId)
+      }
+
+      // ✅ 跳转到质量看板
+      if (router) {
+        router.push('/quality')
       }
 
       return true
@@ -54,28 +60,19 @@ export const useAnalysisStore = defineStore('analysis', () => {
 
   async function pollStatus() {
     if (!taskId.value) return
-
     const maxAttempts = 120
     let attempts = 0
 
     while (attempts < maxAttempts) {
       const status = await analysisApi.getStatus(taskId.value)
-
       progress.value = status.progress || 0
       statusMessage.value = status.message || '处理中...'
 
-      if (status.status === 'completed') {
-        return true
-      }
-
-      if (status.status === 'failed') {
-        throw new Error(status.error || '分析失败')
-      }
-
+      if (status.status === 'completed') return true
+      if (status.status === 'failed') throw new Error(status.error || '分析失败')
       attempts++
       await new Promise(resolve => setTimeout(resolve, 1000))
     }
-
     throw new Error('分析超时')
   }
 
@@ -87,7 +84,6 @@ export const useAnalysisStore = defineStore('analysis', () => {
         reportApi.getSummary(sessionId),
         reportApi.getInsights(sessionId)
       ])
-
       qualityResult.value = quality
       reportData.value = report
       summary.value = summaryData.conclusions || []
@@ -122,6 +118,7 @@ export const useAnalysisStore = defineStore('analysis', () => {
     insights,
     error,
     analysisSessionId,
+    setRouter,
     runAnalysis,
     loadResults,
     reset

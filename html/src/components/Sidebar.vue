@@ -4,44 +4,48 @@
       :default-active="activeMenu"
       router
       class="sidebar-menu"
+      @select="handleMenuSelect"
     >
-      <el-menu-item index="/">
-        <el-icon><HomeFilled /></el-icon>
-        <span>首页</span>
+      <!-- 平铺菜单 -->
+      <el-menu-item index="/upload">
+        <el-icon><Upload /></el-icon>
+        <span>上传数据</span>
       </el-menu-item>
 
-      <el-sub-menu index="analysis">
-        <template #title>
-          <el-icon><DataAnalysis /></el-icon>
-          <span>数据分析</span>
-        </template>
-        <el-menu-item index="/upload">
-          <el-icon><Upload /></el-icon>
-          <span>上传数据</span>
-        </el-menu-item>
-        <el-menu-item index="/quality">
-          <el-icon><Monitor /></el-icon>
-          <span>质量看板</span>
-        </el-menu-item>
-        <el-menu-item index="/report">
-          <el-icon><Document /></el-icon>
-          <span>分析报告</span>
-        </el-menu-item>
-      </el-sub-menu>
+      <el-menu-item index="/data-overview">
+        <el-icon><DataAnalysis /></el-icon>
+        <span>数据总览</span>
+      </el-menu-item>
+
+      <el-menu-item index="/quality">
+        <el-icon><Monitor /></el-icon>
+        <span>质量看板</span>
+      </el-menu-item>
+
+      <el-menu-item index="/data-validation">
+        <el-icon><CircleCheck /></el-icon>
+        <span>数据核验</span>
+      </el-menu-item>
+
+      <el-menu-item index="/pattern-discovery">
+        <el-icon><TrendCharts /></el-icon>
+        <span>规律发现</span>
+      </el-menu-item>
+
+      <el-menu-item index="/conclusion-solution">
+        <el-icon><Document /></el-icon>
+        <span>结论与方案</span>
+      </el-menu-item>
 
       <el-menu-item index="/models">
         <el-icon><Cpu /></el-icon>
-        <span>模型中心</span>
+        <span>智能预测</span>
       </el-menu-item>
 
+      <!-- AI助手暂时保留 -->
       <el-menu-item index="/ai">
         <el-icon><ChatDotRound /></el-icon>
         <span>AI助手</span>
-      </el-menu-item>
-
-      <el-menu-item index="/compare">
-        <el-icon><Switch /></el-icon>
-        <span>项目对比</span>
       </el-menu-item>
 
       <el-menu-item index="/settings">
@@ -50,7 +54,7 @@
       </el-menu-item>
     </el-menu>
 
-    <!-- 项目列表 -->
+    <!-- 最近项目 -->
     <div class="projects-section">
       <el-divider />
       <div class="projects-header">
@@ -121,14 +125,14 @@ import { useSessionStore } from '../stores/session'
 import { sessionApi } from '../api/session'
 
 import {
-  HomeFilled,
-  DataAnalysis,
   Upload,
+  DataAnalysis,
   Monitor,
+  CircleCheck,
+  TrendCharts,
   Document,
   Cpu,
   ChatDotRound,
-  Switch,
   Setting
 } from '@element-plus/icons-vue'
 
@@ -143,6 +147,13 @@ const loadingProjects = ref(false)
 onMounted(async () => {
   await loadProjects()
 })
+
+function handleMenuSelect(index) {
+  // 如果包含查询参数，手动跳转（处理报告子页面的情况）
+  if (index.includes('?')) {
+    router.push(index)
+  }
+}
 
 async function loadProjects() {
   loadingProjects.value = true
@@ -161,7 +172,6 @@ async function loadProject(sessionId) {
   try {
     await sessionStore.loadSession(sessionId)
     ElMessage.success('已加载项目')
-    // 跳转到质量看板
     router.push('/quality')
   } catch (err) {
     ElMessage.error('加载项目失败: ' + err.message)
@@ -211,12 +221,9 @@ async function deleteProject(sessionId, sourceName) {
 .sidebar-menu .el-menu-item:hover {
   background-color: #ecf5ff !important;
 }
-.sidebar-menu .el-sub-menu .el-menu-item {
-  padding-left: 48px !important;
-  font-size: 13px;
-}
-.sidebar-menu .el-sub-menu .el-menu-item.is-active {
-  background-color: #ecf5ff !important;
+.sidebar-menu .el-menu-item {
+  padding-left: 20px !important;
+  font-size: 14px;
 }
 
 .projects-section {
