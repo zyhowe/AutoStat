@@ -25,7 +25,6 @@ class ReportService:
         self.insight_service = InsightService()
 
     def get_full_report(self, analysis_result: Dict) -> Dict:
-        # quality_report 完整透传，不做任何过滤
         return clean_nan({
             "analysis_time": analysis_result.get("analysis_time"),
             "source_table": analysis_result.get("source_table"),
@@ -37,7 +36,9 @@ class ReportService:
             "time_series_diagnostics": analysis_result.get("time_series_diagnostics"),
             "model_recommendations": analysis_result.get("model_recommendations"),
             "cleaning_suggestions": analysis_result.get("cleaning_suggestions"),
-            "distribution_insights": analysis_result.get("distribution_insights")
+            "distribution_insights": analysis_result.get("distribution_insights"),
+            # ✅ 新增：透传 summary
+            "summary": analysis_result.get("summary", [])
         })
 
     def get_summary(self, analysis_result: Dict) -> List[Dict]:

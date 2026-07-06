@@ -1,4 +1,5 @@
-"""依赖注入"""
+"""依赖注入（修改版）"""
+
 from typing import Optional
 from fastapi import HTTPException, UploadFile
 from pathlib import Path
@@ -15,6 +16,8 @@ from api_server.services.models_service import ModelsService
 from api_server.services.chat_service import ChatService
 from api_server.services.config_service import ConfigService
 from api_server.services.database_service import DatabaseService
+from api_server.services.recommendation_service import RecommendationService
+from api_server.services.prediction_agent_service import PredictionAgentService
 
 
 class Dependencies:
@@ -29,6 +32,8 @@ class Dependencies:
     _chat_service = None
     _config_service = None
     _database_service = None
+    _recommendation_service = None
+    _prediction_agent_service = None
 
     @classmethod
     def get_session_service(cls) -> SessionService:
@@ -83,6 +88,18 @@ class Dependencies:
         if cls._database_service is None:
             cls._database_service = DatabaseService()
         return cls._database_service
+
+    @classmethod
+    def get_recommendation_service(cls) -> RecommendationService:
+        if cls._recommendation_service is None:
+            cls._recommendation_service = RecommendationService()
+        return cls._recommendation_service
+
+    @classmethod
+    def get_prediction_agent_service(cls) -> PredictionAgentService:
+        if cls._prediction_agent_service is None:
+            cls._prediction_agent_service = PredictionAgentService()
+        return cls._prediction_agent_service
 
     @classmethod
     def require_session(cls, session_id: str):

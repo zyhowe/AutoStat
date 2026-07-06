@@ -342,12 +342,21 @@ class AutoStatisticalAnalyzer:
 
     def get_numeric_correlation_base64(self):
         """获取数值变量相关性热力图base64"""
-        numeric_vars = [col for col, typ in self.variable_types.items() if typ == 'continuous' and col in self.data.columns]
-        if len(numeric_vars) < 2:
+        numeric_vars = [col for col, typ in self.variable_types.items() if
+                        typ == 'continuous' and col in self.data.columns]
+
+        # ✅ 过滤有效的数值变量（至少2个非空值）
+        valid_vars = []
+        for col in numeric_vars:
+            non_null = self.data[col].dropna()
+            if len(non_null) >= 2:
+                valid_vars.append(col)
+
+        if len(valid_vars) < 2:
             return None
 
         buf = io.BytesIO()
-        plot_correlation(self.data, numeric_vars, buf)
+        plot_correlation(self.data, valid_vars, buf)
         buf.seek(0)
         img_base64 = base64.b64encode(buf.read()).decode('utf-8')
         buf.close()
@@ -357,11 +366,18 @@ class AutoStatisticalAnalyzer:
         """获取分类变量关联热力图base64"""
         categorical_vars = [col for col, typ in self.variable_types.items()
                             if typ in ['categorical', 'categorical_numeric', 'ordinal'] and col in self.data.columns]
-        if len(categorical_vars) < 2:
+        # ✅ 过滤无效的分类变量
+        valid_vars = []
+        for col in categorical_vars:
+            non_null = self.data[col].dropna()
+            if len(non_null) >= 2 and non_null.nunique() >= 2:
+                valid_vars.append(col)
+
+        if len(valid_vars) < 2:
             return None
 
         buf = io.BytesIO()
-        plot_categorical_correlation(self.data, categorical_vars, buf)
+        plot_categorical_correlation(self.data, valid_vars, buf)
         buf.seek(0)
         img_base64 = base64.b64encode(buf.read()).decode('utf-8')
         buf.close()
@@ -369,14 +385,30 @@ class AutoStatisticalAnalyzer:
 
     def get_numeric_categorical_eta_base64(self):
         """获取数值-分类变量关联热力图base64"""
-        numeric_vars = [col for col, typ in self.variable_types.items() if typ == 'continuous' and col in self.data.columns]
+        numeric_vars = [col for col, typ in self.variable_types.items() if
+                        typ == 'continuous' and col in self.data.columns]
         categorical_vars = [col for col, typ in self.variable_types.items()
                             if typ in ['categorical', 'categorical_numeric', 'ordinal'] and col in self.data.columns]
-        if not numeric_vars or not categorical_vars:
+
+        # ✅ 过滤有效的数值变量（至少2个非空值）
+        valid_numeric = []
+        for col in numeric_vars:
+            non_null = self.data[col].dropna()
+            if len(non_null) >= 2:
+                valid_numeric.append(col)
+
+        # ✅ 过滤有效的分类变量
+        valid_categorical = []
+        for col in categorical_vars:
+            non_null = self.data[col].dropna()
+            if len(non_null) >= 2 and non_null.nunique() >= 2:
+                valid_categorical.append(col)
+
+        if not valid_numeric or not valid_categorical:
             return None
 
         buf = io.BytesIO()
-        plot_numeric_categorical_eta(self.data, numeric_vars, categorical_vars, buf)
+        plot_numeric_categorical_eta(self.data, valid_numeric, valid_categorical, buf)
         buf.seek(0)
         img_base64 = base64.b64encode(buf.read()).decode('utf-8')
         buf.close()

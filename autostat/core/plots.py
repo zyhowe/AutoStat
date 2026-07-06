@@ -228,16 +228,21 @@ class PlotGenerator:
     def categorical_correlation(data: pd.DataFrame, categorical_vars: list, buf: Optional[Any] = None):
         """
         生成分类变量关联热力图 (Cramer's V)
-
-        参数:
-        - data: 数据框
-        - categorical_vars: 分类变量列表
-        - buf: 缓冲区，为None时显示，否则保存到缓冲区
         """
-        if len(categorical_vars) < 2:
+        # ✅ 过滤掉无效的分类变量
+        valid_vars = []
+        for col in categorical_vars:
+            if col not in data.columns:
+                continue
+            # 检查是否有有效数据（至少2个非空值，且至少有2个不同值）
+            non_null = data[col].dropna()
+            if len(non_null) >= 2 and non_null.nunique() >= 2:
+                valid_vars.append(col)
+
+        if len(valid_vars) < 2:
             fig, ax = plt.subplots(figsize=(10, 6))
-            ax.text(0.5, 0.5, '分类变量不足2个，无法生成关联热力图',
-                   ha='center', va='center', fontsize=14, transform=ax.transAxes)
+            ax.text(0.5, 0.5, '分类变量不足2个或有效数据不足，无法生成关联热力图',
+                    ha='center', va='center', fontsize=14, transform=ax.transAxes)
             ax.set_title('分类变量关联矩阵 (Cramer\'s V)')
             plt.tight_layout()
             if buf:
@@ -247,19 +252,41 @@ class PlotGenerator:
                 plt.show()
             return
 
-        n = len(categorical_vars)
-        cramer_matrix = pd.DataFrame(index=categorical_vars, columns=categorical_vars, dtype=float)
+        n = len(valid_vars)
+        cramer_matrix = pd.DataFrame(index=valid_vars, columns=valid_vars, dtype=float)
 
         for i in range(n):
             for j in range(n):
                 if i == j:
                     cramer_matrix.iloc[i, j] = 1.0
                 else:
-                    crosstab = pd.crosstab(data[categorical_vars[i]], data[categorical_vars[j]])
-                    chi2, p, dof, expected = chi2_contingency(crosstab)
-                    min_dim = min(crosstab.shape) - 1
-                    cramer_v = np.sqrt(chi2 / (len(data) * min_dim)) if min_dim > 0 else 0
-                    cramer_matrix.iloc[i, j] = cramer_v
+                    try:
+                        crosstab = pd.crosstab(data[valid_vars[i]], data[valid_vars[j]])
+                        # ✅ 检查交叉表是否有效
+                        if crosstab.size == 0 or crosstab.shape[0] <= 1 or crosstab.shape[1] <= 1:
+                            cramer_matrix.iloc[i, j] = 0
+                            continue
+                        chi2, p, dof, expected = chi2_contingency(crosstab)
+                        min_dim = min(crosstab.shape) - 1
+                        cramer_v = np.sqrt(chi2 / (len(data) * min_dim)) if min_dim > 0 else 0
+                        cramer_matrix.iloc[i, j] = cramer_v
+                    except Exception as e:
+                        print(f"⚠️ 计算 {valid_vars[i]} vs {valid_vars[j]} 失败: {e}")
+                        cramer_matrix.iloc[i, j] = 0
+
+        # 检查是否有有效数据
+        if cramer_matrix.isna().all().all() or (cramer_matrix.values == 0).all():
+            fig, ax = plt.subplots(figsize=(10, 6))
+            ax.text(0.5, 0.5, '无有效关联数据',
+                    ha='center', va='center', fontsize=14, transform=ax.transAxes)
+            ax.set_title('分类变量关联矩阵 (Cramer\'s V)')
+            plt.tight_layout()
+            if buf:
+                fig.savefig(buf, format='png', dpi=100, bbox_inches='tight')
+                plt.close(fig)
+            else:
+                plt.show()
+            return
 
         fig, ax = plt.subplots(figsize=(10, 8))
         sns.heatmap(cramer_matrix, annot=True, cmap='YlOrRd', center=0.5,

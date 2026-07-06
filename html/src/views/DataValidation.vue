@@ -1,7 +1,7 @@
 <template>
   <div class="data-validation">
     <h2>📋 数据核验</h2>
-    <p class="subtitle">检查数据一致性，查看勾稽规则、异常值和缺失值明细</p>
+    <p class="subtitle">检查数据一致性，查看勾稽规则、异常值、缺失值明细及清洗建议</p>
 
     <div v-if="loading" class="loading-container">
       <el-skeleton :rows="10" animated />
@@ -18,35 +18,35 @@
             <!-- 数值关系 -->
             <div v-if="arithmeticRules.length > 0" class="rule-section">
               <h4>📐 数值关系（{{ arithmeticRules.length }} 条）</h4>
-              <el-table :data="arithmeticRules" border size="small">
-                <el-table-column prop="rule" label="规则" />
-                <el-table-column prop="confidence" label="置信度" width="100">
+              <el-table :data="arithmeticRules" border size="small" max-height="420">
+                <el-table-column prop="rule" label="规则" min-width="200" />
+                <el-table-column prop="confidence" label="置信度" width="100" align="center">
                   <template #default="{ row }">
                     {{ (row.confidence * 100).toFixed(1) }}%
                   </template>
                 </el-table-column>
-                <el-table-column label="优先级" width="80">
+                <el-table-column label="优先级" width="80" align="center">
                   <template #default="{ row }">
                     <el-tag :type="row.priority === '高' ? 'danger' : row.priority === '中' ? 'warning' : 'info'" size="small">
                       {{ row.priority }}
                     </el-tag>
                   </template>
                 </el-table-column>
-                <el-table-column prop="violation_count" label="违反数" width="80" />
+                <el-table-column prop="violation_count" label="违反数" width="80" align="center" />
               </el-table>
             </div>
 
             <!-- 函数依赖 -->
             <div v-if="functionalRules.length > 0" class="rule-section">
               <h4>🏷️ 函数依赖（{{ functionalRules.length }} 条）</h4>
-              <el-table :data="functionalRules" border size="small">
-                <el-table-column prop="rule" label="规则" />
-                <el-table-column prop="confidence" label="置信度" width="100">
+              <el-table :data="functionalRules" border size="small" max-height="420">
+                <el-table-column prop="rule" label="规则" min-width="200" />
+                <el-table-column prop="confidence" label="置信度" width="100" align="center">
                   <template #default="{ row }">
                     {{ (row.confidence * 100).toFixed(1) }}%
                   </template>
                 </el-table-column>
-                <el-table-column label="优先级" width="80">
+                <el-table-column label="优先级" width="80" align="center">
                   <template #default="{ row }">
                     <el-tag :type="row.priority === '高' ? 'danger' : row.priority === '中' ? 'warning' : 'info'" size="small">
                       {{ row.priority }}
@@ -59,14 +59,14 @@
             <!-- 时序约束 -->
             <div v-if="temporalRules.length > 0" class="rule-section">
               <h4>📅 时序约束（{{ temporalRules.length }} 条）</h4>
-              <el-table :data="temporalRules" border size="small">
-                <el-table-column prop="rule" label="规则" />
-                <el-table-column prop="confidence" label="置信度" width="100">
+              <el-table :data="temporalRules" border size="small" max-height="420">
+                <el-table-column prop="rule" label="规则" min-width="200" />
+                <el-table-column prop="confidence" label="置信度" width="100" align="center">
                   <template #default="{ row }">
                     {{ (row.confidence * 100).toFixed(1) }}%
                   </template>
                 </el-table-column>
-                <el-table-column label="优先级" width="80">
+                <el-table-column label="优先级" width="80" align="center">
                   <template #default="{ row }">
                     <el-tag :type="row.priority === '高' ? 'danger' : row.priority === '中' ? 'warning' : 'info'" size="small">
                       {{ row.priority }}
@@ -83,16 +83,16 @@
           <div v-if="outlierList.length === 0" class="empty-tip">
             ✅ 未发现异常值
           </div>
-          <el-table v-else :data="outlierList" border size="small">
-            <el-table-column prop="field" label="字段" width="150" />
-            <el-table-column prop="count" label="异常数量" width="120" />
-            <el-table-column prop="percent" label="异常比例" width="120">
+          <el-table v-else :data="outlierList" border size="small" max-height="420">
+            <el-table-column prop="field" label="字段" width="150" fixed="left" />
+            <el-table-column prop="count" label="异常数量" width="120" align="center" />
+            <el-table-column prop="percent" label="异常比例" width="120" align="center">
               <template #default="{ row }">
                 {{ row.percent.toFixed(1) }}%
               </template>
             </el-table-column>
-            <el-table-column prop="lower_bound" label="下界" width="120" />
-            <el-table-column prop="upper_bound" label="上界" width="120" />
+            <el-table-column prop="lower_bound" label="下界" width="120" align="center" />
+            <el-table-column prop="upper_bound" label="上界" width="120" align="center" />
           </el-table>
         </el-tab-pane>
 
@@ -101,10 +101,10 @@
           <div v-if="missingList.length === 0" class="empty-tip">
             ✅ 无缺失值
           </div>
-          <el-table v-else :data="missingList" border size="small">
-            <el-table-column prop="column" label="字段" width="150" />
-            <el-table-column prop="count" label="缺失数量" width="120" />
-            <el-table-column prop="percent" label="缺失比例" width="120">
+          <el-table v-else :data="missingList" border size="small" max-height="420">
+            <el-table-column prop="column" label="字段" width="150" fixed="left" />
+            <el-table-column prop="count" label="缺失数量" width="120" align="center" />
+            <el-table-column prop="percent" label="缺失比例" width="120" align="center">
               <template #default="{ row }">
                 {{ row.percent.toFixed(1) }}%
               </template>
@@ -124,6 +124,25 @@
               show-icon
               :closable="false"
             />
+          </div>
+        </el-tab-pane>
+
+        <!-- 🆕 清洗建议 -->
+        <el-tab-pane label="🧹 清洗建议" name="cleaning">
+          <div v-if="cleaningSuggestions.length === 0" class="empty-tip success">
+            ✅ 数据质量良好，无需清洗
+          </div>
+          <div v-else class="cleaning-scroll">
+            <el-timeline>
+              <el-timeline-item
+                v-for="(suggestion, index) in cleaningSuggestions"
+                :key="index"
+                :type="index === 0 ? 'primary' : 'info'"
+                size="large"
+              >
+                {{ suggestion }}
+              </el-timeline-item>
+            </el-timeline>
           </div>
         </el-tab-pane>
       </el-tabs>
@@ -185,6 +204,11 @@ const duplicateRate = computed(() => {
   return reportData.value?.quality_report?.duplicates?.percent || 0
 })
 
+// 🆕 清洗建议
+const cleaningSuggestions = computed(() => {
+  return reportData.value?.cleaning_suggestions || []
+})
+
 async function loadData() {
   let sessionId = sessionStore.currentSessionId
   if (!sessionId) {
@@ -240,6 +264,9 @@ onMounted(() => {
   color: #67c23a;
   font-size: 16px;
 }
+.empty-tip.success {
+  color: #67c23a;
+}
 .rule-section {
   margin-bottom: 24px;
 }
@@ -247,5 +274,21 @@ onMounted(() => {
   margin-bottom: 12px;
   color: #555;
   font-size: 14px;
+}
+.cleaning-scroll {
+  max-height: 420px;
+  overflow-y: auto;
+  padding-right: 8px;
+}
+.cleaning-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+.cleaning-scroll::-webkit-scrollbar-thumb {
+  background: #c0c4cc;
+  border-radius: 3px;
+}
+.cleaning-scroll::-webkit-scrollbar-track {
+  background: #f0f2f6;
+  border-radius: 3px;
 }
 </style>

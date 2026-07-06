@@ -35,18 +35,20 @@ export const useAnalysisStore = defineStore('analysis', () => {
       })
 
       taskId.value = result.task_id
+
       await pollStatus()
       await loadResults(sessionId)
 
       const sessionStore = useSessionStore()
       if (sessionStore.currentSessionId !== sessionId) {
+        console.log('修复 session_id:', sessionId)
         sessionStore.currentSessionId = sessionId
         await sessionStore.loadSession(sessionId)
       }
 
-      // ✅ 跳转到质量看板
+      // 分析完成后跳转到报告总览
       if (router) {
-        router.push('/quality')
+        router.push('/report-summary')
       }
 
       return true
@@ -60,19 +62,28 @@ export const useAnalysisStore = defineStore('analysis', () => {
 
   async function pollStatus() {
     if (!taskId.value) return
+
     const maxAttempts = 120
     let attempts = 0
 
     while (attempts < maxAttempts) {
       const status = await analysisApi.getStatus(taskId.value)
+
       progress.value = status.progress || 0
       statusMessage.value = status.message || '处理中...'
 
-      if (status.status === 'completed') return true
-      if (status.status === 'failed') throw new Error(status.error || '分析失败')
+      if (status.status === 'completed') {
+        return true
+      }
+
+      if (status.status === 'failed') {
+        throw new Error(status.error || '分析失败')
+      }
+
       attempts++
       await new Promise(resolve => setTimeout(resolve, 1000))
     }
+
     throw new Error('分析超时')
   }
 
@@ -84,6 +95,7 @@ export const useAnalysisStore = defineStore('analysis', () => {
         reportApi.getSummary(sessionId),
         reportApi.getInsights(sessionId)
       ])
+
       qualityResult.value = quality
       reportData.value = report
       summary.value = summaryData.conclusions || []

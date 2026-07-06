@@ -362,7 +362,7 @@ class RecommendationAnalyzer:
                 "ml": "随机森林 / XGBoost / LightGBM / SVR",
                 "dl": "MLP / TabNet",
                 "llm": "TabLLM / GPT-4 with few-shot",
-                "reason": f"相关特征：{reason_str}",
+                "reason": f"{reason_str}",
                 "caution": "⚠️ 建议先进行特征选择；⚠️ 注意多重共线性"
             })
 

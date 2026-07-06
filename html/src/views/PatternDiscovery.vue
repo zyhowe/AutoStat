@@ -16,15 +16,15 @@
           </div>
           <div v-else>
             <p>发现 <strong>{{ highCorrelations.length }}</strong> 对强相关关系：</p>
-            <el-table :data="highCorrelations" border size="small">
-              <el-table-column prop="var1" label="变量1" />
-              <el-table-column prop="var2" label="变量2" />
-              <el-table-column prop="value" label="相关系数" width="120">
+            <el-table :data="highCorrelations" border size="small" max-height="400">
+              <el-table-column prop="var1" label="变量1" width="150" fixed="left" />
+              <el-table-column prop="var2" label="变量2" width="150" />
+              <el-table-column prop="value" label="相关系数" width="120" align="center">
                 <template #default="{ row }">
                   {{ row.value.toFixed(3) }}
                 </template>
               </el-table-column>
-              <el-table-column label="方向" width="80">
+              <el-table-column label="方向" width="80" align="center">
                 <template #default="{ row }">
                   <el-tag :type="row.value > 0 ? 'danger' : 'success'" size="small">
                     {{ row.value > 0 ? '正相关' : '负相关' }}
@@ -52,12 +52,12 @@
             未检测到时间序列数据
           </div>
           <div v-else>
-            <el-table :data="timeSeriesData" border size="small">
-              <el-table-column prop="key" label="变量/分组" />
-              <el-table-column prop="n_samples" label="样本量" width="100" />
-              <el-table-column prop="stationary" label="平稳性" width="120" />
-              <el-table-column prop="autocorrelation" label="自相关性" width="120" />
-              <el-table-column prop="seasonality" label="季节性" width="100" />
+            <el-table :data="timeSeriesData" border size="small" max-height="400">
+              <el-table-column prop="key" label="变量/分组" width="180" fixed="left" />
+              <el-table-column prop="n_samples" label="样本量" width="100" align="center" />
+              <el-table-column prop="stationary" label="平稳性" width="120" align="center" />
+              <el-table-column prop="autocorrelation" label="自相关性" width="120" align="center" />
+              <el-table-column prop="seasonality" label="季节性" width="100" align="center" />
             </el-table>
             <div class="plot-placeholder">
               <el-alert

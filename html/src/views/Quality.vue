@@ -32,11 +32,11 @@
         </el-card>
       </div>
 
-      <!-- 问题清单 -->
+      <!-- 问题清单 - 加 max-height -->
       <div class="issues-section">
         <h3>⚠️ 问题清单</h3>
-        <el-table :data="issues" border style="width: 100%">
-          <el-table-column prop="level" label="级别" width="100">
+        <el-table :data="issues" border style="width: 100%" max-height="400">
+          <el-table-column prop="level" label="级别" width="100" align="center">
             <template #default="{ row }">
               <el-tag :type="row.level === 'error' ? 'danger' : 'warning'" size="small">
                 {{ row.level === 'error' ? '严重' : '警告' }}
@@ -44,42 +44,18 @@
             </template>
           </el-table-column>
           <el-table-column prop="field" label="字段" width="150" />
-          <el-table-column prop="message" label="问题描述" />
-          <el-table-column prop="current" label="当前值" width="120" />
-          <el-table-column prop="threshold" label="阈值" width="120" />
+          <el-table-column prop="message" label="问题描述" min-width="200" />
+          <el-table-column prop="current" label="当前值" width="120" align="center" />
+          <el-table-column prop="threshold" label="阈值" width="120" align="center" />
         </el-table>
         <div v-if="issues.length === 0" class="empty-text">✅ 未发现问题</div>
       </div>
 
-      <!-- 清洗建议 -->
-      <div class="suggestions-section">
-        <h3>💡 清洗建议</h3>
-        <el-timeline>
-          <el-timeline-item
-            v-for="(suggestion, index) in suggestions"
-            :key="index"
-            :type="index === 0 ? 'primary' : 'info'"
-          >
-            {{ suggestion }}
-          </el-timeline-item>
-        </el-timeline>
-        <div v-if="suggestions.length === 0" class="empty-text">✅ 数据质量良好，无需清洗</div>
-      </div>
-
-      <!-- 操作按钮 - 修复底部被遮挡 -->
-      <div class="actions" style="margin-top: 30px; padding: 16px 0; border-top: 1px solid #e4e7ed;">
-        <el-button type="primary" size="large" @click="goToReport">
-          📄 查看分析报告
-        </el-button>
-        <el-button size="large" @click="goToUpload">
-          🔄 重新上传
-        </el-button>
-      </div>
     </div>
 
     <div v-else-if="!loading" class="empty-state">
       <el-empty description="暂无质量数据，请先完成分析">
-        <el-button type="primary" @click="goToUpload">去上传数据</el-button>
+        <el-button type="primary" @click="goTo('upload')">去上传数据</el-button>
       </el-empty>
     </div>
   </div>
@@ -98,7 +74,6 @@ const sessionStore = useSessionStore()
 const loading = ref(true)
 const qualityData = ref(null)
 const issues = ref([])
-const suggestions = ref([])
 
 onMounted(async () => {
   await loadQuality()
@@ -107,7 +82,6 @@ onMounted(async () => {
 async function loadQuality() {
   let sessionId = sessionStore.currentSessionId
 
-  // 如果 sessionStore 没有，从 localStorage 获取
   if (!sessionId) {
     sessionId = localStorage.getItem('lastSessionId')
     console.log('从 localStorage 获取 session_id:', sessionId)
@@ -118,7 +92,6 @@ async function loadQuality() {
     return
   }
 
-  // 确保 sessionStore 中有值
   if (!sessionStore.currentSessionId) {
     sessionStore.currentSessionId = sessionId
   }
@@ -141,25 +114,6 @@ async function loadQuality() {
       }
     })
     issues.value = allIssues
-
-    const allSuggestions = []
-    result.alerts?.forEach(alert => {
-      if (alert.level === 'error') {
-        if (alert.dimension === 'completeness') {
-          allSuggestions.push(`处理 ${alert.field || '未知字段'} 的缺失值`)
-        } else if (alert.dimension === 'accuracy') {
-          allSuggestions.push(`检查 ${alert.field || '未知字段'} 的异常值`)
-        } else if (alert.dimension === 'consistency') {
-          allSuggestions.push('检查数据一致性')
-        } else if (alert.dimension === 'uniqueness') {
-          allSuggestions.push('去重处理')
-        }
-      }
-    })
-    if (allSuggestions.length === 0) {
-      allSuggestions.push('数据质量良好，无需清洗')
-    }
-    suggestions.value = allSuggestions.slice(0, 5)
 
   } catch (err) {
     ElMessage.error('加载质量报告失败: ' + err.message)
@@ -185,12 +139,8 @@ function getProgressColor(score) {
   return '#f56c6c'
 }
 
-function goToReport() {
-  router.push('/report')
-}
-
-function goToUpload() {
-  router.push('/upload')
+function goTo(routeName) {
+  router.push(`/${routeName}`)
 }
 </script>
 
@@ -267,10 +217,10 @@ function goToUpload() {
   color: #666;
 }
 
-.issues-section, .suggestions-section {
+.issues-section {
   margin-bottom: 30px;
 }
-.issues-section h3, .suggestions-section h3 {
+.issues-section h3 {
   margin-bottom: 16px;
   color: #2c3e50;
 }
@@ -280,7 +230,6 @@ function goToUpload() {
   color: #67c23a;
 }
 
-/* 操作按钮 - 确保可见 */
 .actions {
   display: flex;
   gap: 16px;

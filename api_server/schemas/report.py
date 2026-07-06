@@ -13,6 +13,7 @@ class ReportResponse(BaseModel):
     time_series_diagnostics: Dict[str, Any]
     model_recommendations: List[Dict]
     cleaning_suggestions: List[str]
+    summary: List[Dict] = []  # ✅ 新增
 
 
 class SummaryResponse(BaseModel):

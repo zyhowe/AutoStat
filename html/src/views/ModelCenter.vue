@@ -1,7 +1,7 @@
 <template>
   <div class="model-center">
-    <h2>🤖 模型中心</h2>
-    <p class="subtitle">训练、预测、预警一体化管理</p>
+    <h2>🤖 智能预测</h2>
+    <p class="subtitle">训练、预测一体化管理</p>
 
     <el-tabs v-model="activeTab">
       <!-- ==================== 训练 ==================== -->
@@ -36,8 +36,8 @@
                   <div class="rec-task">{{ rec.task_type }}</div>
                   <div class="rec-model">{{ rec.ml }}</div>
                   <div class="rec-target" v-if="rec.target_column">🎯 {{ rec.target_column }}</div>
-                  <div class="rec-features" v-if="rec.feature_columns && rec.feature_columns.length > 0">
-                    📊 {{ rec.feature_columns.slice(0, 4).join('、') }}{{ rec.feature_columns.length > 4 ? `等${rec.feature_columns.length}个` : '' }}
+                  <div class="rec-features" v-if="rec.feature_columns && rec.feature_columns.length > 0">相关特征：
+                      📊 {{ rec.feature_columns.slice(0, 5).join('、') }}{{ rec.feature_columns.length > 5 ? `等${rec.feature_columns.length}个` : '' }}
                   </div>
                   <div class="rec-reason" v-if="rec.reason">💡 {{ rec.reason }}</div>
                   <el-button
@@ -277,55 +277,6 @@
           </div>
         </div>
       </el-tab-pane>
-
-      <!-- ==================== 预警 ==================== -->
-      <el-tab-pane label="🚨 预警" name="alert">
-        <div class="alert-section">
-          <h4>预警规则</h4>
-          <el-table :data="alertRules" border style="width: 100%">
-            <el-table-column prop="name" label="规则名称" />
-            <el-table-column prop="level" label="级别" width="100">
-              <template #default="{ row }">
-                <el-tag :type="getAlertLevelType(row.level)">{{ row.level }}</el-tag>
-              </template>
-            </el-table-column>
-            <el-table-column prop="enabled" label="状态" width="100">
-              <template #default="{ row }">
-                <el-switch v-model="row.enabled" />
-              </template>
-            </el-table-column>
-          </el-table>
-
-          <div class="alert-check">
-            <h4>检查预警</h4>
-            <el-form label-width="100px">
-              <el-form-item label="目标">
-                <el-input v-model="alertCheck.target" placeholder="指标名称" />
-              </el-form-item>
-              <el-form-item label="当前值">
-                <el-input-number v-model="alertCheck.value" :precision="2" />
-              </el-form-item>
-              <el-form-item label="阈值">
-                <el-input-number v-model="alertCheck.threshold" :precision="2" />
-              </el-form-item>
-            </el-form>
-            <el-button type="warning" @click="handleCheckAlert">🔍 检查预警</el-button>
-
-            <div v-if="alertResults.length > 0" class="alert-results">
-              <el-alert
-                v-for="(alert, index) in alertResults"
-                :key="index"
-                :title="alert.title"
-                :description="alert.message"
-                :type="alert.level === 'error' ? 'error' : 'warning'"
-                show-icon
-                :closable="false"
-                style="margin-top: 8px"
-              />
-            </div>
-          </div>
-        </div>
-      </el-tab-pane>
     </el-tabs>
   </div>
 </template>
@@ -335,11 +286,10 @@ import { ref, computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useSessionStore } from '../stores/session'
 import { modelsApi } from '../api/models'
-import { reportApi } from '../api/report'  // 确保已导入
+import { reportApi } from '../api/report'
 
-// 在 setup 顶部添加
-const reportData = ref(null)
 const sessionStore = useSessionStore()
+const reportData = ref(null)
 
 // ==================== 状态 ====================
 const activeTab = ref('train')
@@ -369,11 +319,6 @@ const predictForm = ref({
   modelKey: '',
   inputValues: {}
 })
-
-// 预警
-const alertRules = ref([])
-const alertCheck = ref({ target: '', value: 0, threshold: 0 })
-const alertResults = ref([])
 
 // 已保存模型
 const savedModels = ref([])
@@ -406,7 +351,6 @@ const canPredict = computed(() => {
 onMounted(async () => {
   await loadColumns()
   await loadModels()
-  await loadAlertRules()
   await loadRecommendations()
 })
 
@@ -431,35 +375,18 @@ async function loadModels() {
   }
 }
 
-async function loadAlertRules() {
-  try {
-    const result = await modelsApi.getAlertRules()
-    alertRules.value = result || []
-  } catch (err) {
-    console.error('加载预警规则失败:', err)
-  }
-}
-
-// 修改 loadRecommendations
 async function loadRecommendations() {
   if (!sessionStore.currentSessionId) {
     console.warn('没有 session_id，无法加载推荐')
     return
   }
   try {
-    // 🆕 直接从 API 获取报告数据
     const sessionId = sessionStore.currentSessionId
-    console.log('从 API 获取报告数据, sessionId:', sessionId)
-
     const result = await reportApi.get(sessionId)
-    console.log('报告数据:', result)
-
     if (result && result.model_recommendations) {
       recommendations.value = result.model_recommendations.slice(0, 10)
-      console.log('加载推荐模型:', recommendations.value.length)
     } else {
       recommendations.value = []
-      console.warn('报告中没有 model_recommendations')
     }
   } catch (err) {
     console.error('加载推荐失败:', err)
@@ -471,7 +398,6 @@ async function loadRecommendations() {
 function applyRecommendation(rec, index) {
   selectedRecIndex.value = index
 
-  // 映射任务类型
   const taskTypeMap = {
     '回归预测': 'regression',
     '分类预测': 'classification',
@@ -487,12 +413,10 @@ function applyRecommendation(rec, index) {
     }
   }
 
-  // 填充表单
   trainForm.value.taskType = taskType
   trainForm.value.targetColumn = rec.target_column || ''
   trainForm.value.features = rec.feature_columns || []
 
-  // 根据任务类型选择默认模型
   const modelMap = {
     'classification': 'random_forest',
     'regression': 'random_forest_regressor',
@@ -501,12 +425,10 @@ function applyRecommendation(rec, index) {
   }
   trainForm.value.modelKey = modelMap[taskType] || 'random_forest'
 
-  // 生成模型名称
   const targetName = rec.target_column || 'model'
   const modelName = rec.ml?.split('/')[0]?.trim() || 'model'
   trainForm.value.userModelName = `${taskType}_${targetName}_${modelName}`
 
-  // 触发更新
   onTaskTypeChange()
   onModelChange()
 
@@ -553,7 +475,6 @@ function onTaskTypeChange() {
 
 function onModelChange() {
   const modelKey = trainForm.value.modelKey
-  // 简化参数配置
   const paramConfigs = {
     random_forest: [
       { name: 'n_estimators', label: '树的数量', type: 'number', min: 10, max: 500, step: 10, default: 100, hint: '' },
@@ -669,7 +590,6 @@ function formatProgress(percentage) {
 
 // ==================== 预测 ====================
 function onModelSelect() {
-  console.log('选中的 model_key:', predictForm.value.modelKey)
   const model = savedModels.value.find(
     m => m.model_key === predictForm.value.modelKey
   )
@@ -678,7 +598,6 @@ function onModelSelect() {
   selectedModel.value = model
   predictForm.value.inputValues = {}
 
-  // 从 config 中取 features
   const config = model.config || {}
   const features = config.features || []
 
@@ -709,7 +628,7 @@ async function handlePredict() {
   try {
     const result = await modelsApi.predict({
       model_key: predictForm.value.modelKey,
-      session_id: sessionStore.currentSessionId,  // 🆕 传 session_id
+      session_id: sessionStore.currentSessionId,
       input_values: predictForm.value.inputValues
     })
     predictResult.value = result
@@ -719,28 +638,6 @@ async function handlePredict() {
   } finally {
     predicting.value = false
   }
-}
-
-// ==================== 预警 ====================
-async function handleCheckAlert() {
-  if (!alertCheck.value.target) {
-    ElMessage.warning('请输入目标名称')
-    return
-  }
-  try {
-    const result = await modelsApi.checkAlert(alertCheck.value)
-    alertResults.value = result || []
-    if (alertResults.value.length === 0) {
-      ElMessage.success('未触发预警')
-    }
-  } catch (err) {
-    ElMessage.error('检查失败: ' + err.message)
-  }
-}
-
-function getAlertLevelType(level) {
-  const map = { error: 'danger', warning: 'warning', info: 'info' }
-  return map[level] || 'info'
 }
 </script>
 
@@ -756,8 +653,7 @@ function getAlertLevelType(level) {
 }
 
 .train-section,
-.predict-section,
-.alert-section {
+.predict-section {
   padding: 20px 0;
 }
 
@@ -947,14 +843,7 @@ function getAlertLevelType(level) {
   font-size: 12px;
 }
 
-/* ===== 其他 ===== */
 .empty-state {
   padding: 40px 0;
-}
-.alert-check {
-  margin-top: 24px;
-}
-.alert-results {
-  margin-top: 16px;
 }
 </style>

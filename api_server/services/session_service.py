@@ -180,3 +180,57 @@ class SessionService:
             with open(html_path, "r", encoding="utf-8") as f:
                 return f.read()
         return None
+
+    # ==================== 推荐问题管理 ====================
+
+    def save_recommended_questions(self, session_id: str, questions: Dict[str, List[Dict]]):
+        """保存推荐问题到JSON文件"""
+        session_path = self._get_session_path(session_id)
+        questions_file = session_path / "recommended_questions.json"
+
+        data = {
+            "session_id": session_id,
+            "generated_at": datetime.now().isoformat(),
+            "questions": questions
+        }
+
+        with open(questions_file, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+
+        # 也存到内存中以便快速访问
+        if hasattr(self, '_recommended_questions_cache'):
+            self._recommended_questions_cache[session_id] = questions
+        else:
+            self._recommended_questions_cache = {session_id: questions}
+
+    def get_recommended_questions(self, session_id: str) -> Optional[Dict[str, List[Dict]]]:
+        """获取推荐问题"""
+        # 先查内存缓存
+        if hasattr(self, '_recommended_questions_cache'):
+            if session_id in self._recommended_questions_cache:
+                return self._recommended_questions_cache[session_id]
+
+        # 从文件读取
+        session_path = self._get_session_path(session_id)
+        questions_file = session_path / "recommended_questions.json"
+
+        if questions_file.exists():
+            with open(questions_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                questions = data.get('questions', {})
+
+                # 缓存到内存
+                if not hasattr(self, '_recommended_questions_cache'):
+                    self._recommended_questions_cache = {}
+                self._recommended_questions_cache[session_id] = questions
+
+                return questions
+
+        return None
+
+    def get_recommended_questions_by_scene(self, session_id: str, scene: str) -> List[Dict]:
+        """获取指定场景的推荐问题"""
+        questions = self.get_recommended_questions(session_id)
+        if questions:
+            return questions.get(scene, [])
+        return []

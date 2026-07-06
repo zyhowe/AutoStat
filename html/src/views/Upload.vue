@@ -585,7 +585,7 @@ async function handleStartAnalysis() {
     if (success) {
       ElMessage.success('分析完成！')
       router.push({
-        path: '/report',
+        path: '/report-summary',
         query: { session: sessionId }
       })
     } else {
@@ -638,7 +638,7 @@ async function handleStartDbAnalysis() {
     if (success) {
       ElMessage.success('分析完成！')
       router.push({
-        path: '/report',
+        path: '/report-summary',
         query: { session: sessionId }
       })
     } else {

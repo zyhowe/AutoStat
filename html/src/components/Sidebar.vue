@@ -12,9 +12,14 @@
         <span>上传数据</span>
       </el-menu-item>
 
+      <el-menu-item index="/report-summary">
+        <el-icon><Document /></el-icon>
+        <span>报告总览</span>
+      </el-menu-item>
+
       <el-menu-item index="/data-overview">
         <el-icon><DataAnalysis /></el-icon>
-        <span>数据总览</span>
+        <span>数据概览</span>
       </el-menu-item>
 
       <el-menu-item index="/quality">
@@ -30,11 +35,6 @@
       <el-menu-item index="/pattern-discovery">
         <el-icon><TrendCharts /></el-icon>
         <span>规律发现</span>
-      </el-menu-item>
-
-      <el-menu-item index="/conclusion-solution">
-        <el-icon><Document /></el-icon>
-        <span>结论与方案</span>
       </el-menu-item>
 
       <el-menu-item index="/models">
@@ -149,7 +149,6 @@ onMounted(async () => {
 })
 
 function handleMenuSelect(index) {
-  // 如果包含查询参数，手动跳转（处理报告子页面的情况）
   if (index.includes('?')) {
     router.push(index)
   }
@@ -172,7 +171,7 @@ async function loadProject(sessionId) {
   try {
     await sessionStore.loadSession(sessionId)
     ElMessage.success('已加载项目')
-    router.push('/quality')
+    router.push('/report-summary')
   } catch (err) {
     ElMessage.error('加载项目失败: ' + err.message)
   }
