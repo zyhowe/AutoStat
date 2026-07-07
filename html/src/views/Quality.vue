@@ -8,20 +8,39 @@
     </div>
 
     <div v-else-if="qualityData" class="quality-content">
-      <!-- 综合评分 -->
-      <div class="overall-score">
-        <el-card class="score-card" shadow="hover">
-          <div class="score-number">
-            <span class="score-value">{{ qualityData.overall_score }}</span>
-            <span class="score-grade">{{ qualityData.grade }}</span>
+      <!-- ===== 图表区域 ===== -->
+      <div class="charts-row">
+        <!-- 仪表盘 -->
+        <div class="chart-card gauge-card">
+          <div class="chart-header">
+            <span class="chart-title">🎯 综合评分</span>
           </div>
-          <div class="score-label">综合评分</div>
-        </el-card>
+          <v-chart v-if="hasGaugeData" :option="gaugeOption" class="chart-container" />
+          <div v-else class="chart-empty">暂无评分数据</div>
+        </div>
+
+        <!-- 雷达图 -->
+        <div class="chart-card">
+          <div class="chart-header">
+            <span class="chart-title">📊 四维质量得分</span>
+          </div>
+          <v-chart v-if="hasRadarData" :option="radarOption" class="chart-container" />
+          <div v-else class="chart-empty">暂无维度数据</div>
+        </div>
       </div>
 
-      <!-- 四维评分 -->
+      <!-- 维度对比柱状图 -->
+      <div class="chart-card full-width">
+        <div class="chart-header">
+          <span class="chart-title">📊 各维度与目标对比</span>
+        </div>
+        <v-chart v-if="hasRadarData" :option="compareBarOption" class="chart-container" style="height: 250px;" />
+        <div v-else class="chart-empty">暂无维度数据</div>
+      </div>
+
+      <!-- ===== 四维评分卡片 ===== -->
       <div class="dimensions">
-        <el-card v-for="(score, name) in qualityData.dimensions" :key="name" class="dimension-card" shadow="hover">
+        <el-card v-for="(score, name) in filteredDimensions" :key="name" class="dimension-card" shadow="hover">
           <div class="dimension-name">{{ getDimensionLabel(name) }}</div>
           <el-progress
             :percentage="Math.round(score)"
@@ -32,7 +51,7 @@
         </el-card>
       </div>
 
-      <!-- 问题清单 -->
+      <!-- ===== 问题清单 ===== -->
       <div class="issues-section">
         <h3>⚠️ 问题清单</h3>
         <el-table :data="issues" border style="width: 100%" max-height="400">
@@ -61,7 +80,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { useSessionStore } from '../stores/session'
@@ -83,7 +102,6 @@ async function loadQuality() {
 
   if (!sessionId) {
     sessionId = localStorage.getItem('lastSessionId')
-    console.log('从 localStorage 获取 session_id:', sessionId)
   }
 
   if (!sessionId) {
@@ -98,10 +116,11 @@ async function loadQuality() {
   loading.value = true
   try {
     const result = await reportApi.getQuality(sessionId)
+    console.log('📊 Quality 数据:', result)
     qualityData.value = result
 
     const allIssues = []
-    result.alerts?.forEach(alert => {
+    result?.alerts?.forEach(alert => {
       if (alert.level === 'error' || alert.level === 'warning') {
         allIssues.push({
           level: alert.level,
@@ -121,7 +140,6 @@ async function loadQuality() {
   }
 }
 
-// ✅ 移除及时性
 function getDimensionLabel(name) {
   const labels = {
     'completeness': '完整性',
@@ -137,6 +155,185 @@ function getProgressColor(score) {
   if (score >= 60) return '#e6a23c'
   return '#f56c6c'
 }
+
+// ==================== 过滤 timeliness ====================
+const filteredDimensions = computed(() => {
+  const dims = qualityData.value?.dimensions || {}
+  const filtered = {}
+  Object.keys(dims).forEach(k => {
+    if (k !== 'timeliness') {
+      filtered[k] = dims[k]
+    }
+  })
+  return filtered
+})
+
+// ==================== 仪表盘 ====================
+const hasGaugeData = computed(() => {
+  const score = qualityData.value?.overall_score
+  return score !== undefined && score !== null && !isNaN(Number(score))
+})
+
+const gaugeOption = computed(() => {
+  const rawScore = qualityData.value?.overall_score
+  const score = Number(rawScore) || 0
+  const color = score >= 80 ? '#67C23A' : score >= 60 ? '#E6A23C' : '#F56C6C'
+  return {
+    series: [{
+      type: 'gauge',
+      center: ['50%', '55%'],
+      radius: '85%',
+      startAngle: 210,
+      endAngle: -30,
+      min: 0,
+      max: 100,
+      splitNumber: 5,
+      progress: {
+        show: true,
+        width: 14,
+        roundCap: true,
+        itemStyle: { color: color }
+      },
+      axisLine: {
+        lineStyle: {
+          width: 14,
+          color: [
+            [0.3, '#F56C6C'],
+            [0.7, '#E6A23C'],
+            [1, '#67C23A']
+          ]
+        }
+      },
+      axisTick: { show: false },
+      splitLine: { show: false },
+      axisLabel: { show: false },
+      pointer: { show: false },
+      anchor: { show: false },
+      title: { show: false },
+      detail: {
+        valueAnimation: true,
+        // ✅ 核心修复：兼容对象和原始值两种传参方式
+        formatter: function(params) {
+          const val = typeof params === 'object' ? (params.value || 0) : (params || 0)
+          return Number(val).toFixed(1) + ' 分'
+        },
+        color: '#2C3E50',
+        fontSize: 24,
+        fontWeight: 'bold',
+        offsetCenter: [0, '30%']
+      },
+      data: [{ value: score }]
+    }]
+  }
+})
+
+// ==================== 雷达图 ====================
+const hasRadarData = computed(() => {
+  return Object.keys(filteredDimensions.value).length > 0
+})
+
+const radarOption = computed(() => {
+  const dims = filteredDimensions.value
+  const labels = {
+    completeness: '完整性',
+    accuracy: '准确性',
+    consistency: '一致性',
+    uniqueness: '唯一性'
+  }
+  const indicator = Object.keys(dims).map(key => ({
+    name: labels[key] || key,
+    max: 100
+  }))
+  const values = Object.values(dims).map(v => Math.round(v))
+  return {
+    tooltip: { trigger: 'item' },
+    legend: { show: false },
+    radar: {
+      indicator: indicator,
+      shape: 'circle',
+      center: ['50%', '50%'],
+      radius: '70%',
+      axisName: { color: '#333', fontSize: 12 },
+      splitArea: { areaStyle: { color: ['rgba(64,158,255,0.02)'] } }
+    },
+    series: [{
+      type: 'radar',
+      data: [{ value: values, name: '质量得分' }],
+      areaStyle: { color: 'rgba(64,158,255,0.3)' },
+      lineStyle: { color: '#409EFF', width: 2 },
+      itemStyle: { color: '#409EFF' }
+    }]
+  }
+})
+
+// ==================== 维度对比柱状图 ====================
+const compareBarOption = computed(() => {
+  const dims = filteredDimensions.value
+  const labels = {
+    completeness: '完整性',
+    accuracy: '准确性',
+    consistency: '一致性',
+    uniqueness: '唯一性'
+  }
+  const target = 80
+  const keys = Object.keys(dims)
+  const names = keys.map(k => labels[k] || k)
+  const scores = keys.map(k => Math.round(dims[k]))
+  const colors = scores.map(s => s >= target ? '#67C23A' : '#F56C6C')
+
+  return {
+    tooltip: {
+      trigger: 'axis',
+      formatter: function(params) {
+        let html = `<strong>${params[0].name}</strong><br/>`
+        params.forEach(p => {
+          if (p.seriesName === '目标') {
+            html += `${p.marker} ${p.seriesName}：${p.value} 分<br/>`
+          } else {
+            const diff = p.value - target
+            const status = diff >= 0 ? '✅ 达标' : '❌ 不达标'
+            html += `${p.marker} ${p.seriesName}：${p.value} 分（${status}）`
+          }
+        })
+        return html
+      }
+    },
+    legend: { data: ['当前得分', '目标线'], top: 0, right: 10 },
+    grid: { left: '10%', right: '8%', top: '20%', bottom: '15%' },
+    xAxis: {
+      type: 'category',
+      data: names,
+      axisLabel: { fontSize: 12 }
+    },
+    yAxis: {
+      type: 'value',
+      max: 100,
+      name: '得分',
+      nameLocation: 'middle',
+      nameGap: 35
+    },
+    series: [
+      {
+        name: '当前得分',
+        type: 'bar',
+        data: scores.map((s, i) => ({
+          value: s,
+          itemStyle: { color: colors[i] }
+        })),
+        barWidth: '40%',
+        label: { show: true, position: 'top', formatter: '{c}', fontSize: 11 }
+      },
+      {
+        name: '目标线',
+        type: 'line',
+        data: names.map(() => target),
+        symbol: 'none',
+        lineStyle: { color: '#E6A23C', type: 'dashed', width: 2 },
+        label: { show: true, formatter: `目标${target}分`, fontSize: 10, color: '#E6A23C' }
+      }
+    ]
+  }
+})
 
 function goTo(routeName) {
   router.push(`/${routeName}`)
@@ -161,39 +358,64 @@ function goTo(routeName) {
   padding: 60px 0;
 }
 
-.overall-score {
+/* ===== 图表区域 ===== */
+.charts-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+  margin-bottom: 20px;
+}
+.chart-card {
+  background: #fff;
+  border-radius: 12px;
+  border: 1px solid #e4e7ed;
+  padding: 16px 16px 4px 16px;
+  transition: box-shadow 0.2s;
+}
+.chart-card:hover {
+  box-shadow: 0 2px 12px rgba(0,0,0,0.06);
+}
+.chart-card.full-width {
+  grid-column: 1 / -1;
+  margin-bottom: 16px;
+}
+.chart-header {
   display: flex;
-  justify-content: center;
-  margin-bottom: 30px;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
 }
-.score-card {
-  text-align: center;
-  padding: 20px 40px;
-  min-width: 200px;
-}
-.score-number {
-  display: flex;
-  align-items: baseline;
-  justify-content: center;
-  gap: 12px;
-}
-.score-value {
-  font-size: 48px;
-  font-weight: bold;
+.chart-title {
+  font-size: 14px;
+  font-weight: 600;
   color: #2c3e50;
 }
-.score-grade {
-  font-size: 24px;
-  font-weight: 500;
-  padding: 4px 12px;
-  border-radius: 4px;
-  background: #f0f2f6;
+.chart-container {
+  width: 100%;
+  height: 200px;
 }
-.score-label {
-  color: #909399;
-  margin-top: 8px;
+.chart-empty {
+  height: 160px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #bbb;
+  font-size: 13px;
+}
+.gauge-card .chart-container {
+  height: 180px;
 }
 
+@media (max-width: 768px) {
+  .charts-row {
+    grid-template-columns: 1fr;
+  }
+  .chart-container {
+    height: 180px;
+  }
+}
+
+/* ===== 维度评分卡片 ===== */
 .dimensions {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
@@ -216,6 +438,7 @@ function goTo(routeName) {
   color: #666;
 }
 
+/* ===== 问题清单 ===== */
 .issues-section {
   margin-bottom: 30px;
 }

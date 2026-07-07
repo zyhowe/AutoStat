@@ -9,11 +9,58 @@ import router from './router'
 import './styles/main.css'
 import { useAnalysisStore } from './stores/analysis'
 
+// ==================== ECharts 全局注册 ====================
+import VChart from 'vue-echarts'
+import { use } from 'echarts/core'
+import { CanvasRenderer } from 'echarts/renderers'
+import {
+  BarChart,
+  PieChart,
+  RadarChart,
+  GaugeChart,
+  ScatterChart,
+  HeatmapChart,
+  BoxplotChart,
+  LineChart
+} from 'echarts/charts'
+import {
+  TitleComponent,
+  TooltipComponent,
+  LegendComponent,
+  GridComponent,
+  VisualMapComponent,
+  ToolboxComponent,
+  DataZoomComponent
+} from 'echarts/components'
+
+use([
+  CanvasRenderer,
+  BarChart,
+  PieChart,
+  RadarChart,
+  GaugeChart,
+  ScatterChart,
+  HeatmapChart,
+  BoxplotChart,
+  LineChart,
+  TitleComponent,
+  TooltipComponent,
+  LegendComponent,
+  GridComponent,
+  VisualMapComponent,
+  ToolboxComponent,
+  DataZoomComponent
+])
+
 const app = createApp(App)
 
+// 注册 Element Plus 图标
 for (const [key, component] of Object.entries(ElementPlusIconsVue)) {
   app.component(key, component)
 }
+
+// 注册 ECharts 组件
+app.component('v-chart', VChart)
 
 app.use(createPinia())
 app.use(router)

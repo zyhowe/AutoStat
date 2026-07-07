@@ -791,6 +791,8 @@ class AutoStatisticalAnalyzer:
                     'mode_pct': summary.get('mode_pct', 0),
                     'top_categories': top_categories
                 }
+
+
             elif var_type == 'datetime':
                 variable_summaries[col] = {
                     'type': var_type,

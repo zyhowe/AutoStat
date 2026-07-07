@@ -28,7 +28,7 @@
           <div class="stat-label">总列数</div>
         </div>
         <div class="stat-card" :class="qualityGradeClass">
-          <div class="stat-value">{{ qualityScore || '-' }}</div>
+          <div class="stat-value">{{ qualityScore }}</div>
           <div class="stat-label">质量评分</div>
         </div>
         <div class="stat-card" :class="outlierClass">
@@ -45,6 +45,36 @@
         </div>
       </div>
 
+      <!-- ==================== 图表区域 ==================== -->
+      <div class="charts-row">
+        <!-- 雷达图 -->
+        <div class="chart-card">
+          <div class="chart-header">
+            <span class="chart-title">📊 质量维度得分</span>
+          </div>
+          <v-chart v-if="hasRadarData" :option="radarOption" class="chart-container" />
+          <div v-else class="chart-empty">暂无质量维度数据</div>
+        </div>
+
+        <!-- 仪表盘 -->
+        <div class="chart-card gauge-card">
+          <div class="chart-header">
+            <span class="chart-title">🎯 综合评分</span>
+          </div>
+          <v-chart v-if="hasGaugeData" :option="gaugeOption" class="chart-container" />
+          <div v-else class="chart-empty">暂无评分数据</div>
+        </div>
+      </div>
+
+      <!-- 缺失率柱状图 -->
+      <div class="chart-card full-width">
+        <div class="chart-header">
+          <span class="chart-title">📋 缺失率最高的字段</span>
+        </div>
+        <v-chart v-if="hasMissingChartData" :option="missingBarOption" class="chart-container" style="height: 280px;" />
+        <div v-else class="chart-empty">暂无缺失数据</div>
+      </div>
+
       <!-- ==================== 核心发现 ==================== -->
       <div class="section">
         <h3>📊 核心发现</h3>
@@ -53,7 +83,7 @@
         </div>
 
         <div v-else class="discovery-groups">
-          <!-- 1. 数据概况 -->
+          <!-- 数据概况 -->
           <div class="discovery-group field-group">
             <div class="group-header">
               <span class="group-icon">📋</span>
@@ -83,7 +113,7 @@
             </div>
           </div>
 
-          <!-- 2. 质量诊断 -->
+          <!-- 质量发现 -->
           <div v-if="qualityDiscoveries.length > 0" class="discovery-group quality-group">
             <div class="group-header">
               <span class="group-icon">🔍</span>
@@ -96,7 +126,7 @@
             </ul>
           </div>
 
-          <!-- 3. 关联规律 -->
+          <!-- 规律发现 -->
           <div v-if="patternDiscoveries.length > 0" class="discovery-group pattern-group">
             <div class="group-header">
               <span class="group-icon">📈</span>
@@ -109,7 +139,7 @@
             </ul>
           </div>
 
-          <!-- 4. 建模建议 -->
+          <!-- 建模建议 -->
           <div v-if="predictionDiscoveries.length > 0" class="discovery-group prediction-group">
             <div class="group-header">
               <span class="group-icon">🤖</span>
@@ -149,12 +179,13 @@ const qualityData = ref(null)
 
 // ==================== 关键指标卡片 ====================
 const qualityScore = computed(() => {
-  return qualityData.value?.overall_score || '-'
+  const score = qualityData.value?.overall_score
+  return score !== undefined && score !== null ? score : '-'
 })
 
 const qualityGradeClass = computed(() => {
   const score = qualityData.value?.overall_score
-  if (!score) return ''
+  if (score === undefined || score === null) return ''
   if (score >= 80) return 'grade-good'
   if (score >= 60) return 'grade-warn'
   return 'grade-bad'
@@ -198,7 +229,7 @@ const ruleClass = computed(() => {
   return 'status-bad'
 })
 
-// ==================== 核心发现 - 数据概况 ====================
+// ==================== 数据概况统计 ====================
 const variableTypes = computed(() => {
   return reportData.value?.variable_types || {}
 })
@@ -217,7 +248,166 @@ const datetimeCount = computed(() => {
   return Object.values(variableTypes.value).filter(v => v.type === 'datetime').length
 })
 
-// ==================== 核心发现 - 质量诊断 ====================
+// ==================== 雷达图数据（过滤 timeliness） ====================
+const hasRadarData = computed(() => {
+  const dims = qualityData.value?.dimensions || {}
+  const filteredKeys = Object.keys(dims).filter(k => k !== 'timeliness')
+  return filteredKeys.length > 0
+})
+
+const radarOption = computed(() => {
+  const dims = qualityData.value?.dimensions || {}
+  const filteredDims = {}
+  Object.keys(dims).forEach(k => {
+    if (k !== 'timeliness') {
+      filteredDims[k] = dims[k]
+    }
+  })
+  const labels = {
+    completeness: '完整性',
+    accuracy: '准确性',
+    consistency: '一致性',
+    uniqueness: '唯一性'
+  }
+  const indicator = Object.keys(filteredDims).map(key => ({
+    name: labels[key] || key,
+    max: 100
+  }))
+  const values = Object.values(filteredDims).map(v => Math.round(v))
+  return {
+    tooltip: { trigger: 'item' },
+    legend: { show: false },
+    radar: {
+      indicator: indicator,
+      shape: 'circle',
+      center: ['50%', '50%'],
+      radius: '70%',
+      axisName: { color: '#333', fontSize: 12 },
+      splitArea: { areaStyle: { color: ['rgba(64,158,255,0.02)'] } }
+    },
+    series: [{
+      type: 'radar',
+      data: [{ value: values, name: '质量得分' }],
+      areaStyle: { color: 'rgba(64,158,255,0.3)' },
+      lineStyle: { color: '#409EFF', width: 2 },
+      itemStyle: { color: '#409EFF' }
+    }]
+  }
+})
+
+// ==================== 仪表盘数据 ====================
+const hasGaugeData = computed(() => {
+  const score = qualityData.value?.overall_score
+  return score !== undefined && score !== null && !isNaN(Number(score))
+})
+
+const gaugeOption = computed(() => {
+  const rawScore = qualityData.value?.overall_score
+  const score = Number(rawScore) || 0
+  const color = score >= 80 ? '#67C23A' : score >= 60 ? '#E6A23C' : '#F56C6C'
+  return {
+    series: [{
+      type: 'gauge',
+      center: ['50%', '55%'],
+      radius: '85%',
+      startAngle: 210,
+      endAngle: -30,
+      min: 0,
+      max: 100,
+      splitNumber: 5,
+      progress: {
+        show: true,
+        width: 14,
+        roundCap: true,
+        itemStyle: { color: color }
+      },
+      axisLine: {
+        lineStyle: {
+          width: 14,
+          color: [
+            [0.3, '#F56C6C'],
+            [0.7, '#E6A23C'],
+            [1, '#67C23A']
+          ]
+        }
+      },
+      axisTick: { show: false },
+      splitLine: { show: false },
+      axisLabel: { show: false },
+      pointer: { show: false },
+      anchor: { show: false },
+      title: { show: false },
+      detail: {
+        valueAnimation: true,
+        // ✅ 核心修复：兼容对象和原始值两种传参方式
+        formatter: function(params) {
+          const val = typeof params === 'object' ? (params.value || 0) : (params || 0)
+          return Number(val).toFixed(1) + ' 分'
+        },
+        color: '#2C3E50',
+        fontSize: 24,
+        fontWeight: 'bold',
+        offsetCenter: [0, '30%']
+      },
+      data: [{ value: score }]
+    }]
+  }
+})
+
+// ==================== 缺失率柱状图 ====================
+const hasMissingChartData = computed(() => {
+  const missing = reportData.value?.quality_report?.missing || []
+  return missing.length > 0
+})
+
+const missingBarOption = computed(() => {
+  const missing = reportData.value?.quality_report?.missing || []
+  const sorted = [...missing].sort((a, b) => (b.percent || 0) - (a.percent || 0))
+  const top = sorted.slice(0, 10)
+  return {
+    tooltip: {
+      trigger: 'axis',
+      formatter: function(params) {
+        const p = params[0]
+        return `<strong>${p.name}</strong><br/>缺失率：${p.value}%`
+      }
+    },
+    grid: { left: '10%', right: '8%', top: '10%', bottom: '20%' },
+    xAxis: {
+      type: 'category',
+      data: top.map(m => m.column || '未知'),
+      axisLabel: { rotate: 30, fontSize: 10, interval: 0 },
+      axisLine: { show: false },
+      axisTick: { show: false }
+    },
+    yAxis: {
+      type: 'value',
+      max: 100,
+      name: '缺失率 (%)',
+      nameLocation: 'middle',
+      nameGap: 35,
+      nameTextStyle: { fontSize: 11, color: '#909399' }
+    },
+    series: [{
+      type: 'bar',
+      data: top.map(m => ({
+        value: Math.round(m.percent || 0),
+        itemStyle: {
+          color: (m.percent || 0) > 50 ? '#F56C6C' : (m.percent || 0) > 20 ? '#E6A23C' : '#67C23A'
+        }
+      })),
+      barWidth: '50%',
+      label: {
+        show: true,
+        position: 'top',
+        formatter: '{c}%',
+        fontSize: 10
+      }
+    }]
+  }
+})
+
+// ==================== 核心发现 ====================
 const qualityDiscoveries = computed(() => {
   const result = []
   const quality = reportData.value?.quality_report || {}
@@ -225,14 +415,12 @@ const qualityDiscoveries = computed(() => {
   const outliers = quality.outliers || {}
   const duplicates = quality.duplicates || {}
 
-  // 1. 质量评分
-  if (qualityData.value?.overall_score) {
+  if (qualityData.value?.overall_score !== undefined && qualityData.value?.overall_score !== null) {
     const score = qualityData.value.overall_score
     const grade = score >= 80 ? '良好' : score >= 70 ? '一般' : '需关注'
     result.push(`综合质量评分 ${score} 分（${grade}）`)
   }
 
-  // 2. 缺失值
   const highMissing = missing.filter(m => parseFloat(m.percent) > 20)
   if (highMissing.length > 0) {
     const fields = highMissing.slice(0, 3).map(m => m.column).filter(Boolean)
@@ -246,7 +434,6 @@ const qualityDiscoveries = computed(() => {
     result.push(text)
   }
 
-  // 3. 异常值
   const outlierFields = Object.keys(outliers)
   if (outlierFields.length > 0) {
     const fields = outlierFields.slice(0, 3)
@@ -260,13 +447,11 @@ const qualityDiscoveries = computed(() => {
     result.push(text)
   }
 
-  // 4. 重复记录
   const dupCount = parseInt(duplicates.count) || 0
   if (dupCount > 0) {
     result.push(`发现${dupCount}条重复记录，建议去重处理`)
   }
 
-  // 5. 勾稽规则
   const rules = reportData.value?.quality_report?.audit_rules || {}
   const arithmeticCount = rules.arithmetic_rules?.length || 0
   const temporalCount = rules.temporal_rules?.length || 0
@@ -283,14 +468,12 @@ const qualityDiscoveries = computed(() => {
   return result
 })
 
-// ==================== 核心发现 - 关联规律 ====================
 const patternDiscoveries = computed(() => {
   const result = []
   const correlations = reportData.value?.correlations || {}
   const tsDiag = reportData.value?.time_series_diagnostics || {}
   const distribution = reportData.value?.distribution_insights || {}
 
-  // 1. 强相关
   const highCorrs = correlations.high_correlations || []
   if (highCorrs.length > 0) {
     const pairs = highCorrs.slice(0, 3).map(c => `${c.var1} ↔ ${c.var2} (r=${c.value})`)
@@ -304,27 +487,23 @@ const patternDiscoveries = computed(() => {
     result.push(text)
   }
 
-  // 2. 时间序列
-    // ✅ 只要 has_autocorrelation 字段存在且非空就认为有自相关
   const tsVars = Object.keys(tsDiag).filter(k => {
-      const val = tsDiag[k]?.has_autocorrelation
-      if (val === undefined || val === null || val === '') return false
-      if (typeof val === 'string') return true  // 非空字符串即视为True
-      return val === true
-    })
+    const val = tsDiag[k]?.has_autocorrelation
+    if (typeof val === 'string') return val.toLowerCase() === 'true'
+    return val === true
+  })
   if (tsVars.length > 0) {
-      const fields = tsVars.slice(0, 3)
-      let text = `检测到${tsVars.length}个序列存在自相关性`
-      if (fields.length > 0) {
-        text += `（${fields.join('、')}`
-        if (tsVars.length > 3) text += `等${tsVars.length}个`
-        text += '）'
-      }
-      text += '，适合进行时间序列预测'
-      result.push(text)
+    const fields = tsVars.slice(0, 3)
+    let text = `检测到${tsVars.length}个序列存在自相关性`
+    if (fields.length > 0) {
+      text += `（${fields.join('、')}`
+      if (tsVars.length > 3) text += `等${tsVars.length}个`
+      text += '）'
+    }
+    text += '，适合进行时间序列预测'
+    result.push(text)
   }
 
-  // 3. 偏态变量
   const skewed = distribution.skewed_variables || []
   if (skewed.length > 0) {
     const names = skewed.slice(0, 3).map(s => s.name).filter(Boolean)
@@ -338,7 +517,6 @@ const patternDiscoveries = computed(() => {
     result.push(text)
   }
 
-  // 4. 不平衡分类变量
   const imbalanced = distribution.imbalanced_categoricals || []
   if (imbalanced.length > 0) {
     const names = imbalanced.slice(0, 3).map(s => s.name).filter(Boolean)
@@ -355,14 +533,12 @@ const patternDiscoveries = computed(() => {
   return result
 })
 
-// ==================== 核心发现 - 建模建议 ====================
 const predictionDiscoveries = computed(() => {
   const result = []
   const variableTypesData = reportData.value?.variable_types || {}
   const dataShape = reportData.value?.data_shape || {}
   const modelRecs = reportData.value?.model_recommendations || []
 
-  // 1. 可预测字段
   const targets = []
   for (const rec of modelRecs) {
     const target = rec.target_column
@@ -382,14 +558,12 @@ const predictionDiscoveries = computed(() => {
     result.push(text)
   }
 
-  // 2. 聚类机会
   const numericVars = Object.keys(variableTypesData).filter(k => variableTypesData[k]?.type === 'continuous')
   const rows = dataShape.rows || 0
   if (numericVars.length >= 3 && rows >= 100) {
     result.push(`${numericVars.length}个数值指标，${rows}个样本，可识别分群`)
   }
 
-  // 3. 关联规则
   const categoricalVars = Object.keys(variableTypesData).filter(k =>
     ['categorical', 'categorical_numeric', 'ordinal'].includes(variableTypesData[k]?.type)
   )
@@ -400,7 +574,6 @@ const predictionDiscoveries = computed(() => {
   return result
 })
 
-// ==================== 是否有任何发现 ====================
 const hasDiscoveries = computed(() => {
   return qualityDiscoveries.value.length > 0 ||
          patternDiscoveries.value.length > 0 ||
@@ -420,6 +593,10 @@ async function loadData() {
     return
   }
 
+  if (!sessionStore.currentSessionId) {
+    sessionStore.currentSessionId = sessionId
+  }
+
   loading.value = true
   try {
     const [reportResult, qualityResult] = await Promise.all([
@@ -427,10 +604,11 @@ async function loadData() {
       reportApi.getQuality(sessionId)
     ])
 
+    console.log('📊 ReportSummary - reportResult:', reportResult)
+    console.log('📊 ReportSummary - qualityResult:', qualityResult)
+
     reportData.value = reportResult
     qualityData.value = qualityResult
-
-    console.log('✅ 分析总览数据加载完成')
 
   } catch (err) {
     console.error('加载报告失败:', err)
@@ -477,7 +655,7 @@ onMounted(() => {
 .report-summary {
   max-width: 1200px;
   margin: 0 auto;
-  padding: 20px 20px 80px 20px;  /* ✅ 底部留白 80px */
+  padding: 20px 20px 80px 20px;
 }
 .loading-container {
   padding: 40px 0;
@@ -486,7 +664,6 @@ onMounted(() => {
   padding: 60px 0;
 }
 
-/* ===== 头部 ===== */
 .report-header {
   display: flex;
   justify-content: space-between;
@@ -497,7 +674,7 @@ onMounted(() => {
 }
 .report-header h2 {
   margin: 0;
-  font-size: 20px;  /* ✅ 调小字号 */
+  font-size: 20px;
   color: #2c3e50;
 }
 .header-actions {
@@ -505,7 +682,6 @@ onMounted(() => {
   gap: 8px;
 }
 
-/* ===== 关键指标卡片 ===== */
 .stats-row {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
@@ -541,6 +717,63 @@ onMounted(() => {
 .status-warn .stat-value { color: #e6a23c; }
 .status-bad .stat-value { color: #f56c6c; }
 
+/* ===== 图表区域 ===== */
+.charts-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+  margin-bottom: 20px;
+}
+.chart-card {
+  background: #fff;
+  border-radius: 12px;
+  border: 1px solid #e4e7ed;
+  padding: 16px 16px 4px 16px;
+  transition: box-shadow 0.2s;
+}
+.chart-card:hover {
+  box-shadow: 0 2px 12px rgba(0,0,0,0.06);
+}
+.chart-card.full-width {
+  grid-column: 1 / -1;
+  margin-bottom: 16px;
+}
+.chart-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+.chart-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #2c3e50;
+}
+.chart-container {
+  width: 100%;
+  height: 220px;
+}
+.chart-empty {
+  height: 180px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #bbb;
+  font-size: 13px;
+}
+.gauge-card .chart-container {
+  height: 180px;
+}
+
+@media (max-width: 768px) {
+  .charts-row {
+    grid-template-columns: 1fr;
+  }
+  .chart-container {
+    height: 200px;
+  }
+}
+
 /* ===== 核心发现 ===== */
 .section {
   margin-top: 8px;
@@ -548,7 +781,7 @@ onMounted(() => {
 .section h3 {
   margin-bottom: 16px;
   color: #2c3e50;
-  font-size: 18px;  /* ✅ 比标题稍大，层级清晰 */
+  font-size: 18px;
 }
 .empty-tip {
   padding: 20px;
@@ -570,7 +803,6 @@ onMounted(() => {
   padding: 16px 20px;
   border-left: 4px solid #909399;
 }
-
 .field-group { border-left-color: #409eff; }
 .quality-group { border-left-color: #e6a23c; }
 .pattern-group { border-left-color: #67c23a; }
