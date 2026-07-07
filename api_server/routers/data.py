@@ -1,6 +1,6 @@
 """数据管理路由（完整版）"""
 from typing import Optional, List, Dict, Any
-from fastapi import APIRouter, HTTPException, UploadFile, File, Depends
+from fastapi import APIRouter, HTTPException, UploadFile, File, Depends, Request
 from pydantic import BaseModel
 
 from api_server.dependencies import Dependencies
@@ -8,6 +8,7 @@ from api_server.services.data_service import DataService
 from api_server.services.session_service import SessionService
 from api_server.services.database_service import DatabaseService
 from api_server.schemas.data import DataPreviewResponse, DataUploadResponse
+from api_server.routers.session import get_client_ip
 
 router = APIRouter()
 
@@ -27,6 +28,7 @@ class DatabaseLoadResponse(BaseModel):
 
 @router.post("/data/upload", response_model=DataUploadResponse)
 async def upload_file(
+    request: Request,
     file: UploadFile = File(...),
     session_id: Optional[str] = None,
     data_service: DataService = Depends(Dependencies.get_data_service),
@@ -59,18 +61,19 @@ async def upload_file(
 
 @router.post("/data/database/load", response_model=DatabaseLoadResponse)
 async def load_database(
-        request: DatabaseLoadRequest,
-        database_service: DatabaseService = Depends(Dependencies.get_database_service),
-        session_service: SessionService = Depends(Dependencies.get_session_service)
+    request: Request,
+    request_body: DatabaseLoadRequest,
+    database_service: DatabaseService = Depends(Dependencies.get_database_service),
+    session_service: SessionService = Depends(Dependencies.get_session_service)
 ):
     """从数据库加载表"""
     try:
         tables = database_service.load_tables(
-            config=request.config,
-            table_names=request.table_names,
-            limit=request.limit,
-            max_text_length=request.max_text_length,
-            relationships=request.relationships
+            config=request_body.config,
+            table_names=request_body.table_names,
+            limit=request_body.limit,
+            max_text_length=request_body.max_text_length,
+            relationships=request_body.relationships
         )
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"数据库加载失败: {str(e)}")
@@ -78,8 +81,11 @@ async def load_database(
     if not tables:
         raise HTTPException(status_code=400, detail="没有成功加载任何表")
 
-    source_name = f"{request.table_names[0]}_db"
-    session_id = session_service.create_session(source_name, "database", {"tables": request.table_names})
+    source_name = f"{request_body.table_names[0]}_db"
+    client_ip = get_client_ip(request)
+    # ✅ 设置客户端IP到service实例
+    session_service.set_client_ip(client_ip)
+    session_id = session_service.create_session(source_name, "database", {"tables": request_body.table_names})
 
     result = {}
     first_table = None
@@ -95,11 +101,9 @@ async def load_database(
             }
             session_service.save_variable_types(session_id, variable_types)
 
-            # 🆕 保存第一个表为临时CSV
             if first_table is None:
                 first_table = (name, df)
 
-    # 🆕 保存临时CSV文件
     if first_table:
         import tempfile
         name, df = first_table
@@ -113,8 +117,10 @@ async def load_database(
         session_id=session_id
     )
 
+
 @router.post("/data/demo")
 async def load_demo_data(
+    request: Request,
     dataset: str = "sales",
     data_service: DataService = Depends(Dependencies.get_data_service),
     session_service: SessionService = Depends(Dependencies.get_session_service)
@@ -177,6 +183,9 @@ async def load_demo_data(
 
     # 创建会话
     source_name = f"{dataset}_demo"
+    client_ip = get_client_ip(request)
+    # ✅ 设置客户端IP到service实例
+    session_service.set_client_ip(client_ip)
     session_id = session_service.create_session(source_name, "single")
 
     # 保存文件

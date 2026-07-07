@@ -1,6 +1,6 @@
 """会话管理路由"""
 from typing import List
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Request
 from pydantic import BaseModel
 
 from api_server.dependencies import Dependencies
@@ -15,16 +15,36 @@ from api_server.schemas.session import (
 router = APIRouter()
 
 
+def get_client_ip(request: Request) -> str:
+    """从请求中获取客户端IP"""
+    # 优先从 X-Client-IP 请求头获取（前端主动传递）
+    client_ip = request.headers.get("X-Client-IP")
+    if client_ip:
+        return client_ip
+    # 从 X-Forwarded-For 获取
+    forwarded = request.headers.get("X-Forwarded-For")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    # 从 client.host 获取
+    if request.client:
+        return request.client.host
+    return "localhost"
+
+
 @router.post("/session/create", response_model=SessionCreateResponse)
 async def create_session(
-    request: SessionCreateRequest,
+    request: Request,
+    req: SessionCreateRequest,
     service: SessionService = Depends(Dependencies.get_session_service)
 ):
     """创建新会话"""
+    client_ip = get_client_ip(request)
+    # ✅ 设置客户端IP到service实例
+    service.set_client_ip(client_ip)
     session_id = service.create_session(
-        source_name=request.source_name or "未命名",
-        analysis_type=request.analysis_type or "single",
-        tables_info=request.tables_info
+        source_name=req.source_name or "未命名",
+        analysis_type=req.analysis_type or "single",
+        tables_info=req.tables_info
     )
     return SessionCreateResponse(
         session_id=session_id,
@@ -34,9 +54,13 @@ async def create_session(
 
 @router.get("/session/list", response_model=ProjectListResponse)
 async def list_projects(
+    request: Request,
     service: SessionService = Depends(Dependencies.get_session_service)
 ):
     """获取最近项目列表"""
+    client_ip = get_client_ip(request)
+    # ✅ 设置客户端IP到service实例
+    service.set_client_ip(client_ip)
     projects = service.list_projects()
     return ProjectListResponse(
         total=len(projects),
@@ -58,10 +82,13 @@ async def get_session(
 
 @router.delete("/session/{session_id}")
 async def delete_session(
+    request: Request,
     session_id: str,
     service: SessionService = Depends(Dependencies.get_session_service)
 ):
     """删除会话"""
+    client_ip = get_client_ip(request)
+    service.set_client_ip(client_ip)
     success = service.delete_session(session_id)
     if not success:
         raise HTTPException(status_code=404, detail="会话不存在")

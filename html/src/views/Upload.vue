@@ -437,11 +437,9 @@ async function handleLoadDbTable() {
     })
 
     if (result && result.tables) {
-      // 🆕 保存 session_id
       if (result.session_id) {
         sessionStore.currentSessionId = result.session_id
         localStorage.setItem('lastSessionId', result.session_id)
-        // 加载会话信息
         await sessionStore.loadSession(result.session_id)
       }
 
@@ -544,6 +542,10 @@ async function handleLoadDemo(datasetKey) {
       currentStep.value = 1
 
       ElMessage.success(`已加载 ${result.source_name}`)
+
+      // ✅ 切换到文件上传标签页，跳转到上传页面
+      dataSourceType.value = 'file'
+      router.push('/upload')
     }
   } catch (err) {
     ElMessage.error('加载示例数据失败: ' + err.message)
@@ -577,17 +579,13 @@ async function handleStartAnalysis() {
       return
     }
 
-    // 保存到 localStorage
     localStorage.setItem('lastSessionId', sessionId)
 
     const success = await analysisStore.runAnalysis(sessionId, filteredTypes)
 
     if (success) {
       ElMessage.success('分析完成！')
-      router.push({
-        path: '/report-summary',
-        query: { session: sessionId }
-      })
+      // analysisStore 内部已跳转到 /report-summary
     } else {
       ElMessage.error(analysisStore.error || '分析失败')
     }
@@ -637,10 +635,7 @@ async function handleStartDbAnalysis() {
 
     if (success) {
       ElMessage.success('分析完成！')
-      router.push({
-        path: '/report-summary',
-        query: { session: sessionId }
-      })
+      // analysisStore 内部已跳转到 /report-summary
     } else {
       ElMessage.error(analysisStore.error || '分析失败')
     }

@@ -32,8 +32,12 @@ class AnalysisService:
         self.session_service = SessionService()
         self.recommendation_service = RecommendationService()
 
-    def run_analysis(self, session_id: str, file_path: str, variable_types: Dict, task_id: str):
+    def run_analysis(self, session_id: str, file_path: str, variable_types: Dict, task_id: str, client_ip: str = None):
         from api_server.routers.analysis import task_status
+
+        # ✅ 设置客户端IP到session_service
+        if client_ip:
+            self.session_service.set_client_ip(client_ip)
 
         try:
             task_status[task_id] = {"status": "running", "progress": 10, "message": "加载数据中..."}
@@ -80,73 +84,20 @@ class AnalysisService:
             json_result = json.loads(analyzer.to_json())
             self.session_service.save_analysis_result(session_id, json_result)
 
-            # ==================== 🔍 调试：核心结论数据检查 ====================
-            print("\n" + "=" * 70)
-            print("🔍 核心结论数据检查")
-            print("=" * 70)
-
-            ts_diag = json_result.get('time_series_diagnostics', {})
-            print(f"\n【1】time_series_diagnostics 数量: {len(ts_diag)}")
-            if ts_diag:
-                sample_key = list(ts_diag.keys())[0]
-                print(f"    示例: {sample_key} -> {ts_diag[sample_key]}")
-
-            high_corrs = json_result.get('correlations', {}).get('high_correlations', [])
-            print(f"\n【2】high_correlations 数量: {len(high_corrs)}")
-            if high_corrs:
-                print(f"    示例: {high_corrs[0]}")
-
-            missing = json_result.get('quality_report', {}).get('missing', [])
-            print(f"\n【3】missing 数量: {len(missing)}")
-            if missing:
-                print(f"    示例: {missing[0]}")
-
-            outliers = json_result.get('quality_report', {}).get('outliers', {})
-            print(f"\n【4】outliers 数量: {len(outliers)}")
-            if outliers:
-                sample_key = list(outliers.keys())[0]
-                print(f"    示例: {sample_key} -> {outliers[sample_key]}")
-
-            data_shape = json_result.get('data_shape', {})
-            print(f"\n【5】data_shape: {data_shape}")
-
-            variable_types = json_result.get('variable_types', {})
-            print(f"\n【6】variable_types 数量: {len(variable_types)}")
-            if variable_types:
-                sample_key = list(variable_types.keys())[0]
-                print(f"    示例: {sample_key} -> {variable_types[sample_key]}")
-
-            distribution = json_result.get('distribution_insights', {})
-            skewed = distribution.get('skewed_variables', [])
-            imbalanced = distribution.get('imbalanced_categoricals', [])
-            print(f"\n【7】distribution_insights: skewed={len(skewed)}, imbalanced={len(imbalanced)}")
-
-            model_recs = json_result.get('model_recommendations', [])
-            print(f"\n【8】model_recommendations 数量: {len(model_recs)}")
-
-            print("\n" + "=" * 70)
-            print("✅ 调试数据打印完成")
-            print("=" * 70 + "\n")
-
-            # ============================================================
-            # 🆕 生成核心结论（调用 InsightService）
-            # ============================================================
+            # ==================== 生成核心结论 ====================
             try:
                 from autostat.core.insight import InsightService
                 insight_service = InsightService()
                 conclusions = insight_service.extract_top_conclusions(json_result)
                 json_result['summary'] = conclusions
-                # ✅ 重新保存（现在包含 summary）
                 self.session_service.save_analysis_result(session_id, json_result)
                 print(f"✅ 已生成核心结论: {len(conclusions)} 条")
-                for c in conclusions:
-                    print(f"    - {c.get('title', '')}")
             except Exception as e:
                 print(f"⚠️ 生成核心结论失败: {e}")
                 import traceback as tb
                 tb.print_exc()
 
-            # 🆕 生成并保存 HTML 报告
+            # ==================== 生成 HTML 报告 ====================
             reporter = Reporter(analyzer)
             html_content = reporter.to_html()
             self.session_service.save_html(session_id, html_content)
@@ -154,9 +105,7 @@ class AnalysisService:
             self.session_service.save_variable_types(session_id, analyzer.variable_types)
             self.session_service.save_analyzer(session_id, analyzer)
 
-            # ============================================================
-            # 🆕 生成个性化推荐问题
-            # ============================================================
+            # ==================== 生成推荐问题 ====================
             try:
                 questions = self.recommendation_service.generate(json_result)
                 self.session_service.save_recommended_questions(session_id, questions)

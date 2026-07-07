@@ -21,34 +21,35 @@
               <div v-if="recommendations.length === 0" class="empty-hint">
                 暂无模型推荐，请先完成数据分析
               </div>
-              <div v-else class="recommend-list">
-                <el-card
-                  v-for="(rec, idx) in recommendations"
-                  :key="idx"
-                  class="recommend-card"
-                  shadow="hover"
-                  :class="{ active: selectedRecIndex === idx }"
-                  @click="applyRecommendation(rec, idx)"
-                >
-                  <div class="rec-priority" :class="rec.priority">
-                    {{ rec.priority === '高' ? '🔴' : rec.priority === '中' ? '🟠' : '🟢' }}
-                  </div>
-                  <div class="rec-task">{{ rec.task_type }}</div>
-                  <div class="rec-model">{{ rec.ml }}</div>
-                  <div class="rec-target" v-if="rec.target_column">🎯 {{ rec.target_column }}</div>
-                  <div class="rec-features" v-if="rec.feature_columns && rec.feature_columns.length > 0">相关特征：
-                      📊 {{ rec.feature_columns.slice(0, 5).join('、') }}{{ rec.feature_columns.length > 5 ? `等${rec.feature_columns.length}个` : '' }}
-                  </div>
-                  <div class="rec-reason" v-if="rec.reason">💡 {{ rec.reason }}</div>
-                  <el-button
-                    size="small"
-                    type="primary"
-                    class="rec-btn"
+              <div v-else class="recommend-wrapper">
+                <div class="recommend-list">
+                  <el-card
+                    v-for="(rec, idx) in recommendations"
+                    :key="idx"
+                    class="recommend-card"
+                    shadow="hover"
                     :class="{ active: selectedRecIndex === idx }"
+                    @click="applyRecommendation(rec, idx)"
                   >
-                    {{ selectedRecIndex === idx ? '✅ 已选中' : '📋 使用此配置' }}
-                  </el-button>
-                </el-card>
+                    <div class="rec-priority" :class="rec.priority">
+                      {{ rec.priority === '高' ? '🔴' : rec.priority === '中' ? '🟠' : '🟢' }}
+                    </div>
+                    <div class="rec-task">{{ rec.task_type }}</div>
+                    <div class="rec-model">{{ rec.ml }}</div>
+                    <div class="rec-target" v-if="rec.target_column">🎯 {{ rec.target_column }}</div>
+                    <div class="rec-features" v-if="rec.feature_columns && rec.feature_columns.length > 0">
+                      📊 相关特征：{{ rec.feature_columns.slice(0, 5).join('、') }}{{ rec.feature_columns.length > 5 ? `等${rec.feature_columns.length}个` : '' }}
+                    </div>
+                    <el-button
+                      size="small"
+                      type="primary"
+                      class="rec-btn"
+                      :class="{ active: selectedRecIndex === idx }"
+                    >
+                      {{ selectedRecIndex === idx ? '✅ 已选中' : '📋 使用此配置' }}
+                    </el-button>
+                  </el-card>
+                </div>
               </div>
             </div>
 
@@ -203,13 +204,18 @@
             </el-empty>
           </div>
           <div v-else>
-            <el-form label-width="120px">
-              <el-form-item label="选择模型">
-                <el-select v-model="predictForm.modelKey" @change="onModelSelect">
+            <el-form label-width="140px" label-position="left">
+              <el-form-item label="选择模型" class="model-select-item">
+                <el-select
+                  v-model="predictForm.modelKey"
+                  @change="onModelSelect"
+                  placeholder="请选择已训练的模型"
+                  style="width: 100%"
+                >
                   <el-option
                     v-for="model in savedModels"
                     :key="model.model_key"
-                    :label="model.user_model_name || model.model_key"
+                    :label="getModelLabel(model)"
                     :value="model.model_key"
                   />
                 </el-select>
@@ -217,7 +223,7 @@
 
               <div v-if="selectedModel" class="model-info">
                 <el-descriptions :column="2" border size="small">
-                  <el-descriptions-item label="类型">{{ selectedModel.task_type }}</el-descriptions-item>
+                  <el-descriptions-item label="类型">{{ selectedModel.task_type || '未知' }}</el-descriptions-item>
                   <el-descriptions-item label="目标">{{ selectedModel.target_column || '无' }}</el-descriptions-item>
                   <el-descriptions-item label="特征" :span="2">
                     {{ (selectedModel.features || []).join('、') }}
@@ -228,7 +234,7 @@
                 </el-descriptions>
               </div>
 
-              <div v-if="selectedModel && selectedModel.features" class="input-fields">
+              <div v-if="selectedModel && selectedModel.features && selectedModel.features.length > 0" class="input-fields">
                 <el-form-item
                   v-for="feature in selectedModel.features"
                   :key="feature"
@@ -589,24 +595,44 @@ function formatProgress(percentage) {
 }
 
 // ==================== 预测 ====================
+
+// ✅ 下拉框显示：模型名（目标：目标列）
+function getModelLabel(model) {
+  const name = model.user_model_name || model.model_key || '未命名模型'
+  const config = model.config || {}
+  const target = config.target_column || model.target_column || ''
+  if (target) {
+    return `${name}（目标：${target}）`
+  }
+  return name
+}
+
 function onModelSelect() {
   const model = savedModels.value.find(
     m => m.model_key === predictForm.value.modelKey
   )
   if (!model) return
 
-  selectedModel.value = model
-  predictForm.value.inputValues = {}
-
+  // ✅ 从 config 中取数据
   const config = model.config || {}
-  const features = config.features || []
+  const taskType = config.task_type || model.task_type || '未知'
+  const targetColumn = config.target_column || model.target_column || '无'
+  const features = config.features || model.features || []
+
+  selectedModel.value = {
+    ...model,
+    task_type: taskType,
+    target_column: targetColumn,
+    features: features
+  }
+
+  predictForm.value.inputValues = {}
 
   if (features.length === 0) {
     ElMessage.warning('该模型没有特征信息，请重新训练')
     return
   }
 
-  model.features = features
   features.forEach(f => {
     predictForm.value.inputValues[f] = ''
   })
@@ -665,11 +691,20 @@ async function handlePredict() {
   margin-bottom: 12px;
   color: #2c3e50;
 }
+
+.recommend-wrapper {
+  border: 1px solid #e4e7ed;
+  border-radius: 8px;
+  padding: 16px;
+  background: #fafafa;
+}
+
 .recommend-list {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
   gap: 12px;
 }
+
 .recommend-card {
   cursor: pointer;
   transition: all 0.2s;
@@ -711,14 +746,6 @@ async function handlePredict() {
   font-size: 12px;
   color: #909399;
   margin-top: 4px;
-}
-.recommend-card .rec-reason {
-  font-size: 12px;
-  color: #67c23a;
-  margin-top: 4px;
-  background: #f0f9eb;
-  padding: 4px 8px;
-  border-radius: 4px;
 }
 .recommend-card .rec-btn {
   margin-top: 10px;
@@ -817,12 +844,43 @@ async function handlePredict() {
 }
 
 /* ===== 预测 ===== */
+.model-select-item .el-form-item__label {
+  text-align: left !important;
+  justify-content: flex-start !important;
+}
+
+.model-select-item .el-select {
+  width: 100%;
+}
+
 .model-info {
   margin: 16px 0;
 }
+
+/* 特征区域 - 滚动防止遮挡 */
 .input-fields {
   margin: 16px 0;
+  max-height: 400px;
+  overflow-y: auto;
+  padding-right: 8px;
 }
+
+.input-fields .el-form-item {
+  margin-bottom: 16px;
+}
+
+.input-fields::-webkit-scrollbar {
+  width: 6px;
+}
+.input-fields::-webkit-scrollbar-thumb {
+  background: #c0c4cc;
+  border-radius: 3px;
+}
+.input-fields::-webkit-scrollbar-track {
+  background: #f0f2f6;
+  border-radius: 3px;
+}
+
 .predict-result {
   margin-top: 20px;
 }

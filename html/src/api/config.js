@@ -11,6 +11,10 @@ export const configApi = {
   deleteDatabase(name) {
     return api.delete(`/config/database/${name}`)
   },
+  // ✅ 新增：测试数据库连接
+  testDatabase(data) {
+    return api.post('/config/database/test', data)
+  },
 
   // 大模型配置
   getLLM() {

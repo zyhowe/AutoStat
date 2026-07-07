@@ -118,7 +118,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useSessionStore } from '../stores/session'
@@ -148,6 +148,13 @@ onMounted(async () => {
   await loadProjects()
 })
 
+// ✅ 监听 sessionId 变化，自动刷新项目列表
+watch(() => sessionStore.currentSessionId, async (newId, oldId) => {
+  if (newId !== oldId) {
+    await loadProjects()
+  }
+})
+
 function handleMenuSelect(index) {
   if (index.includes('?')) {
     router.push(index)
@@ -158,6 +165,7 @@ async function loadProjects() {
   loadingProjects.value = true
   try {
     const result = await sessionApi.list()
+    console.log('📋 项目列表刷新:', result.projects)
     projects.value = result.projects || []
   } catch (err) {
     console.error('加载项目列表失败:', err)
@@ -167,11 +175,16 @@ async function loadProjects() {
 }
 
 async function loadProject(sessionId) {
-  if (sessionId === sessionStore.currentSessionId) return
+  if (sessionId === sessionStore.currentSessionId) {
+    // ✅ 如果已经是当前项目，强制刷新页面
+    router.go(0)
+    return
+  }
   try {
     await sessionStore.loadSession(sessionId)
     ElMessage.success('已加载项目')
-    router.push('/report-summary')
+    // ✅ 使用 replace 强制刷新
+    router.replace('/report-summary')
   } catch (err) {
     ElMessage.error('加载项目失败: ' + err.message)
   }

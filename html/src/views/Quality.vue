@@ -1,7 +1,7 @@
 <template>
   <div class="quality-page">
     <h2>📊 数据质量看板</h2>
-    <p class="subtitle">五维质量评分，全面了解数据健康状况</p>
+    <p class="subtitle">四维质量评分，全面了解数据健康状况</p>
 
     <div v-if="loading" class="loading-container">
       <el-skeleton :rows="10" animated />
@@ -19,7 +19,7 @@
         </el-card>
       </div>
 
-      <!-- 五维评分 -->
+      <!-- 四维评分 -->
       <div class="dimensions">
         <el-card v-for="(score, name) in qualityData.dimensions" :key="name" class="dimension-card" shadow="hover">
           <div class="dimension-name">{{ getDimensionLabel(name) }}</div>
@@ -32,7 +32,7 @@
         </el-card>
       </div>
 
-      <!-- 问题清单 - 加 max-height -->
+      <!-- 问题清单 -->
       <div class="issues-section">
         <h3>⚠️ 问题清单</h3>
         <el-table :data="issues" border style="width: 100%" max-height="400">
@@ -50,7 +50,6 @@
         </el-table>
         <div v-if="issues.length === 0" class="empty-text">✅ 未发现问题</div>
       </div>
-
     </div>
 
     <div v-else-if="!loading" class="empty-state">
@@ -122,12 +121,12 @@ async function loadQuality() {
   }
 }
 
+// ✅ 移除及时性
 function getDimensionLabel(name) {
   const labels = {
     'completeness': '完整性',
     'accuracy': '准确性',
     'consistency': '一致性',
-    'timeliness': '及时性',
     'uniqueness': '唯一性'
   }
   return labels[name] || name
@@ -197,7 +196,7 @@ function goTo(routeName) {
 
 .dimensions {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 16px;
   margin-bottom: 30px;
 }
@@ -228,19 +227,5 @@ function goTo(routeName) {
   padding: 20px;
   text-align: center;
   color: #67c23a;
-}
-
-.actions {
-  display: flex;
-  gap: 16px;
-  flex-wrap: wrap;
-  margin-top: 30px !important;
-  padding: 20px 0 !important;
-  border-top: 1px solid #e4e7ed !important;
-  position: relative;
-  z-index: 10;
-}
-.actions .el-button {
-  min-width: 150px;
 }
 </style>

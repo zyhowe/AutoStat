@@ -1,10 +1,11 @@
 """配置管理路由"""
-from typing import List, Dict, Any,Optional
+from typing import List, Dict, Any, Optional
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 
 from api_server.dependencies import Dependencies
 from api_server.services.config_service import ConfigService
+from api_server.services.database_service import DatabaseService
 
 router = APIRouter()
 
@@ -63,6 +64,17 @@ async def delete_db_config(
     if not success:
         raise HTTPException(status_code=404, detail="配置不存在")
     return {"message": "配置已删除"}
+
+
+# ✅ 新增：测试数据库连接
+@router.post("/config/database/test")
+async def test_database_connection(
+    request: DbConfigRequest,
+    database_service: DatabaseService = Depends(Dependencies.get_database_service)
+):
+    """测试数据库连接"""
+    success, message = database_service.test_connection(request.model_dump())
+    return {"success": success, "message": message}
 
 
 @router.get("/config/llm")

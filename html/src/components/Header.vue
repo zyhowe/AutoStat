@@ -4,6 +4,7 @@
       <span class="logo-icon">📊</span>
       <span class="logo-text">AutoStat</span>
       <span class="logo-version">v0.2.0</span>
+      <span class="ip-tag">{{ clientIp }}</span>
     </div>
     <div class="header-right">
       <el-tag v-if="sessionStore.hasSession" type="success" size="small">
@@ -15,11 +16,17 @@
 </template>
 
 <script setup>
+import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useSessionStore } from '../stores/session'
 
 const router = useRouter()
 const sessionStore = useSessionStore()
+const clientIp = ref('')
+
+onMounted(() => {
+  clientIp.value = window.location.hostname || ''
+})
 
 function goHome() {
   router.push('/')
@@ -55,6 +62,15 @@ function goHome() {
   background: #f0f2f6;
   padding: 2px 8px;
   border-radius: 4px;
+}
+.ip-tag {
+  font-size: 12px;
+  color: #409eff;
+  background: #ecf5ff;
+  padding: 2px 12px;
+  border-radius: 4px;
+  border: 1px solid #d9ecff;
+  margin-left: 12px;
 }
 .header-right {
   display: flex;

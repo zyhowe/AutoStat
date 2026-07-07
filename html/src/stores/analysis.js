@@ -46,7 +46,10 @@ export const useAnalysisStore = defineStore('analysis', () => {
         await sessionStore.loadSession(sessionId)
       }
 
-      // 分析完成后跳转到报告总览
+      // ✅ 刷新左侧项目列表
+      await sessionStore.loadProjects()
+
+      // ✅ 跳转到报告总览
       if (router) {
         router.push('/report-summary')
       }

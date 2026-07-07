@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 from typing import List, Dict, Any, Set, Tuple, Optional
 import warnings
+import re
 
 warnings.filterwarnings('ignore')
 
@@ -68,6 +69,82 @@ class RecommendationAnalyzer:
             if self.date_column_mapping.get(col2) == col1:
                 return True
         return False
+
+    # ==================== 新增：特征有效性过滤 ====================
+
+    def _is_valid_feature(self, col: str, target: str = None) -> bool:
+        """
+        判断字段是否可以作为有效的特征
+        过滤条件：
+        1. 空值率 > 50%
+        2. 标准差为0（常量）
+        3. 分类变量唯一值 < 2
+        4. 被排除的字段（标识符等）
+        """
+        if col not in self.data.columns:
+            return False
+
+        # 排除标识符列
+        if self.variable_types.get(col) == 'identifier':
+            return False
+
+        # 排除目标列自身
+        if target and col == target:
+            return False
+
+        # 空值率检查
+        null_rate = self.data[col].isna().mean()
+        if null_rate > 0.5:
+            return False
+
+        # 常量检查（连续变量）
+        if self.variable_types.get(col) == 'continuous':
+            if self.data[col].dropna().std() == 0:
+                return False
+
+        # 分类变量唯一值检查
+        if self.variable_types.get(col) in ['categorical', 'categorical_numeric', 'ordinal']:
+            if self.data[col].dropna().nunique() < 2:
+                return False
+
+        return True
+
+    def _is_valid_target(self, col: str, task_type: str = 'regression') -> bool:
+        """
+        判断字段是否可以作为有效的目标变量
+        """
+        if col not in self.data.columns:
+            return False
+
+        # 排除派生列
+        if self._should_exclude_target(col):
+            return False
+
+        # 空值率检查
+        null_rate = self.data[col].isna().mean()
+        if null_rate > 0.5:
+            return False
+
+        if task_type == 'regression':
+            # 回归目标：必须是连续变量，且标准差 > 0
+            if self.variable_types.get(col) != 'continuous':
+                return False
+            if self.data[col].dropna().std() == 0:
+                return False
+        elif task_type == 'classification':
+            # 分类目标：必须是分类变量，且唯一值 >= 2
+            if self.variable_types.get(col) not in ['categorical', 'categorical_numeric', 'ordinal']:
+                return False
+            if self.data[col].dropna().nunique() < 2:
+                return False
+
+        return True
+
+    def _filter_valid_features(self, features: List[str], target: str = None) -> List[str]:
+        """过滤无效特征"""
+        return [f for f in features if self._is_valid_feature(f, target)]
+
+    # ==================== 场景推荐 ====================
 
     def recommend_scenarios(self):
         """场景推荐 - 输出所有符合条件的分析任务"""
@@ -159,7 +236,6 @@ class RecommendationAnalyzer:
                 return 2
             elif '回归预测' in task_type:
                 reason = rec.get('reason', '')
-                import re
                 match = re.search(r'r=([0-9.]+)', reason)
                 if match:
                     r = abs(float(match.group(1)))
@@ -172,7 +248,6 @@ class RecommendationAnalyzer:
                 return 4
             elif '分类预测' in task_type:
                 reason = rec.get('reason', '')
-                import re
                 match = re.search(r'V=([0-9.]+)', reason)
                 if not match:
                     match = re.search(r'η²=([0-9.]+)', reason)
@@ -243,7 +318,7 @@ class RecommendationAnalyzer:
         if len(numeric_vars) < 2:
             return recommendations
 
-        valid_numeric = [col for col in numeric_vars if col in self.data.columns]
+        valid_numeric = [col for col in numeric_vars if self._is_valid_feature(col)]
         if len(valid_numeric) < 2:
             return recommendations
 
@@ -282,14 +357,16 @@ class RecommendationAnalyzer:
                 if p_value >= 0.05:
                     continue
 
-                var1_std = self.data[var1].std()
-                var2_std = self.data[var2].std()
-                if var1_std > var2_std:
+                # 选择目标列：优先选有效的目标
+                if self._is_valid_target(var1, 'regression'):
                     target = var1
                     feature = var2
-                else:
+                elif self._is_valid_target(var2, 'regression'):
                     target = var2
                     feature = var1
+                else:
+                    # 两者都无效，跳过
+                    continue
 
                 significant_pairs.append({
                     'target': target,
@@ -307,6 +384,7 @@ class RecommendationAnalyzer:
             strength = "强" if pair['abs_corr'] > 0.7 else "中" if pair['abs_corr'] > 0.5 else "弱"
             direction = "正" if pair['corr'] > 0 else "负"
 
+            # 单特征推荐
             recommendations.append({
                 "task_type": "回归预测",
                 "title": f"{pair['target']} ← {pair['feature']}",
@@ -321,6 +399,7 @@ class RecommendationAnalyzer:
                 "caution": "⚠️ 相关性不代表因果，建议结合业务理解"
             })
 
+        # 多特征推荐
         multi_feature_recs = self._build_multi_feature_regression(target_to_features, numeric_vars)
         recommendations.extend(multi_feature_recs)
 
@@ -331,14 +410,14 @@ class RecommendationAnalyzer:
         recommendations = []
 
         for target, features in target_to_features.items():
-            if self._should_exclude_target(target):
+            if not self._is_valid_target(target, 'regression'):
                 continue
 
             features_sorted = sorted(features, key=lambda x: x[1], reverse=True)
 
             all_features = []
             for f, _ in features_sorted:
-                if not self._is_derived_column(f):
+                if self._is_valid_feature(f, target):
                     all_features.append(f)
 
             all_features = self._deduplicate_features(all_features, target, task_type='regression')
@@ -346,9 +425,10 @@ class RecommendationAnalyzer:
             if len(all_features) < 2:
                 continue
 
+            # ✅ reason只存特征列表，不加"相关特征："前缀
             reason_parts = []
             for f, corr in features_sorted:
-                if not self._is_derived_column(f):
+                if f in all_features:
                     reason_parts.append(f"{f}(r={corr:.3f})")
             reason_str = '、'.join(reason_parts)
 
@@ -362,7 +442,7 @@ class RecommendationAnalyzer:
                 "ml": "随机森林 / XGBoost / LightGBM / SVR",
                 "dl": "MLP / TabNet",
                 "llm": "TabLLM / GPT-4 with few-shot",
-                "reason": f"{reason_str}",
+                "reason": reason_str,
                 "caution": "⚠️ 建议先进行特征选择；⚠️ 注意多重共线性"
             })
 
@@ -413,12 +493,14 @@ class RecommendationAnalyzer:
         for num_var in numeric_vars:
             if num_var not in self.data.columns:
                 continue
+            if not self._is_valid_feature(num_var):
+                continue
 
             for cat_var in categorical_vars:
                 if cat_var not in self.data.columns:
                     continue
 
-                if self._should_exclude_target(cat_var):
+                if not self._is_valid_target(cat_var, 'classification'):
                     continue
 
                 if self._should_exclude_pair(num_var, cat_var):
@@ -484,8 +566,8 @@ class RecommendationAnalyzer:
                 if pair_key in processed_pairs:
                     continue
 
-                target_candidate1 = None if self._should_exclude_target(var1) else var1
-                target_candidate2 = None if self._should_exclude_target(var2) else var2
+                target_candidate1 = var1 if self._is_valid_target(var1, 'classification') else None
+                target_candidate2 = var2 if self._is_valid_target(var2, 'classification') else None
 
                 if target_candidate1 is None and target_candidate2 is None:
                     continue
@@ -547,7 +629,7 @@ class RecommendationAnalyzer:
                         "caution": "⚠️ 可尝试加入更多特征提升效果"
                     })
 
-                    if not self._should_exclude_target(target):
+                    if target and self._is_valid_target(target, 'classification'):
                         if target not in target_to_features:
                             target_to_features[target] = []
                         target_to_features[target].append((feature, cramer_v))
@@ -565,14 +647,14 @@ class RecommendationAnalyzer:
         recommendations = []
 
         for target, features in target_to_features.items():
-            if self._should_exclude_target(target):
+            if not self._is_valid_target(target, 'classification'):
                 continue
 
             features_sorted = sorted(features, key=lambda x: x[1], reverse=True)
 
             all_features = []
             for f, _ in features_sorted:
-                if not self._is_derived_column(f):
+                if self._is_valid_feature(f, target):
                     all_features.append(f)
 
             all_features = self._deduplicate_features(all_features, target, task_type='classification')
@@ -582,10 +664,11 @@ class RecommendationAnalyzer:
 
             n_classes = self.data[target].nunique() if target in self.data.columns else 2
 
+            # ✅ reason只存特征列表，不加前缀
             reason_parts = []
             metric_name = "η²" if task_type == 'numeric_to_categorical' else "V"
             for f, val in features_sorted:
-                if not self._is_derived_column(f):
+                if f in all_features:
                     reason_parts.append(f"{f}({metric_name}={val:.3f})")
             reason_str = '、'.join(reason_parts)
 
@@ -599,7 +682,7 @@ class RecommendationAnalyzer:
                 "ml": "随机森林 / XGBoost / LightGBM / CatBoost",
                 "dl": "MLP / TabNet",
                 "llm": "TabLLM / GPT-4 with few-shot",
-                "reason": f"关联特征：{reason_str}",
+                "reason": reason_str,
                 "caution": "⚠️ 建议先进行特征选择；⚠️ 注意类别不平衡问题"
             })
 
@@ -709,7 +792,7 @@ class RecommendationAnalyzer:
 
         valid_vars = []
         for col in numeric_vars:
-            if col in self.data.columns and self.data[col].std() > 0:
+            if self._is_valid_feature(col):
                 valid_vars.append(col)
 
         if len(valid_vars) < 3:
@@ -736,7 +819,7 @@ class RecommendationAnalyzer:
 
         valid_vars = []
         for col in categorical_vars:
-            if col in self.data.columns:
+            if self._is_valid_feature(col):
                 n_unique = self.data[col].nunique()
                 if 2 <= n_unique <= 20:
                     valid_vars.append(col)
@@ -828,13 +911,10 @@ class RecommendationAnalyzer:
         else:
             return "中"
 
-    # autostat/core/recommendation.py - 添加方法
-
     def _get_audit_recommendations(self, audit_rules: Dict) -> List[Dict]:
         """基于勾稽规则生成推荐"""
         recommendations = []
 
-        # 数值规则推荐
         for rule in audit_rules.get('arithmetic_rules', []):
             if rule.get('violation_count', 0) > 0:
                 recommendations.append({
@@ -867,7 +947,6 @@ class RecommendationAnalyzer:
                     "caution": "业务逻辑变更时需要更新规则"
                 })
 
-        # 外键规则推荐
         for fk in audit_rules.get('foreign_keys', []):
             confidence = fk.get('confidence', 1.0)
             if confidence < 1.0:
@@ -886,7 +965,6 @@ class RecommendationAnalyzer:
                     "caution": "可能存在孤儿记录"
                 })
 
-        # 函数依赖推荐
         for fd in audit_rules.get('functional_dependencies', []):
             recommendations.append({
                 "priority": "低",

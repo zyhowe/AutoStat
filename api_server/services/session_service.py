@@ -2,6 +2,7 @@
 import json
 import pickle
 import shutil
+import socket
 from pathlib import Path
 from typing import Dict, Any, Optional, List
 from datetime import datetime
@@ -16,10 +17,20 @@ class SessionService:
         self.data_dir = settings.DATA_DIR
         self.projects_dir = settings.PROJECTS_DIR
         self._ensure_dirs()
+        # ✅ 存储客户端IP，一次设置，全局使用
+        self._client_ip = None
 
     def _ensure_dirs(self):
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.projects_dir.mkdir(parents=True, exist_ok=True)
+
+    # ✅ 设置客户端IP
+    def set_client_ip(self, client_ip: str):
+        self._client_ip = client_ip
+
+    # ✅ 获取客户端IP
+    def get_client_ip(self) -> str:
+        return self._client_ip or "localhost"
 
     def _get_session_path(self, session_id: str) -> Path:
         return self.data_dir / session_id
@@ -28,7 +39,10 @@ class SessionService:
         return self._get_session_path(session_id) / "metadata.json"
 
     def _get_projects_file(self) -> Path:
-        return self.projects_dir / "projects.json"
+        """获取项目列表文件路径（使用存储的client_ip）"""
+        ip = self._client_ip or "localhost"
+        ip_key = ip.replace('.', '_')
+        return self.projects_dir / f"{ip_key}.json"
 
     def _load_metadata(self, session_id: str) -> Optional[Dict]:
         metadata_path = self._get_metadata_path(session_id)
@@ -134,6 +148,15 @@ class SessionService:
             metadata["data_shape"] = result.get("data_shape", {})
             self._save_metadata(session_id, metadata)
 
+            # ✅ 使用存储的client_ip
+            projects = self._load_projects()
+            for p in projects:
+                if p.get("session_id") == session_id:
+                    p["data_shape"] = result.get("data_shape", {})
+                    p["last_accessed_at"] = datetime.now().isoformat()
+                    break
+            self._save_projects(projects)
+
     def save_variable_types(self, session_id: str, variable_types: Dict):
         metadata = self._load_metadata(session_id)
         if metadata:
@@ -182,9 +205,7 @@ class SessionService:
         return None
 
     # ==================== 推荐问题管理 ====================
-
     def save_recommended_questions(self, session_id: str, questions: Dict[str, List[Dict]]):
-        """保存推荐问题到JSON文件"""
         session_path = self._get_session_path(session_id)
         questions_file = session_path / "recommended_questions.json"
 
@@ -197,20 +218,16 @@ class SessionService:
         with open(questions_file, 'w', encoding='utf-8') as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
 
-        # 也存到内存中以便快速访问
         if hasattr(self, '_recommended_questions_cache'):
             self._recommended_questions_cache[session_id] = questions
         else:
             self._recommended_questions_cache = {session_id: questions}
 
     def get_recommended_questions(self, session_id: str) -> Optional[Dict[str, List[Dict]]]:
-        """获取推荐问题"""
-        # 先查内存缓存
         if hasattr(self, '_recommended_questions_cache'):
             if session_id in self._recommended_questions_cache:
                 return self._recommended_questions_cache[session_id]
 
-        # 从文件读取
         session_path = self._get_session_path(session_id)
         questions_file = session_path / "recommended_questions.json"
 
@@ -219,7 +236,6 @@ class SessionService:
                 data = json.load(f)
                 questions = data.get('questions', {})
 
-                # 缓存到内存
                 if not hasattr(self, '_recommended_questions_cache'):
                     self._recommended_questions_cache = {}
                 self._recommended_questions_cache[session_id] = questions
@@ -229,7 +245,6 @@ class SessionService:
         return None
 
     def get_recommended_questions_by_scene(self, session_id: str, scene: str) -> List[Dict]:
-        """获取指定场景的推荐问题"""
         questions = self.get_recommended_questions(session_id)
         if questions:
             return questions.get(scene, [])
