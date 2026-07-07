@@ -15,7 +15,12 @@
           <div class="chart-header">
             <span class="chart-title">🎯 综合评分</span>
           </div>
-          <v-chart v-if="hasGaugeData" :option="gaugeOption" class="chart-container" />
+          <v-chart
+            v-if="hasGaugeData"
+            :key="'gauge_' + gaugeKey"
+            :option="gaugeOption"
+            class="chart-container"
+          />
           <div v-else class="chart-empty">暂无评分数据</div>
         </div>
 
@@ -29,16 +34,7 @@
         </div>
       </div>
 
-      <!-- 维度对比柱状图 -->
-      <div class="chart-card full-width">
-        <div class="chart-header">
-          <span class="chart-title">📊 各维度与目标对比</span>
-        </div>
-        <v-chart v-if="hasRadarData" :option="compareBarOption" class="chart-container" style="height: 250px;" />
-        <div v-else class="chart-empty">暂无维度数据</div>
-      </div>
-
-      <!-- ===== 四维评分卡片 ===== -->
+      <!-- ===== 四维评分卡片（进度条） ===== -->
       <div class="dimensions">
         <el-card v-for="(score, name) in filteredDimensions" :key="name" class="dimension-card" shadow="hover">
           <div class="dimension-name">{{ getDimensionLabel(name) }}</div>
@@ -80,7 +76,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { useSessionStore } from '../stores/session'
@@ -92,6 +88,14 @@ const sessionStore = useSessionStore()
 const loading = ref(true)
 const qualityData = ref(null)
 const issues = ref([])
+
+const gaugeKey = ref(0)
+
+watch(() => qualityData.value?.overall_score, (newVal) => {
+  if (newVal !== undefined && newVal !== null) {
+    gaugeKey.value += 1
+  }
+})
 
 onMounted(async () => {
   await loadQuality()
@@ -212,7 +216,6 @@ const gaugeOption = computed(() => {
       title: { show: false },
       detail: {
         valueAnimation: true,
-        // ✅ 核心修复：兼容对象和原始值两种传参方式
         formatter: function(params) {
           const val = typeof params === 'object' ? (params.value || 0) : (params || 0)
           return Number(val).toFixed(1) + ' 分'
@@ -263,75 +266,6 @@ const radarOption = computed(() => {
       lineStyle: { color: '#409EFF', width: 2 },
       itemStyle: { color: '#409EFF' }
     }]
-  }
-})
-
-// ==================== 维度对比柱状图 ====================
-const compareBarOption = computed(() => {
-  const dims = filteredDimensions.value
-  const labels = {
-    completeness: '完整性',
-    accuracy: '准确性',
-    consistency: '一致性',
-    uniqueness: '唯一性'
-  }
-  const target = 80
-  const keys = Object.keys(dims)
-  const names = keys.map(k => labels[k] || k)
-  const scores = keys.map(k => Math.round(dims[k]))
-  const colors = scores.map(s => s >= target ? '#67C23A' : '#F56C6C')
-
-  return {
-    tooltip: {
-      trigger: 'axis',
-      formatter: function(params) {
-        let html = `<strong>${params[0].name}</strong><br/>`
-        params.forEach(p => {
-          if (p.seriesName === '目标') {
-            html += `${p.marker} ${p.seriesName}：${p.value} 分<br/>`
-          } else {
-            const diff = p.value - target
-            const status = diff >= 0 ? '✅ 达标' : '❌ 不达标'
-            html += `${p.marker} ${p.seriesName}：${p.value} 分（${status}）`
-          }
-        })
-        return html
-      }
-    },
-    legend: { data: ['当前得分', '目标线'], top: 0, right: 10 },
-    grid: { left: '10%', right: '8%', top: '20%', bottom: '15%' },
-    xAxis: {
-      type: 'category',
-      data: names,
-      axisLabel: { fontSize: 12 }
-    },
-    yAxis: {
-      type: 'value',
-      max: 100,
-      name: '得分',
-      nameLocation: 'middle',
-      nameGap: 35
-    },
-    series: [
-      {
-        name: '当前得分',
-        type: 'bar',
-        data: scores.map((s, i) => ({
-          value: s,
-          itemStyle: { color: colors[i] }
-        })),
-        barWidth: '40%',
-        label: { show: true, position: 'top', formatter: '{c}', fontSize: 11 }
-      },
-      {
-        name: '目标线',
-        type: 'line',
-        data: names.map(() => target),
-        symbol: 'none',
-        lineStyle: { color: '#E6A23C', type: 'dashed', width: 2 },
-        label: { show: true, formatter: `目标${target}分`, fontSize: 10, color: '#E6A23C' }
-      }
-    ]
   }
 })
 

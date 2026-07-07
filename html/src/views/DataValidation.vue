@@ -23,22 +23,22 @@
         <div v-else class="chart-empty">暂无问题数据</div>
       </div>
 
-      <!-- ===== 勾稽规则关系图（饼图） ===== -->
-      <div class="chart-card full-width" v-if="hasAuditData">
-        <div class="chart-header">
-          <span class="chart-title">🔗 勾稽规则类型分布</span>
-        </div>
-        <v-chart
-          :key="'audit_pie_' + auditPieKey"
-          :option="auditPieOption"
-          class="chart-container"
-          style="height: 200px;"
-        />
-      </div>
-
       <el-tabs v-model="activeTab">
         <!-- ===== 勾稽规则 ===== -->
         <el-tab-pane label="勾稽规则" name="rules">
+          <!-- ✅ 饼图移入Tab内部 -->
+          <div class="chart-card full-width" v-if="hasAuditData">
+            <div class="chart-header">
+              <span class="chart-title">🔗 勾稽规则类型分布</span>
+            </div>
+            <v-chart
+              :key="'audit_pie_' + auditPieKey"
+              :option="auditPieOption"
+              class="chart-container"
+              style="height: 200px;"
+            />
+          </div>
+
           <div v-if="auditRulesTotal === 0" class="empty-tip">
             ✅ 未发现勾稽规则违反，数据一致性良好
           </div>
@@ -105,7 +105,6 @@
 
         <!-- ===== 异常值 ===== -->
         <el-tab-pane label="异常值" name="outliers">
-          <!-- 异常值图表：仅在当前 tab 激活时渲染，并延迟 key 更新 -->
           <div class="chart-card full-width" style="margin-bottom: 16px;">
             <div class="chart-header">
               <span class="chart-title">📊 异常值分布（TOP 5）</span>
@@ -139,7 +138,6 @@
 
         <!-- ===== 缺失值 ===== -->
         <el-tab-pane label="缺失值" name="missing">
-          <!-- 缺失值图表：仅在当前 tab 激活时渲染，并延迟 key 更新 -->
           <div class="chart-card full-width" style="margin-bottom: 16px;">
             <div class="chart-header">
               <span class="chart-title">📊 缺失率 TOP 10</span>
@@ -214,7 +212,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch, nextTick } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { useSessionStore } from '../stores/session'
@@ -233,17 +231,14 @@ const outlierKey = ref(0)
 const missingKey = ref(0)
 const auditPieKey = ref(0)
 
-// ==================== 监听 tab 切换，延迟更新 key 让 DOM 渲染完成 ====================
+// ==================== 监听 tab 切换 ====================
 watch(activeTab, (newTab) => {
   if (newTab === 'outliers') {
-    // 延迟 100ms 确保 DOM 已布局
-    setTimeout(() => {
-      outlierKey.value += 1
-    }, 100)
+    setTimeout(() => { outlierKey.value += 1 }, 100)
   } else if (newTab === 'missing') {
-    setTimeout(() => {
-      missingKey.value += 1
-    }, 100)
+    setTimeout(() => { missingKey.value += 1 }, 100)
+  } else if (newTab === 'rules') {
+    setTimeout(() => { auditPieKey.value += 1 }, 100)
   }
 })
 
@@ -448,8 +443,6 @@ async function loadData() {
     const result = await reportApi.get(sessionId)
     reportData.value = result
     console.log('✅ 数据核验加载完成')
-    console.log('📊 异常值数据:', result?.quality_report?.outliers)
-    console.log('📊 缺失值数据:', result?.quality_report?.missing)
   } catch (err) {
     ElMessage.error('加载数据失败: ' + err.message)
   } finally {

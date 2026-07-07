@@ -27,9 +27,15 @@
           <div class="stat-value">{{ reportData.data_shape?.columns || 0 }}</div>
           <div class="stat-label">总列数</div>
         </div>
-        <div class="stat-card" :class="qualityGradeClass">
-          <div class="stat-value">{{ qualityScore }}</div>
-          <div class="stat-label">质量评分</div>
+        <!-- ✅ 新增：强相关关系对数 -->
+        <div class="stat-card" :class="corrCountClass">
+          <div class="stat-value">{{ highCorrCount }}</div>
+          <div class="stat-label">强相关对数</div>
+        </div>
+        <!-- ✅ 新增：可预测模型数 -->
+        <div class="stat-card" :class="modelCountClass">
+          <div class="stat-value">{{ modelRecommendCount }}</div>
+          <div class="stat-label">可预测模型</div>
         </div>
         <div class="stat-card" :class="outlierClass">
           <div class="stat-value">{{ outlierCount }}</div>
@@ -61,7 +67,12 @@
           <div class="chart-header">
             <span class="chart-title">🎯 综合评分</span>
           </div>
-          <v-chart v-if="hasGaugeData" :option="gaugeOption" class="chart-container" />
+          <v-chart
+            v-if="hasGaugeData"
+            :key="'gauge_' + gaugeKey"
+            :option="gaugeOption"
+            class="chart-container"
+          />
           <div v-else class="chart-empty">暂无评分数据</div>
         </div>
       </div>
@@ -164,7 +175,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { useSessionStore } from '../stores/session'
@@ -177,18 +188,35 @@ const loading = ref(false)
 const reportData = ref(null)
 const qualityData = ref(null)
 
-// ==================== 关键指标卡片 ====================
-const qualityScore = computed(() => {
-  const score = qualityData.value?.overall_score
-  return score !== undefined && score !== null ? score : '-'
+const gaugeKey = ref(0)
+
+watch(() => qualityData.value?.overall_score, (newVal) => {
+  if (newVal !== undefined && newVal !== null) {
+    gaugeKey.value += 1
+  }
 })
 
-const qualityGradeClass = computed(() => {
-  const score = qualityData.value?.overall_score
-  if (score === undefined || score === null) return ''
-  if (score >= 80) return 'grade-good'
-  if (score >= 60) return 'grade-warn'
-  return 'grade-bad'
+// ==================== 关键指标卡片 ====================
+const highCorrCount = computed(() => {
+  return reportData.value?.correlations?.high_correlations?.length || 0
+})
+
+const corrCountClass = computed(() => {
+  const count = highCorrCount.value
+  if (count === 0) return 'status-ok'
+  if (count <= 10) return 'status-warn'
+  return 'status-high'
+})
+
+const modelRecommendCount = computed(() => {
+  return reportData.value?.model_recommendations?.length || 0
+})
+
+const modelCountClass = computed(() => {
+  const count = modelRecommendCount.value
+  if (count === 0) return 'status-ok'
+  if (count <= 10) return 'status-warn'
+  return 'status-high'
 })
 
 const outlierCount = computed(() => {
@@ -248,7 +276,7 @@ const datetimeCount = computed(() => {
   return Object.values(variableTypes.value).filter(v => v.type === 'datetime').length
 })
 
-// ==================== 雷达图数据（过滤 timeliness） ====================
+// ==================== 雷达图 ====================
 const hasRadarData = computed(() => {
   const dims = qualityData.value?.dimensions || {}
   const filteredKeys = Object.keys(dims).filter(k => k !== 'timeliness')
@@ -295,7 +323,7 @@ const radarOption = computed(() => {
   }
 })
 
-// ==================== 仪表盘数据 ====================
+// ==================== 仪表盘 ====================
 const hasGaugeData = computed(() => {
   const score = qualityData.value?.overall_score
   return score !== undefined && score !== null && !isNaN(Number(score))
@@ -339,7 +367,6 @@ const gaugeOption = computed(() => {
       title: { show: false },
       detail: {
         valueAnimation: true,
-        // ✅ 核心修复：兼容对象和原始值两种传参方式
         formatter: function(params) {
           const val = typeof params === 'object' ? (params.value || 0) : (params || 0)
           return Number(val).toFixed(1) + ' 分'
@@ -716,8 +743,8 @@ onMounted(() => {
 .status-ok .stat-value { color: #67c23a; }
 .status-warn .stat-value { color: #e6a23c; }
 .status-bad .stat-value { color: #f56c6c; }
+.status-high .stat-value { color: #409EFF; }
 
-/* ===== 图表区域 ===== */
 .charts-row {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -774,7 +801,6 @@ onMounted(() => {
   }
 }
 
-/* ===== 核心发现 ===== */
 .section {
   margin-top: 8px;
 }
