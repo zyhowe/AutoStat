@@ -671,7 +671,7 @@ async function handlePredict() {
 .model-center {
   max-width: 1200px;
   margin: 0 auto;
-  padding: 20px;
+  padding: 20px 20px 80px 20px;
 }
 .subtitle {
   color: #909399;

@@ -147,6 +147,7 @@ class SessionService:
             metadata["analysis_result"] = result
             metadata["data_shape"] = result.get("data_shape", {})
             self._save_metadata(session_id, metadata)
+            print(f"✅ 已保存 analysis_result 到 metadata: {session_id}")
 
             # ✅ 使用存储的client_ip
             projects = self._load_projects()
@@ -156,6 +157,8 @@ class SessionService:
                     p["last_accessed_at"] = datetime.now().isoformat()
                     break
             self._save_projects(projects)
+        else:
+            print(f"❌ metadata 为空，无法保存 analysis_result: {session_id}")
 
     def save_variable_types(self, session_id: str, variable_types: Dict):
         metadata = self._load_metadata(session_id)

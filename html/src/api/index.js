@@ -8,10 +8,9 @@ const api = axios.create({
   }
 })
 
-// ✅ 请求拦截器：自动添加客户端IP
+// 请求拦截器：自动添加客户端IP
 api.interceptors.request.use(
   config => {
-    // 从浏览器获取当前访问的IP
     const clientIp = window.location.hostname || 'localhost'
     config.headers['X-Client-IP'] = clientIp
     return config

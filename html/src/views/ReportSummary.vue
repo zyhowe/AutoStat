@@ -17,37 +17,42 @@
     </div>
 
     <div v-else-if="reportData" class="summary-content">
-      <!-- ==================== 关键指标卡片 ==================== -->
+      <!-- ==================== 关键指标卡片（新顺序） ==================== -->
       <div class="stats-row">
+        <!-- 1. 总行数 -->
         <div class="stat-card">
           <div class="stat-value">{{ reportData.data_shape?.rows || 0 }}</div>
           <div class="stat-label">总行数</div>
         </div>
+        <!-- 2. 总列数 -->
         <div class="stat-card">
           <div class="stat-value">{{ reportData.data_shape?.columns || 0 }}</div>
           <div class="stat-label">总列数</div>
         </div>
-        <!-- ✅ 新增：强相关关系对数 -->
-        <div class="stat-card" :class="corrCountClass">
-          <div class="stat-value">{{ highCorrCount }}</div>
-          <div class="stat-label">强相关对数</div>
-        </div>
-        <!-- ✅ 新增：可预测模型数 -->
-        <div class="stat-card" :class="modelCountClass">
-          <div class="stat-value">{{ modelRecommendCount }}</div>
-          <div class="stat-label">可预测模型</div>
-        </div>
+        <!-- 3. 异常字段（前置） -->
         <div class="stat-card" :class="outlierClass">
           <div class="stat-value">{{ outlierCount }}</div>
           <div class="stat-label">异常字段</div>
         </div>
+        <!-- 4. 高缺失字段（前置） -->
         <div class="stat-card" :class="highMissingClass">
           <div class="stat-value">{{ highMissingCount }}</div>
           <div class="stat-label">高缺失字段</div>
         </div>
+        <!-- 5. 勾稽规则（前置） -->
         <div class="stat-card" :class="ruleClass">
           <div class="stat-value">{{ auditRulesTotal }}</div>
           <div class="stat-label">勾稽规则</div>
+        </div>
+        <!-- 6. 强相关对数（后置） -->
+        <div class="stat-card" :class="corrCountClass">
+          <div class="stat-value">{{ highCorrCount }}</div>
+          <div class="stat-label">强相关对数</div>
+        </div>
+        <!-- 7. 可预测模型（后置） -->
+        <div class="stat-card" :class="modelCountClass">
+          <div class="stat-value">{{ modelRecommendCount }}</div>
+          <div class="stat-label">可预测模型</div>
         </div>
       </div>
 
@@ -77,7 +82,7 @@
         </div>
       </div>
 
-      <!-- 缺失率柱状图 -->
+      <!-- 缺失率柱状图（保留TOP5） -->
       <div class="chart-card full-width">
         <div class="chart-header">
           <span class="chart-title">📋 缺失率最高的字段</span>
@@ -124,7 +129,7 @@
             </div>
           </div>
 
-          <!-- 质量发现 -->
+          <!-- 质量发现（保留缺失重复） -->
           <div v-if="qualityDiscoveries.length > 0" class="discovery-group quality-group">
             <div class="group-header">
               <span class="group-icon">🔍</span>
@@ -175,7 +180,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, watch, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { useSessionStore } from '../stores/session'
@@ -192,7 +197,7 @@ const gaugeKey = ref(0)
 
 watch(() => qualityData.value?.overall_score, (newVal) => {
   if (newVal !== undefined && newVal !== null) {
-    gaugeKey.value += 1
+    nextTick(() => { gaugeKey.value += 1 })
   }
 })
 
@@ -390,7 +395,7 @@ const hasMissingChartData = computed(() => {
 const missingBarOption = computed(() => {
   const missing = reportData.value?.quality_report?.missing || []
   const sorted = [...missing].sort((a, b) => (b.percent || 0) - (a.percent || 0))
-  const top = sorted.slice(0, 10)
+  const top = sorted.slice(0, 5)
   return {
     tooltip: {
       trigger: 'axis',
@@ -631,9 +636,6 @@ async function loadData() {
       reportApi.getQuality(sessionId)
     ])
 
-    console.log('📊 ReportSummary - reportResult:', reportResult)
-    console.log('📊 ReportSummary - qualityResult:', qualityResult)
-
     reportData.value = reportResult
     qualityData.value = qualityResult
 
@@ -711,14 +713,14 @@ onMounted(() => {
 
 .stats-row {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 12px;
   margin-bottom: 30px;
 }
 .stat-card {
   background: #f5f7fa;
   border-radius: 12px;
-  padding: 16px 20px;
+  padding: 14px 16px;
   text-align: center;
   transition: all 0.2s;
 }
@@ -727,7 +729,7 @@ onMounted(() => {
   box-shadow: 0 4px 12px rgba(0,0,0,0.08);
 }
 .stat-value {
-  font-size: 28px;
+  font-size: 26px;
   font-weight: bold;
   color: #2c3e50;
 }

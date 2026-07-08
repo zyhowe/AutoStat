@@ -54,12 +54,10 @@ use([
 
 const app = createApp(App)
 
-// 注册 Element Plus 图标
 for (const [key, component] of Object.entries(ElementPlusIconsVue)) {
   app.component(key, component)
 }
 
-// 注册 ECharts 组件
 app.component('v-chart', VChart)
 
 app.use(createPinia())
@@ -68,6 +66,5 @@ app.use(ElementPlus)
 
 app.mount('#app')
 
-// 将 router 注入到 analysis store
 const analysisStore = useAnalysisStore()
 analysisStore.setRouter(router)

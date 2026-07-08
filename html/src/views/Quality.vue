@@ -8,9 +8,8 @@
     </div>
 
     <div v-else-if="qualityData" class="quality-content">
-      <!-- ===== 图表区域 ===== -->
+      <!-- 图表区域 -->
       <div class="charts-row">
-        <!-- 仪表盘 -->
         <div class="chart-card gauge-card">
           <div class="chart-header">
             <span class="chart-title">🎯 综合评分</span>
@@ -23,8 +22,6 @@
           />
           <div v-else class="chart-empty">暂无评分数据</div>
         </div>
-
-        <!-- 雷达图 -->
         <div class="chart-card">
           <div class="chart-header">
             <span class="chart-title">📊 四维质量得分</span>
@@ -34,10 +31,24 @@
         </div>
       </div>
 
-      <!-- ===== 四维评分卡片（进度条） ===== -->
+      <!-- 四维评分卡片（带解释 Tooltip） -->
       <div class="dimensions">
-        <el-card v-for="(score, name) in filteredDimensions" :key="name" class="dimension-card" shadow="hover">
-          <div class="dimension-name">{{ getDimensionLabel(name) }}</div>
+        <el-card
+          v-for="(score, name) in filteredDimensions"
+          :key="name"
+          class="dimension-card"
+          shadow="hover"
+        >
+          <div class="dimension-header">
+            <span class="dimension-name">{{ getDimensionLabel(name) }}</span>
+            <el-tooltip
+              placement="top"
+              effect="dark"
+              :content="getDimensionTooltip(name)"
+            >
+              <el-icon class="dimension-help"><QuestionFilled /></el-icon>
+            </el-tooltip>
+          </div>
           <el-progress
             :percentage="Math.round(score)"
             :color="getProgressColor(score)"
@@ -47,7 +58,7 @@
         </el-card>
       </div>
 
-      <!-- ===== 问题清单 ===== -->
+      <!-- 问题清单 -->
       <div class="issues-section">
         <h3>⚠️ 问题清单</h3>
         <el-table :data="issues" border style="width: 100%" max-height="400">
@@ -79,6 +90,7 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
+import { QuestionFilled } from '@element-plus/icons-vue'
 import { useSessionStore } from '../stores/session'
 import { reportApi } from '../api/report'
 
@@ -88,7 +100,6 @@ const sessionStore = useSessionStore()
 const loading = ref(true)
 const qualityData = ref(null)
 const issues = ref([])
-
 const gaugeKey = ref(0)
 
 watch(() => qualityData.value?.overall_score, (newVal) => {
@@ -120,7 +131,6 @@ async function loadQuality() {
   loading.value = true
   try {
     const result = await reportApi.getQuality(sessionId)
-    console.log('📊 Quality 数据:', result)
     qualityData.value = result
 
     const allIssues = []
@@ -152,6 +162,16 @@ function getDimensionLabel(name) {
     'uniqueness': '唯一性'
   }
   return labels[name] || name
+}
+
+function getDimensionTooltip(name) {
+  const tooltips = {
+    'completeness': '数据是否完整，有没有空值\n计算方式：非空值数量 / 总行数 × 100%',
+    'accuracy': '数据是否正确，有没有异常值\n计算方式：1 - (异常值数量 / 有效样本量) × 100%',
+    'consistency': '数据是否统一，勾稽关系是否成立\n计算方式：满足勾稽规则的记录数 / 总记录数 × 100%',
+    'uniqueness': '数据是否重复\n计算方式：1 - (重复记录数 / 总行数) × 100%'
+  }
+  return tooltips[name] || '该维度评分'
 }
 
 function getProgressColor(score) {
@@ -196,7 +216,7 @@ const gaugeOption = computed(() => {
         show: true,
         width: 14,
         roundCap: true,
-        itemStyle: { color: color }
+        itemStyle: { color }
       },
       axisLine: {
         lineStyle: {
@@ -252,7 +272,7 @@ const radarOption = computed(() => {
     tooltip: { trigger: 'item' },
     legend: { show: false },
     radar: {
-      indicator: indicator,
+      indicator,
       shape: 'circle',
       center: ['50%', '50%'],
       radius: '70%',
@@ -278,8 +298,7 @@ function goTo(routeName) {
 .quality-page {
   max-width: 1200px;
   margin: 0 auto;
-  padding: 20px;
-  padding-bottom: 40px;
+  padding: 20px 20px 80px 20px;
 }
 .subtitle {
   color: #909399;
@@ -292,7 +311,6 @@ function goTo(routeName) {
   padding: 60px 0;
 }
 
-/* ===== 图表区域 ===== */
 .charts-row {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -352,17 +370,31 @@ function goTo(routeName) {
 /* ===== 维度评分卡片 ===== */
 .dimensions {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
   gap: 16px;
   margin-bottom: 30px;
 }
 .dimension-card {
   padding: 16px;
 }
+.dimension-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
 .dimension-name {
   font-weight: 500;
-  margin-bottom: 8px;
+  font-size: 15px;
   color: #2c3e50;
+}
+.dimension-help {
+  font-size: 16px;
+  color: #909399;
+  cursor: pointer;
+}
+.dimension-help:hover {
+  color: #409EFF;
 }
 .dimension-value {
   text-align: right;
@@ -372,7 +404,6 @@ function goTo(routeName) {
   color: #666;
 }
 
-/* ===== 问题清单 ===== */
 .issues-section {
   margin-bottom: 30px;
 }

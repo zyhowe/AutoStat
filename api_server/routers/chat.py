@@ -18,6 +18,7 @@ class ChatRequest(BaseModel):
     session_id: str
     question: str
     context: Optional[List[str]] = ["json_result"]
+    context_data: Optional[Dict[str, Any]] = None
 
 
 class ChatResponse(BaseModel):
@@ -45,7 +46,8 @@ async def chat(
         request.session_id,
         request.question,
         analysis_result,
-        request.context
+        request.context,
+        request.context_data
     )
 
     return ChatResponse(answer=answer)
@@ -71,7 +73,8 @@ async def chat_stream(
             request.session_id,
             request.question,
             analysis_result,
-            request.context
+            request.context,
+            request.context_data
         ):
             yield f"data: {json.dumps({'content': chunk})}\n\n"
         yield f"data: {json.dumps({'done': True})}\n\n"
@@ -159,7 +162,9 @@ async def prediction_agent_stream(
         result = agent_service.process(request.session_id, request.question)
 
         if result.get('success'):
-            yield f"data: {json.dumps({'content': result.get('result', '')})}\n\n"
+            content = result.get('result', '')
+            for char in content:
+                yield f"data: {json.dumps({'content': char})}\n\n"
             yield f"data: {json.dumps({'done': True, 'data': result.get('data'), 'model_used': result.get('model_used'), 'confidence': result.get('confidence')})}\n\n"
         else:
             yield f"data: {json.dumps({'content': f'❌ {result.get("error", "预测失败")}'})}\n\n"
@@ -175,7 +180,7 @@ async def prediction_agent_stream(
     )
 
 
-# ==================== 场景推荐（原有） ====================
+# ==================== 场景推荐 ====================
 
 @router.get("/chat/scenarios")
 async def get_scenarios(

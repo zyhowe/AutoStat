@@ -44,17 +44,17 @@ async def run_analysis(
         "message": "任务已提交"
     }
 
-    # ✅ 获取客户端IP
+    # 获取客户端IP，设置到 analysis_service 实例
     client_ip = get_client_ip(request)
+    analysis_service.set_client_ip(client_ip)
 
-    # 后台执行分析，传入client_ip
+    # 后台执行分析（只传5个参数）
     background_tasks.add_task(
         analysis_service.run_analysis,
         analysis_request.session_id,
         file_info["path"],
         analysis_request.variable_types or {},
-        task_id,
-        client_ip  # ✅ 新增参数
+        task_id
     )
 
     return AnalysisResponse(

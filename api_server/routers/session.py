@@ -93,3 +93,15 @@ async def delete_session(
     if not success:
         raise HTTPException(status_code=404, detail="会话不存在")
     return {"message": "会话已删除"}
+
+@router.get("/session/{session_id}/recommended_questions")
+async def get_recommended_questions(
+    session_id: str,
+    service: SessionService = Depends(Dependencies.get_session_service)
+):
+    """获取推荐问题"""
+    session = service.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="会话不存在")
+    return service.get_recommended_questions(session_id)
+
