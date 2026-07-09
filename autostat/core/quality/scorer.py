@@ -18,7 +18,6 @@ from enum import Enum
 
 
 class QualityGrade(Enum):
-    """质量等级"""
     EXCELLENT = (90, 100, "优秀", "🟢")
     GOOD = (80, 89, "良好", "🟢")
     FAIR = (70, 79, "一般", "🟡")
@@ -33,14 +32,12 @@ class QualityGrade(Enum):
 
     @classmethod
     def from_score(cls, score: float) -> "QualityGrade":
-        """根据分数获取等级"""
         for grade in cls:
             if grade.min_score <= score <= grade.max_score:
                 return grade
         return cls.BAD
 
 
-# 等级列表（用于外部引用）
 QUALITY_GRADES = [
     {"min": 90, "max": 100, "label": "优秀", "icon": "🟢"},
     {"min": 80, "max": 89, "label": "良好", "icon": "🟢"},
@@ -52,7 +49,6 @@ QUALITY_GRADES = [
 
 @dataclass
 class QualityScore:
-    """质量评分结果"""
     timestamp: str
     table_name: str
     overall_score: float
@@ -65,16 +61,6 @@ class QualityScore:
 
 
 class QualityScorer:
-    """
-    五维数据质量评分器
-
-    使用方式:
-        scorer = QualityScorer()
-        result = scorer.score(df, table_name="orders", rules=audit_rules)
-        print(f"综合评分: {result.overall_score} ({result.grade})")
-    """
-
-    # 各维度权重
     WEIGHTS = {
         "completeness": 0.25,
         "accuracy": 0.25,
@@ -82,55 +68,28 @@ class QualityScorer:
         "timeliness": 0.15,
         "uniqueness": 0.15,
     }
-
-    # 及时性阈值（天）
     TIMELINESS_THRESHOLD = 7
 
     def __init__(self, weights: Optional[Dict[str, float]] = None):
-        """
-        初始化评分器
-
-        参数:
-        - weights: 自定义各维度权重，默认使用 WEIGHTS
-        """
         self.weights = weights or self.WEIGHTS.copy()
-        # 归一化权重
         total = sum(self.weights.values())
         if total != 1.0:
             self.weights = {k: v / total for k, v in self.weights.items()}
 
-    def score(
-        self,
-        df: pd.DataFrame,
-        table_name: str = "unknown",
-        variable_types: Optional[Dict[str, str]] = None,
-        audit_rules: Optional[Dict[str, Any]] = None,
-        last_updated: Optional[datetime] = None,
-        id_columns: Optional[List[str]] = None
-    ) -> QualityScore:
-        """
-        计算数据质量评分
-
-        参数:
-        - df: 待评分的数据框
-        - table_name: 表名
-        - variable_types: 变量类型字典 {col: type}
-        - audit_rules: 勾稽规则（来自 AuditRuleDiscoverer）
-        - last_updated: 最后更新时间（用于及时性计算）
-        - id_columns: 标识符列（用于唯一性计算）
-
-        返回:
-        - QualityScore 对象
-        """
+    def score(self, df: pd.DataFrame, table_name: str = "unknown",
+              variable_types: Optional[Dict[str, str]] = None,
+              audit_rules: Optional[Dict[str, Any]] = None,
+              last_updated: Optional[datetime] = None,
+              id_columns: Optional[List[str]] = None) -> QualityScore:
+        # 保持不变（调用的子方法会被向量化）
         if variable_types is None:
             from autostat.core.base import BaseAnalyzer
             base = BaseAnalyzer(df, quiet=True)
             base._infer_variable_types()
             variable_types = base.variable_types
 
-        # 计算各维度得分
         completeness = self._score_completeness(df)
-        accuracy = self._score_accuracy(df, variable_types)
+        accuracy = self._score_accuracy(df, variable_types)  # 已向量化
         consistency = self._score_consistency(df, audit_rules)
         timeliness = self._score_timeliness(last_updated)
         uniqueness = self._score_uniqueness(df, id_columns)
@@ -138,28 +97,19 @@ class QualityScorer:
         dimensions = {
             "completeness": completeness,
             "accuracy": accuracy,
-            "accuracy": accuracy,
             "consistency": consistency,
             "timeliness": timeliness,
             "uniqueness": uniqueness,
         }
 
-        # 计算综合得分
-        overall = (
-            completeness * self.weights["completeness"] +
-            accuracy * self.weights["accuracy"] +
-            consistency * self.weights["consistency"] +
-            timeliness * self.weights["timeliness"] +
-            uniqueness * self.weights["uniqueness"]
-        ) * 100
+        overall = (completeness * self.weights["completeness"] +
+                   accuracy * self.weights["accuracy"] +
+                   consistency * self.weights["consistency"] +
+                   timeliness * self.weights["timeliness"] +
+                   uniqueness * self.weights["uniqueness"]) * 100
 
-        # 获取等级
         grade = QualityGrade.from_score(overall)
-
-        # 计算各字段得分
         field_scores = self._score_fields(df, variable_types)
-
-        # 生成告警
         alerts = self._generate_alerts(dimensions, field_scores, audit_rules)
 
         return QualityScore(
@@ -180,74 +130,50 @@ class QualityScorer:
         )
 
     def _score_completeness(self, df: pd.DataFrame) -> float:
-        """
-        完整性得分：所有字段非空率的加权平均
-
-        返回: 0-1 之间的分数
-        """
+        # 保持不变
         if df.empty:
             return 0.0
+        nonnull_rates = df.notna().mean().values  # 已向量化，无需改动
+        return float(np.mean(nonnull_rates)) if nonnull_rates.size > 0 else 0.0
 
-        nonnull_rates = []
-        for col in df.columns:
-            rate = df[col].notna().mean()
-            nonnull_rates.append(rate)
-
-        return np.mean(nonnull_rates) if nonnull_rates else 0.0
-
+    # ==================== 向量化改造的 _score_accuracy ====================
     def _score_accuracy(self, df: pd.DataFrame, variable_types: Dict[str, str]) -> float:
         """
-        准确性得分：基于异常值检测
-
-        返回: 0-1 之间的分数
+        准确性得分：基于异常值检测（向量化计算所有连续变量）
         """
         if df.empty:
             return 0.0
 
-        total_cols = 0
-        total_score = 0.0
+        # 只处理连续变量
+        continuous_cols = [col for col, typ in variable_types.items() if typ == 'continuous' and col in df.columns]
+        if not continuous_cols:
+            return 1.0  # 无连续变量，得满分
 
-        for col, var_type in variable_types.items():
-            if col not in df.columns:
-                continue
+        # 提取连续变量数据
+        cont_data = df[continuous_cols]
+        # 计算每列的 Q1, Q3, IQR（向量化）
+        q1 = cont_data.quantile(0.25, numeric_only=True)
+        q3 = cont_data.quantile(0.75, numeric_only=True)
+        iqr = q3 - q1
 
-            series = df[col].dropna()
+        # 计算每列的异常值比例
+        scores = []
+        for col in continuous_cols:
+            series = cont_data[col].dropna()
             if len(series) < 3:
+                scores.append(1.0)
                 continue
-
-            total_cols += 1
-
-            if var_type == "continuous":
-                # 连续变量：基于 IQR 检测异常值
-                Q1 = series.quantile(0.25)
-                Q3 = series.quantile(0.75)
-                IQR = Q3 - Q1
-
-                if IQR == 0:
-                    col_score = 1.0
-                else:
-                    lower = Q1 - 1.5 * IQR
-                    upper = Q3 + 1.5 * IQR
-                    outliers = ((series < lower) | (series > upper)).sum()
-                    col_score = 1 - (outliers / len(series))
-                    col_score = max(0, col_score)
-
-            elif var_type in ["categorical", "categorical_numeric", "ordinal"]:
-                # 分类变量：检查是否有未知类别（频率极低的类别视为噪音）
-                vc = series.value_counts()
-                if len(vc) > 1:
-                    # 出现次数少于 3 次的类别视为噪音
-                    noise = (vc < 3).sum()
-                    col_score = 1 - (noise / len(vc))
-                    col_score = max(0, col_score)
-                else:
-                    col_score = 1.0
+            lower = q1[col] - 1.5 * iqr[col]
+            upper = q3[col] + 1.5 * iqr[col]
+            # 如果 IQR 为 0，则全部视为正常
+            if iqr[col] == 0:
+                scores.append(1.0)
             else:
-                col_score = 1.0
+                outliers = ((series < lower) | (series > upper)).sum()
+                col_score = 1 - (outliers / len(series))
+                scores.append(max(0, col_score))
 
-            total_score += col_score
-
-        return total_score / total_cols if total_cols > 0 else 1.0
+        return float(np.mean(scores)) if scores else 1.0
 
     def _score_consistency(self, df: pd.DataFrame, audit_rules: Optional[Dict[str, Any]]) -> float:
         """

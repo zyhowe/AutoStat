@@ -118,10 +118,10 @@ class AutoStatisticalAnalyzer:
             if not quiet:
                 print("  ✅ 使用用户定义类型")
         else:
-            # MCP/CLI模式：自动识别
+            # MCP/CLI模式：自动识别（使用向量化方法）
             base.variable_types = self.variable_types
             base.type_reasons = self.type_reasons
-            base._infer_variable_types()
+            base._infer_variable_types_vectorized()  # ✅ 改为向量化版本
             self.variable_types = base.variable_types
             self.type_reasons = base.type_reasons
             # 如果有部分预定义，覆盖
@@ -703,7 +703,9 @@ class AutoStatisticalAnalyzer:
             if not self.quiet:
                 print(f"  ⚠️ 日期关系发现失败: {e}")
 
-    def generate_full_report(self, show_outlier_details=False):
+        # ========== 修改 generate_full_report 增加 include_html 参数 ==========
+
+    def generate_full_report(self, show_outlier_details=False, include_html=False):  # ✅ 新增 include_html
         """生成完整报告"""
         print("\n" + "=" * 70)
         print("📋 完整自动分析报告")
@@ -729,7 +731,7 @@ class AutoStatisticalAnalyzer:
         self.auto_time_series_analysis()
         self.auto_analyze_relationships()
 
-        # 🆕 勾稽关系发现（在时间序列和关系分析之后）
+        # 勾稽关系发现（在时间序列和关系分析之后）
         self._discover_audit_rules()
         self._discover_date_rules()
 
@@ -741,6 +743,14 @@ class AutoStatisticalAnalyzer:
         except Exception as e:
             if not self.quiet:
                 print(f"⚠️ 图表显示失败: {e}")
+
+        # 如果 include_html 为 True，可以在外部调用 Reporter，这里不做重复生成
+        # 因为外部 analysis_service 会单独调用 Reporter，所以这里不再生成 HTML
+        # 仅打印提示
+        if include_html:
+            print("✅ 将在外部生成 HTML 报告（由调用方控制）")
+        else:
+            print("⏩ 跳过 HTML 报告生成（include_html=False）")
 
     def to_json(self, output_file=None, indent=2, ensure_ascii=False):
         import json

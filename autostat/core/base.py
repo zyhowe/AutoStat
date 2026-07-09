@@ -8,12 +8,10 @@ from scipy.stats import shapiro, normaltest
 from typing import Dict, List, Optional, Tuple
 import warnings
 
-
 warnings.filterwarnings('ignore')
 
 # ==================== 全局常量定义 ====================
 
-# 变量类型中文描述映射（唯一来源）
 TYPE_DESCRIPTION_MAP = {
     'categorical': '分类变量',
     'categorical_numeric': '数值型分类变量',
@@ -26,17 +24,10 @@ TYPE_DESCRIPTION_MAP = {
     'empty': '空变量'
 }
 
-# 相关性阈值
-HIGH_CORRELATION_THRESHOLD = 0.7  # 强相关阈值
-STATISTICAL_SIGNIFICANCE_THRESHOLD = 0.05  # 统计显著阈值
-
-# 偏态阈值
+HIGH_CORRELATION_THRESHOLD = 0.7
+STATISTICAL_SIGNIFICANCE_THRESHOLD = 0.05
 SKEWNESS_THRESHOLD = 2.0
-
-# 峰度阈值
 KURTOSIS_THRESHOLD = 7.0
-
-# 正态性检验样本量限制
 NORMALITY_MIN_SAMPLES = 8
 NORMALITY_MAX_SAMPLES = 5000
 
@@ -261,6 +252,98 @@ class BaseAnalyzer:
             else:
                 self.variable_types[col] = 'other'
                 self.type_reasons[col] = f'其他类型'
+
+    # ==================== 新增向量化类型推断方法 ====================
+    def _infer_variable_types_vectorized(self):
+        """
+        向量化版本的类型推断：一次性计算所有列的统计量，批量输出类型。
+        与原有 _infer_variable_types 逻辑等价，但使用向量化操作。
+        """
+        df = self.data
+        # 获取所有列名
+        cols = df.columns.tolist()
+        n_rows = len(df)
+
+        # 计算各列的空值比例、唯一值数、数据类型等
+        null_ratios = df.isna().mean().values  # 向量化
+        nunique = df.nunique().values  # 向量化
+        dtypes = df.dtypes.values
+
+        # 判断是否为数值类型
+        is_numeric = np.array([pd.api.types.is_numeric_dtype(dtype) for dtype in dtypes])
+        is_object = np.array([pd.api.types.is_object_dtype(dtype) for dtype in dtypes])
+        is_datetime = np.array([pd.api.types.is_datetime64_any_dtype(dtype) for dtype in dtypes])
+        is_categorical = np.array([pd.api.types.is_categorical_dtype(dtype) for dtype in dtypes])
+        is_bool = np.array([pd.api.types.is_bool_dtype(dtype) for dtype in dtypes])
+
+        # 预分配结果数组
+        types = np.empty(len(cols), dtype=object)
+        reasons = np.empty(len(cols), dtype=object)
+
+        for idx, col in enumerate(cols):
+            # 处理全空列
+            if null_ratios[idx] == 1.0:
+                types[idx] = 'empty'
+                reasons[idx] = '空变量'
+                continue
+
+            # 日期类型（优先）
+            if is_datetime[idx]:
+                types[idx] = 'datetime'
+                reasons[idx] = '日期时间类型'
+                continue
+
+            # 字符串/对象类型
+            if is_object[idx] or is_categorical[idx]:
+                n_unique = nunique[idx]
+                if n_unique <= 20:
+                    types[idx] = 'categorical'
+                    reasons[idx] = f'分类变量，{n_unique}个类别'
+                else:
+                    types[idx] = 'text'
+                    reasons[idx] = '文本变量'
+                continue
+
+            # 布尔类型
+            if is_bool[idx]:
+                types[idx] = 'categorical'
+                reasons[idx] = '布尔型分类变量'
+                continue
+
+            # 数值类型
+            if is_numeric[idx]:
+                n_unique = nunique[idx]
+                unique_ratio = n_unique / max(1, (1 - null_ratios[idx]) * n_rows)
+                # 标识符判断
+                if n_unique > 0.95 * n_rows and n_unique > 10:
+                    types[idx] = 'identifier'
+                    reasons[idx] = f'标识符列 (唯一性{unique_ratio:.1%})'
+                elif n_unique <= 5 or (unique_ratio < 0.05 and n_unique < 20):
+                    types[idx] = 'categorical_numeric'
+                    reasons[idx] = f'数值型分类变量，{n_unique}个取值'
+                elif n_unique < 25 and pd.api.types.is_integer_dtype(df[col]):
+                    types[idx] = 'ordinal'
+                    reasons[idx] = f'有序分类变量，{n_unique}个等级'
+                else:
+                    # 连续变量，检查正态性
+                    data = df[col].dropna()
+                    if len(data) >= 8:
+                        is_normal, _, norm_stats = self.check_normality(data)
+                        norm_status = "正态" if is_normal else "非正态"
+                        reasons[idx] = f'连续变量，{norm_status}分布 (偏度={norm_stats["skew"]:.2f})'
+                    else:
+                        reasons[idx] = '连续变量 (样本量不足)'
+                    types[idx] = 'continuous'
+                continue
+
+            # 其他类型
+            types[idx] = 'other'
+            reasons[idx] = f'其他类型'
+
+        # 赋值回对象
+        for i, col in enumerate(cols):
+            self.variable_types[col] = types[i]
+            self.type_reasons[col] = reasons[i]
 
     def _check_missing_values(self) -> List[Dict]:
         """检查缺失值"""

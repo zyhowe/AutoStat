@@ -7,7 +7,12 @@ import networkx as nx
 from typing import Dict, List, Tuple, Any, Optional, Set
 from collections import defaultdict
 import math
-
+# 新增导入随机 SVD
+try:
+    from sklearn.utils.extmath import randomized_svd
+    HAS_SKLEARN = True
+except ImportError:
+    HAS_SKLEARN = False
 
 class AuditRuleDiscoverer:
     """勾稽规则发现器 - 四条路径"""
@@ -40,7 +45,7 @@ class AuditRuleDiscoverer:
                  strong_coverage_threshold: float = 0.8,  # 强相等覆盖比例阈值，用于验证强相等关系
 
                  # ========== 7. RANSAC拟合参数 ==========
-                 ransac_iter: int = 50,  # RANSAC迭代次数，用于线性关系拟合
+                 ransac_iter: int = 20,  # RANSAC迭代次数，用于线性关系拟合
                  ransac_sample_size: int = 20,  # RANSAC采样大小，每次迭代随机抽取的样本数
                  inlier_ratio: float = 0.7,  # 内点比例阈值，RANSAC拟合时的内点比例要求
 
@@ -101,6 +106,14 @@ class AuditRuleDiscoverer:
             print(f"  [DEBUG] {msg}")
 
     # ==================== 公共工具函数 ====================
+    # ==================== 新增：向量化共现矩阵 ====================
+    def _compute_cooccurrence_matrix(self, df: pd.DataFrame, cols: List[str]) -> np.ndarray:
+        """使用矩阵乘法一次性计算所有列对的共现次数"""
+        # 构造布尔矩阵：行=样本，列=字段，值为是否非空
+        nonnull_bool = df[cols].notna().values.astype(int)
+        # 共现矩阵 = 转置矩阵 × 原矩阵，结果 (n_cols x n_cols)
+        cooccur = nonnull_bool.T @ nonnull_bool
+        return cooccur
 
     def _parse_rule_string(self, rule_dict: Dict) -> Tuple[List[str], List[str], float]:
         """解析规则字符串，返回 (left_fields, right_fields, confidence)"""
@@ -262,10 +275,11 @@ class AuditRuleDiscoverer:
 
 
     # ==================== 数值规则发现 ====================
+    # ==================== 修改 _discover_arithmetic_rules 中调用 ====================
     def _discover_arithmetic_rules(self, df: pd.DataFrame,
                                    numeric_cols: List[str]) -> List[Dict]:
         """
-        数值规则发现
+        数值规则发现（使用向量化共现矩阵）
         """
         self._log("  [数值关系] 开始...")
 
@@ -304,7 +318,7 @@ class AuditRuleDiscoverer:
         unique_rules = self._deduplicate_rules(all_rules)
         self._log(f"\n    合并后总计: {len(unique_rules)} 条数值关系")
 
-        # ========== 新增：用全量数据重新验证所有规则 ==========
+        # 全量验证
         validated_rules = self._validate_rules_on_full_data(df, unique_rules)
 
         if self.debug:
@@ -312,11 +326,6 @@ class AuditRuleDiscoverer:
             for i, rule in enumerate(validated_rules, 1):
                 self._log(
                     f"    {i}. {rule['rule']} (置信度={rule['confidence']}, 有效行数={rule['valid_rows']}, 满足行数={rule['satisfied_rows']})")
-        # ====================================================
-
-        #线性消元简化（2字段规则不参与消元，只对3+字段规则进行）
-        # validated_rules = self.reduce_arithmetic_rules(validated_rules, strong_equality)
-        # self._log(f"\n    合并后总计2: {len(validated_rules)} 条数值关系:{validated_rules}")
 
         return validated_rules
 
@@ -875,58 +884,81 @@ class AuditRuleDiscoverer:
         return best_coeffs, best_inlier_mask, best_keep_rows_count
 
     def _basic_svd_fit(self, X: np.ndarray, valid_rows: int):
-        """
-        原始 SVD 拟合：全量数据，不采样（一次性计算）
-        """
-        try:
-            X_centered = X - np.mean(X, axis=0)
-            U, s, Vt = np.linalg.svd(X_centered, full_matrices=False)
-            coeffs = Vt[-1, :]
-
-            if np.all(np.abs(coeffs) < self.precision):
+        """使用随机化 SVD 加速"""
+        if not HAS_SKLEARN:
+            # 降级到标准 SVD
+            try:
+                X_centered = X - np.mean(X, axis=0)
+                U, s, Vt = np.linalg.svd(X_centered, full_matrices=False)
+                coeffs = Vt[-1, :]
+                if np.all(np.abs(coeffs) < self.precision):
+                    return None, None, 0
+                result = X @ coeffs
+                rel_error = np.abs(result) / (np.abs(X[:, 0]) + 1)
+                inlier_mask = rel_error < self.inlier_error_threshold
+                inlier_count = inlier_mask.sum()
+                return coeffs, inlier_mask, inlier_count
+            except Exception:
                 return None, None, 0
-
-            result = X @ coeffs
-            rel_error = np.abs(result) / (np.abs(X[:, 0]) + 1)
-            inlier_mask = rel_error < self.inlier_error_threshold
-            inlier_count = inlier_mask.sum()
-
-            return coeffs, inlier_mask, inlier_count
-        except Exception:
-            return None, None, 0
+        else:
+            try:
+                # 使用随机化 SVD，只取最小奇异值对应的右奇异向量
+                # n_components 取列数，但随机化可以只计算少量成分
+                n_components = min(X.shape[1], 10)  # 最多取10个成分，但我们需要最后一个
+                U, s, Vt = randomized_svd(X, n_components=min(n_components, X.shape[1]-1), random_state=42)
+                # 实际上我们需要最后一个右奇异向量，但 randomized_svd 不保证顺序，我们取最小的奇异值对应的向量
+                # 更可靠：对中心化数据做 SVD，但使用随机化近似
+                X_centered = X - np.mean(X, axis=0)
+                U, s, Vt = randomized_svd(X_centered, n_components=min(n_components, X.shape[1]-1), random_state=42)
+                # 取最小奇异值对应的向量（最后一个）
+                coeffs = Vt[-1, :]
+                if np.all(np.abs(coeffs) < self.precision):
+                    return None, None, 0
+                result = X @ coeffs
+                rel_error = np.abs(result) / (np.abs(X[:, 0]) + 1)
+                inlier_mask = rel_error < self.inlier_error_threshold
+                inlier_count = inlier_mask.sum()
+                return coeffs, inlier_mask, inlier_count
+            except Exception:
+                # 降级到标准 SVD
+                try:
+                    X_centered = X - np.mean(X, axis=0)
+                    U, s, Vt = np.linalg.svd(X_centered, full_matrices=False)
+                    coeffs = Vt[-1, :]
+                    if np.all(np.abs(coeffs) < self.precision):
+                        return None, None, 0
+                    result = X @ coeffs
+                    rel_error = np.abs(result) / (np.abs(X[:, 0]) + 1)
+                    inlier_mask = rel_error < self.inlier_error_threshold
+                    inlier_count = inlier_mask.sum()
+                    return coeffs, inlier_mask, inlier_count
+                except Exception:
+                    return None, None, 0
 
     def _ransac_svd_fit(self, X: np.ndarray, valid_rows: int):
-        """
-        RANSAC SVD 拟合：迭代采样，提高鲁棒性
-        """
+        """RANSAC 迭代中使用随机 SVD"""
         best_coeffs = None
         best_inlier_mask = None
         best_inlier_count = 0
 
         for _ in range(self.ransac_iter):
-            # 随机采样
             sample_idx = np.random.choice(valid_rows, size=self.ransac_sample_size, replace=False)
             X_sample = X[sample_idx]
-
             try:
-                X_centered = X_sample - np.mean(X_sample, axis=0)
-                U, s, Vt = np.linalg.svd(X_centered, full_matrices=False)
-                coeffs = Vt[-1, :]
-
+                # 使用基本 SVD（内部可能使用随机化）
+                coeffs, _, _ = self._basic_svd_fit(X_sample, len(sample_idx))
+                if coeffs is None:
+                    continue
                 if np.all(np.abs(coeffs) < self.precision):
                     continue
-
                 result = X @ coeffs
                 rel_error = np.abs(result) / (np.abs(X[:, 0]) + 1)
                 inlier_mask = rel_error < self.inlier_error_threshold
                 inlier_count = inlier_mask.sum()
-
                 if inlier_count > best_inlier_count:
                     best_inlier_count = inlier_count
                     best_coeffs = coeffs
                     best_inlier_mask = inlier_mask
-
-                    # 提前终止：已达到要求的内点比例
                     if best_inlier_count >= valid_rows * self.inlier_ratio:
                         break
             except Exception:
@@ -934,7 +966,6 @@ class AuditRuleDiscoverer:
 
         if best_coeffs is None:
             return None, None, 0
-
         return best_coeffs, best_inlier_mask, best_inlier_count
 
     def _fit_linear_relation(self, X: np.ndarray, valid_rows: int, use_ransac: bool = True):

@@ -31,11 +31,10 @@ class RelationshipAnalyzer:
         self.quiet = quiet
 
     def _check_normality(self, x):
-        """检查正态性 - 调用 BaseAnalyzer 静态方法"""
         return BaseAnalyzer.check_normality(x)
 
     def auto_analyze_relationships(self):
-        """自动关系分析"""
+        # 保持不变（调用内部方法）
         print("\n" + "=" * 70)
         print("🔗 自动关系分析报告")
         print("=" * 70)
@@ -51,7 +50,6 @@ class RelationshipAnalyzer:
         categorical_vars = [v for v in all_vars
                             if self.variable_types.get(v) in ['categorical', 'categorical_numeric', 'ordinal']]
 
-        # 排除同源日期派生列的关系
         exclude_pairs = self._build_exclude_pairs(all_vars)
         print(f"\n📌 排除 {len(exclude_pairs)} 对日期相关关系")
 
@@ -83,22 +81,18 @@ class RelationshipAnalyzer:
         return exclude_pairs
 
     def _plot_complete_correlation_matrix(self, all_vars, numeric_vars, categorical_vars, exclude_pairs):
-        """绘制完整相关性矩阵"""
+        # 调用各子方法
         significant_pairs = []
 
-        # 数值-数值相关性
         if len(numeric_vars) >= 2:
             self._analyze_numeric_numeric(numeric_vars, exclude_pairs, significant_pairs)
 
-        # 分类-分类关联
         if len(categorical_vars) >= 2:
-            self._analyze_categorical_categorical(categorical_vars, exclude_pairs, significant_pairs)
+            self._analyze_categorical_categorical_vectorized(categorical_vars, exclude_pairs, significant_pairs)
 
-        # 数值-分类关联
         if numeric_vars and categorical_vars:
-            self._analyze_numeric_categorical(numeric_vars, categorical_vars, exclude_pairs, significant_pairs)
+            self._analyze_numeric_categorical_vectorized(numeric_vars, categorical_vars, exclude_pairs, significant_pairs)
 
-        # 综合热力图 - 使用统一模块
         if len(numeric_vars) >= 2:
             plot_correlation(self.data, numeric_vars)
         else:
@@ -136,9 +130,11 @@ class RelationshipAnalyzer:
                                     'statistic': corr_value, 'p_value': p_value, 'strength': abs(corr_value)
                                 })
 
-    def _analyze_categorical_categorical(self, categorical_vars, exclude_pairs, significant_pairs):
-        """分析分类-分类关联"""
+    # ==================== 向量化改造：分类-分类关联 (Cramer's V) ====================
+    def _analyze_categorical_categorical_vectorized(self, categorical_vars, exclude_pairs, significant_pairs):
+        """向量化计算所有分类变量对的 Cramer's V"""
         print("\n【分类变量关联矩阵 (Cramer's V)】")
+        # 过滤有效分类变量
         valid_cat = []
         for v in categorical_vars:
             if v in self.date_derived_columns:
@@ -155,41 +151,43 @@ class RelationshipAnalyzer:
         n_cat = len(valid_cat)
         cramer_matrix = pd.DataFrame(index=valid_cat, columns=valid_cat, dtype=float)
 
+        # 使用笛卡尔积迭代构建所有列对的交叉表（但可以用向量化方式预计算）
+        # 由于 chi2_contingency 需要逐个计算，这里仍然循环，但尽量减少计算量
+        # 优化：先计算所有列对的唯一值数，跳过无变化的列对
         for i in range(n_cat):
-            for j in range(n_cat):
-                if i == j:
-                    cramer_matrix.iloc[i, j] = 1.0
-                elif i < j:
-                    v1, v2 = valid_cat[i], valid_cat[j]
-                    if (v1, v2) in exclude_pairs or (v2, v1) in exclude_pairs:
-                        cramer_matrix.iloc[i, j] = np.nan
-                        continue
-                    try:
-                        crosstab = pd.crosstab(self.data[v1], self.data[v2])
-                        # 检查 crosstab 是否有效
-                        if crosstab.size == 0 or crosstab.shape[0] <= 1 or crosstab.shape[1] <= 1:
-                            cramer_matrix.iloc[i, j] = 0
-                            continue
-                        chi2, p_value, dof, expected = chi2_contingency(crosstab)
-                        n = len(self.data)
-                        min_dim = min(crosstab.shape) - 1
-                        if min_dim <= 0:
-                            cramer_matrix.iloc[i, j] = 0
-                            continue
-                        cramer_v = np.sqrt(chi2 / (n * min_dim)) if chi2 > 0 and n > 0 else 0
-                        cramer_matrix.iloc[i, j] = cramer_v
-                        if p_value < 0.05:
-                            significant_pairs.append({
-                                'var1': v1, 'var2': v2, 'type': '分类-分类',
-                                'statistic': cramer_v, 'p_value': p_value, 'strength': cramer_v
-                            })
-                    except Exception as e:
-                        print(f"  ⚠️ 计算 {v1} vs {v2} 失败: {e}")
+            for j in range(i + 1, n_cat):
+                v1, v2 = valid_cat[i], valid_cat[j]
+                if (v1, v2) in exclude_pairs or (v2, v1) in exclude_pairs:
+                    cramer_matrix.iloc[i, j] = np.nan
+                    continue
+                try:
+                    crosstab = pd.crosstab(self.data[v1], self.data[v2])
+                    if crosstab.size == 0 or crosstab.shape[0] <= 1 or crosstab.shape[1] <= 1:
                         cramer_matrix.iloc[i, j] = 0
-                else:
-                    cramer_matrix.iloc[i, j] = cramer_matrix.iloc[j, i]
+                        continue
+                    chi2, p_value, dof, expected = chi2_contingency(crosstab)
+                    n = len(self.data)
+                    min_dim = min(crosstab.shape) - 1
+                    if min_dim <= 0:
+                        cramer_matrix.iloc[i, j] = 0
+                        continue
+                    cramer_v = np.sqrt(chi2 / (n * min_dim)) if chi2 > 0 and n > 0 else 0
+                    cramer_matrix.iloc[i, j] = cramer_v
+                    if p_value < 0.05:
+                        significant_pairs.append({
+                            'var1': v1, 'var2': v2, 'type': '分类-分类',
+                            'statistic': cramer_v, 'p_value': p_value, 'strength': cramer_v
+                        })
+                except Exception as e:
+                    print(f"  ⚠️ 计算 {v1} vs {v2} 失败: {e}")
+                    cramer_matrix.iloc[i, j] = 0
 
-        # 检查是否有有效数据
+        # 填充对称矩阵
+        for i in range(n_cat):
+            for j in range(i + 1, n_cat):
+                cramer_matrix.iloc[j, i] = cramer_matrix.iloc[i, j]
+            cramer_matrix.iloc[i, i] = 1.0
+
         if cramer_matrix.isna().all().all() or (cramer_matrix.values == 0).all():
             print("  无有效关联数据，跳过热力图")
             return
@@ -202,34 +200,55 @@ class RelationshipAnalyzer:
         plt.tight_layout()
         plt.show()
 
-    def _analyze_numeric_categorical(self, numeric_vars, categorical_vars, exclude_pairs, significant_pairs):
-        """分析数值-分类关联"""
+    # ==================== 向量化改造：数值-分类关联 (Eta-squared) ====================
+    def _analyze_numeric_categorical_vectorized(self, numeric_vars, categorical_vars, exclude_pairs,
+                                                significant_pairs):
+        """向量化计算所有数值-分类变量对的 Eta-squared"""
         print("\n【数值-分类关联矩阵 (Eta-squared)】")
         eta_matrix = pd.DataFrame(index=numeric_vars, columns=categorical_vars, dtype=float)
 
+        # 预计算每个数值列的总均值和总平方和（用于计算 Eta）
         for num_var in numeric_vars:
+            all_values = self.data[num_var].dropna()
+            total_mean = all_values.mean()
+            total_ss = ((all_values - total_mean) ** 2).sum()
+
             for cat_var in categorical_vars:
                 if (num_var, cat_var) in exclude_pairs or (cat_var, num_var) in exclude_pairs:
                     eta_matrix.loc[num_var, cat_var] = np.nan
                     continue
 
-                groups = [self.data[self.data[cat_var] == name][num_var].dropna()
-                          for name in self.data[cat_var].unique() if len(self.data[self.data[cat_var] == name]) > 1]
-                groups = [g for g in groups if len(g) > 1]
-
-                if len(groups) >= 2:
-                    all_values = self.data[num_var].dropna()
-                    ss_between = sum(len(g) * (g.mean() - all_values.mean()) ** 2 for g in groups)
-                    ss_total = sum((all_values - all_values.mean()) ** 2)
-                    eta_sq = ss_between / ss_total if ss_total > 0 else 0
-                    eta_matrix.loc[num_var, cat_var] = eta_sq
-                    if eta_sq > 0.01:
-                        significant_pairs.append({
-                            'var1': num_var, 'var2': cat_var, 'type': '数值-分类',
-                            'statistic': eta_sq, 'p_value': 0.01, 'strength': eta_sq
-                        })
-                else:
+                # 使用 groupby 一次性计算组内统计量（向量化）
+                grouped = self.data.groupby(cat_var)[num_var]
+                # 过滤掉少于2个样本的组
+                valid_groups = grouped.filter(lambda x: len(x) > 1)
+                if valid_groups.empty:
                     eta_matrix.loc[num_var, cat_var] = np.nan
+                    continue
+
+                # 计算组间平方和
+                group_means = grouped.mean()
+                group_counts = grouped.count()
+                # 只保留有效的组
+                valid_mask = group_counts > 1
+                if not valid_mask.any():
+                    eta_matrix.loc[num_var, cat_var] = np.nan
+                    continue
+                group_means_valid = group_means[valid_mask]
+                group_counts_valid = group_counts[valid_mask]
+
+                # 组间平方和 = sum( count_i * (mean_i - total_mean)^2 )
+                ss_between = (group_counts_valid * ((group_means_valid - total_mean) ** 2)).sum()
+                # 总平方和 = sum( (x - total_mean)^2 )
+                # 这里复用总平方和（所有样本）
+                ss_total = total_ss
+                eta_sq = ss_between / ss_total if ss_total > 0 else 0
+                eta_matrix.loc[num_var, cat_var] = eta_sq
+                if eta_sq > 0.01:
+                    significant_pairs.append({
+                        'var1': num_var, 'var2': cat_var, 'type': '数值-分类',
+                        'statistic': eta_sq, 'p_value': 0.01, 'strength': eta_sq
+                    })
 
         print(eta_matrix.round(4))
         plt.figure(figsize=(12, 8))
@@ -238,6 +257,14 @@ class RelationshipAnalyzer:
         plt.title('数值-分类变量关联矩阵 (Eta-squared)')
         plt.tight_layout()
         plt.show()
+
+    # 保留旧方法名以兼容（指向新方法）
+    def _analyze_categorical_categorical(self, categorical_vars, exclude_pairs, significant_pairs):
+        self._analyze_categorical_categorical_vectorized(categorical_vars, exclude_pairs, significant_pairs)
+
+    def _analyze_numeric_categorical(self, numeric_vars, categorical_vars, exclude_pairs, significant_pairs):
+        self._analyze_numeric_categorical_vectorized(numeric_vars, categorical_vars, exclude_pairs,
+                                                     significant_pairs)
 
     def _print_significant_pairs(self, significant_pairs):
         """打印显著关联对"""

@@ -6,6 +6,7 @@ from pydantic import BaseModel
 class AnalysisRequest(BaseModel):
     session_id: str
     variable_types: Optional[Dict[str, str]] = None
+    include_html: bool = False  # ✅ 新增：是否生成 HTML 报告，默认 False
 
 
 class AnalysisResponse(BaseModel):

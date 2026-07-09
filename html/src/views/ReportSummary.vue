@@ -3,7 +3,7 @@
     <div class="report-header">
       <h2>📊 分析总览</h2>
       <div class="header-actions">
-        <el-button size="small" type="primary" plain @click="handleExport('html')">
+        <el-button size="small" type="primary" plain @click="handleDownloadHtml">
           📄 导出HTML
         </el-button>
         <el-button size="small" type="success" plain @click="handleExport('json')">
@@ -575,6 +575,22 @@ async function loadData() {
     ElMessage.error('加载报告失败: ' + err.message)
   } finally {
     loading.value = false
+  }
+}
+
+// ✅ 新增：下载 HTML（前端动态生成）
+async function handleDownloadHtml() {
+  const sessionId = sessionStore.currentSessionId || localStorage.getItem('lastSessionId')
+  if (!sessionId) {
+    ElMessage.warning('没有可导出的会话')
+    return
+  }
+
+  try {
+    await reportApi.downloadHtml(sessionId)
+    ElMessage.success('HTML 报告导出成功')
+  } catch (err) {
+    ElMessage.error('导出失败: ' + err.message)
   }
 }
 

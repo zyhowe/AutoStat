@@ -1,3 +1,4 @@
+// src/main.js
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
 import ElementPlus from 'element-plus'
@@ -30,7 +31,8 @@ import {
   GridComponent,
   VisualMapComponent,
   ToolboxComponent,
-  DataZoomComponent
+  DataZoomComponent,
+  MarkLineComponent  // ✅ 新增：注册 MarkLine 组件
 } from 'echarts/components'
 
 use([
@@ -49,7 +51,8 @@ use([
   GridComponent,
   VisualMapComponent,
   ToolboxComponent,
-  DataZoomComponent
+  DataZoomComponent,
+  MarkLineComponent  // ✅ 新增
 ])
 
 const app = createApp(App)

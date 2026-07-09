@@ -1,4 +1,4 @@
-// src/views/DataOverview.vue（完整代码）
+// src/views/DataOverview.vue（完整代码，已修复 toFixed 报错）
 <template>
   <div class="data-overview">
     <h2>📊 数据概览</h2>
@@ -77,39 +77,39 @@
               </el-table-column>
               <el-table-column prop="mean" label="均值" width="100" align="center">
                 <template #default="{ row }">
-                  {{ row.mean !== undefined ? row.mean.toFixed(2) : '-' }}
+                  {{ row.mean !== undefined && row.mean !== null ? Number(row.mean).toFixed(2) : '-' }}
                 </template>
               </el-table-column>
               <el-table-column prop="median" label="中位数" width="100" align="center">
                 <template #default="{ row }">
-                  {{ row.median !== undefined ? row.median.toFixed(2) : '-' }}
+                  {{ row.median !== undefined && row.median !== null ? Number(row.median).toFixed(2) : '-' }}
                 </template>
               </el-table-column>
               <el-table-column prop="std" label="标准差" width="100" align="center">
                 <template #default="{ row }">
-                  {{ row.std !== undefined ? row.std.toFixed(2) : '-' }}
+                  {{ row.std !== undefined && row.std !== null ? Number(row.std).toFixed(2) : '-' }}
                 </template>
               </el-table-column>
               <el-table-column prop="min" label="最小值" width="90" align="center">
                 <template #default="{ row }">
-                  {{ row.min !== undefined ? row.min.toFixed(2) : '-' }}
+                  {{ row.min !== undefined && row.min !== null ? Number(row.min).toFixed(2) : '-' }}
                 </template>
               </el-table-column>
               <el-table-column prop="max" label="最大值" width="90" align="center">
                 <template #default="{ row }">
-                  {{ row.max !== undefined ? row.max.toFixed(2) : '-' }}
+                  {{ row.max !== undefined && row.max !== null ? Number(row.max).toFixed(2) : '-' }}
                 </template>
               </el-table-column>
               <el-table-column label="分布区间" min-width="160" align="center">
                 <template #default="{ row }">
-                  <div class="range-bar-wrapper" :title="`${row.min.toFixed(2)} ~ ${row.max.toFixed(2)}，均值 ${row.mean.toFixed(2)}`">
+                  <div class="range-bar-wrapper" :title="`${Number(row.min).toFixed(2)} ~ ${Number(row.max).toFixed(2)}，均值 ${Number(row.mean).toFixed(2)}`">
                     <div class="range-bar-track">
                       <div class="range-bar-fill" :style="{ left: getRangeBarLeft(row), width: getRangeBarWidth(row) }" />
                       <div class="range-bar-dot" :style="{ left: getRangeBarDot(row) }" />
                     </div>
                     <div class="range-bar-labels">
-                      <span class="range-min">{{ row.min !== undefined ? row.min.toFixed(1) : '-' }}</span>
-                      <span class="range-max">{{ row.max !== undefined ? row.max.toFixed(1) : '-' }}</span>
+                      <span class="range-min">{{ row.min !== undefined && row.min !== null ? Number(row.min).toFixed(1) : '-' }}</span>
+                      <span class="range-max">{{ row.max !== undefined && row.max !== null ? Number(row.max).toFixed(1) : '-' }}</span>
                     </div>
                   </div>
                 </template>
@@ -137,7 +137,7 @@
               <el-table-column prop="mode" label="众数" width="100" align="center" show-overflow-tooltip />
               <el-table-column prop="mode_pct" label="众数占比" width="90" align="center">
                 <template #default="{ row }">
-                  {{ row.mode_pct !== undefined ? row.mode_pct.toFixed(1) + '%' : '-' }}
+                  {{ row.mode_pct !== undefined ? Number(row.mode_pct).toFixed(1) + '%' : '-' }}
                 </template>
               </el-table-column>
               <el-table-column label="类别分布 (Top3)" min-width="180">
@@ -244,16 +244,17 @@ const continuousVarList = computed(() => {
   const result = []
   Object.entries(summaries).forEach(([name, info]) => {
     if (info.type === 'continuous') {
-      const minVal = info.min !== undefined ? info.min : 0
-      const maxVal = info.max !== undefined ? info.max : 0
-      const meanVal = info.mean !== undefined ? info.mean : 0
+      // ✅ 强制转换为 number，避免 toFixed 报错
+      const minVal = info.min !== undefined && info.min !== null ? Number(info.min) : 0
+      const maxVal = info.max !== undefined && info.max !== null ? Number(info.max) : 0
+      const meanVal = info.mean !== undefined && info.mean !== null ? Number(info.mean) : 0
       result.push({
         name,
         count: info.count || 0,
         missing_pct: info.missing_pct || 0,
         mean: meanVal,
-        median: info.median !== undefined ? info.median : 0,
-        std: info.std !== undefined ? info.std : 0,
+        median: info.median !== undefined && info.median !== null ? Number(info.median) : 0,
+        std: info.std !== undefined && info.std !== null ? Number(info.std) : 0,
         min: minVal,
         max: maxVal,
         _min: minVal,
@@ -341,30 +342,32 @@ const otherVarList = computed(() => {
   return result
 })
 
-// ==================== 区间条辅助 ====================
+// ==================== 区间条辅助（带类型安全） ====================
 function getRangeBarLeft(row) {
-  const min = row._min !== undefined ? row._min : 0
-  const max = row._max !== undefined ? row._max : 0
+  const min = row._min !== undefined && row._min !== null ? Number(row._min) : 0
+  const max = row._max !== undefined && row._max !== null ? Number(row._max) : 0
+  const mean = row._mean !== undefined && row._mean !== null ? Number(row._mean) : 0
   const range = max - min
   if (range === 0) return '0%'
-  return ((row._mean - min) / range * 100) + '%'
+  return ((mean - min) / range * 100) + '%'
 }
 
 function getRangeBarWidth(row) {
-  const min = row._min !== undefined ? row._min : 0
-  const max = row._max !== undefined ? row._max : 0
+  const min = row._min !== undefined && row._min !== null ? Number(row._min) : 0
+  const max = row._max !== undefined && row._max !== null ? Number(row._max) : 0
   const range = max - min
   if (range === 0) return '100%'
-  const width = (range / (max + 1)) * 100
+  const width = (range / (Math.abs(max) + 1)) * 100
   return Math.max(width, 5) + '%'
 }
 
 function getRangeBarDot(row) {
-  const min = row._min !== undefined ? row._min : 0
-  const max = row._max !== undefined ? row._max : 0
+  const min = row._min !== undefined && row._min !== null ? Number(row._min) : 0
+  const max = row._max !== undefined && row._max !== null ? Number(row._max) : 0
+  const mean = row._mean !== undefined && row._mean !== null ? Number(row._mean) : 0
   const range = max - min
   if (range === 0) return '50%'
-  return ((row._mean - min) / range * 100) + '%'
+  return ((mean - min) / range * 100) + '%'
 }
 
 function getCategoryColor(idx) {
@@ -438,7 +441,7 @@ const categoryCountOption = computed(() => {
   }
 })
 
-// ==================== 连续变量取值范围 ====================
+// ==================== 连续变量取值范围（修复 toFixed 报错） ====================
 const hasContinuousRangeData = computed(() => {
   const summaries = reportData.value?.variable_summaries || {}
   return Object.keys(summaries).filter(key => summaries[key]?.type === 'continuous').length > 0
@@ -448,28 +451,59 @@ const continuousRangeOption = computed(() => {
   const summaries = reportData.value?.variable_summaries || {}
   const contVars = Object.keys(summaries).filter(key => summaries[key]?.type === 'continuous')
   if (contVars.length === 0) return {}
+
   const topVars = contVars.slice(0, 8)
   const colors = ['#409EFF', '#67C23A', '#E6A23C', '#F56C6C', '#9B59B6', '#1ABC9C', '#3498DB', '#2ECC71']
+
+  // ✅ 强制转换为 number
   const data = topVars.map((key, idx) => {
     const info = summaries[key]
-    return { name: key, min: info.min || 0, max: info.max || 0, mean: info.mean || 0, color: colors[idx % colors.length] }
+    return {
+      name: key,
+      min: info.min !== undefined && info.min !== null ? Number(info.min) : 0,
+      max: info.max !== undefined && info.max !== null ? Number(info.max) : 0,
+      mean: info.mean !== undefined && info.mean !== null ? Number(info.mean) : 0,
+      color: colors[idx % colors.length]
+    }
   })
+
   return {
-    tooltip: { trigger: 'axis', formatter: (params) => {
-      const d = data.find(item => item.name === params[0].name)
-      return d ? `<strong>${d.name}</strong><br/>最小值：${d.min.toFixed(2)}<br/>最大值：${d.max.toFixed(2)}<br/>均值：${d.mean.toFixed(2)}` : ''
-    }},
+    tooltip: {
+      trigger: 'axis',
+      formatter: (params) => {
+        const d = data.find(item => item.name === params[0].name)
+        if (!d) return ''
+        return `<strong>${d.name}</strong><br/>最小值：${d.min.toFixed(2)}<br/>最大值：${d.max.toFixed(2)}<br/>均值：${d.mean.toFixed(2)}`
+      }
+    },
     grid: { left: '12%', right: '8%', top: '10%', bottom: '20%' },
-    xAxis: { type: 'category', data: data.map(d => d.name), axisLabel: { rotate: 30, fontSize: 10, interval: 0 } },
-    yAxis: { type: 'value', name: '取值范围' },
+    xAxis: {
+      type: 'category',
+      data: data.map(d => d.name),
+      axisLabel: { rotate: 30, fontSize: 10, interval: 0 }
+    },
+    yAxis: {
+      type: 'value',
+      name: '取值范围'
+    },
     series: [{
-      type: 'bar', name: '取值范围',
-      data: data.map(d => ({ value: d.max - d.min, itemStyle: { color: d.color, opacity: 0.3 } })),
+      type: 'bar',
+      name: '取值范围',
+      data: data.map(d => ({
+        value: d.max - d.min,
+        itemStyle: { color: d.color, opacity: 0.3 }
+      })),
       barWidth: '40%',
-      label: { show: true, position: 'top', formatter: (params) => {
-        const d = data[params.dataIndex]
-        return `${d.min.toFixed(1)} ~ ${d.max.toFixed(1)}`
-      }, fontSize: 9 }
+      label: {
+        show: true,
+        position: 'top',
+        formatter: (params) => {
+          const d = data[params.dataIndex]
+          if (!d) return ''
+          return `${d.min.toFixed(1)} ~ ${d.max.toFixed(1)}`
+        },
+        fontSize: 9
+      }
     }]
   }
 })
@@ -491,7 +525,7 @@ function buildFieldData(fieldName) {
     const entries = Object.entries(matrix[fieldName])
     for (const [varName, value] of entries) {
       if (varName !== fieldName && value !== null && value !== undefined && Math.abs(value) >= 0.7) {
-        correlations.push({ var: varName, value: parseFloat(value.toFixed(4)) })
+        correlations.push({ var: varName, value: parseFloat(Number(value).toFixed(4)) })
       }
     }
     correlations.sort((a, b) => Math.abs(b.value) - Math.abs(a.value))

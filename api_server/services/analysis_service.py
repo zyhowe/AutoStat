@@ -36,7 +36,7 @@ class AnalysisService:
     def set_client_ip(self, client_ip: str):
         self._client_ip = client_ip
 
-    def run_analysis(self, session_id: str, file_path: str, variable_types: Dict, task_id: str):
+    def run_analysis(self, session_id: str, file_path: str, variable_types: Dict, task_id: str, include_html: bool = False):  # ✅ 新增参数
         from api_server.routers.analysis import task_status
 
         if self._client_ip:
@@ -59,9 +59,7 @@ class AnalysisService:
                 base._infer_variable_types()
                 filtered_types = base.variable_types
 
-            # ============================================================
-            # 🔥 获取真实表名（带调试日志）
-            # ============================================================
+            # 获取真实表名（带调试日志）
             print("\n" + "=" * 70)
             print("[DEBUG] ===== analysis_service.py: 获取真实表名 =====")
             print("=" * 70)
@@ -86,11 +84,9 @@ class AnalysisService:
                     if tables_info:
                         real_table_name = tables_info[0]
 
-            # 如果从 tables_info 没取到，使用 source_name 作为备选
             if not real_table_name and session_meta:
                 source_name = session_meta.get('source_name', '')
                 print(f"[DEBUG] source_name: {source_name}")
-                # 去掉 _db、_demo 等后缀
                 if source_name.endswith('_db'):
                     real_table_name = source_name[:-3]
                 elif source_name.endswith('_demo'):
@@ -108,7 +104,7 @@ class AnalysisService:
 
             analyzer = AutoStatisticalAnalyzer(
                 df,
-                source_table_name=real_table_name,  # 🔥 使用真实表名
+                source_table_name=real_table_name,
                 predefined_types=filtered_types,
                 skip_auto_inference=bool(filtered_types),
                 quiet=True
@@ -122,7 +118,8 @@ class AnalysisService:
             sys.stdout = log_capture
 
             try:
-                analyzer.generate_full_report()
+                # ✅ 传递 include_html 参数给 generate_full_report
+                analyzer.generate_full_report(include_html=include_html)
                 log_content = log_capture.getvalue()
             finally:
                 sys.stdout = old_stdout
@@ -136,9 +133,7 @@ class AnalysisService:
 
             print(f"[DEBUG] ✅ analysis_result.source_table = {json_result.get('source_table')}")
 
-            # ============================================================
             # 补充时间序列真实数据点（最近30个）
-            # ============================================================
             try:
                 data = analyzer.data
                 variable_types_dict = analyzer.variable_types
@@ -191,9 +186,7 @@ class AnalysisService:
                 import traceback as tb
                 tb.print_exc()
 
-            # ============================================================
             # 生成核心结论
-            # ============================================================
             try:
                 from autostat.core.insight import InsightService
                 insight_service = InsightService()
@@ -206,17 +199,21 @@ class AnalysisService:
                 import traceback as tb
                 tb.print_exc()
 
-            # 生成 HTML 报告
-            reporter = Reporter(analyzer)
-            html_content = reporter.to_html()
-            self.session_service.save_html(session_id, html_content)
+            # ============================================================
+            # HTML 报告：仅在 include_html=True 时生成
+            # ============================================================
+            if include_html:
+                reporter = Reporter(analyzer)
+                html_content = reporter.to_html()
+                self.session_service.save_html(session_id, html_content)
+                print(f"✅ HTML 报告已生成并保存")
+            else:
+                print(f"⏩ 跳过 HTML 报告生成 (include_html=False)")
 
             self.session_service.save_variable_types(session_id, analyzer.variable_types)
             self.session_service.save_analyzer(session_id, analyzer)
 
-            # ============================================================
             # 生成个性化推荐问题
-            # ============================================================
             try:
                 questions = self.recommendation_service.generate(json_result)
                 self.session_service.save_recommended_questions(session_id, questions)
