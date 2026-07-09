@@ -17,39 +17,32 @@
     </div>
 
     <div v-else-if="reportData" class="summary-content">
-      <!-- ==================== 关键指标卡片（新顺序） ==================== -->
+      <!-- ==================== 关键指标卡片 ==================== -->
       <div class="stats-row">
-        <!-- 1. 总行数 -->
         <div class="stat-card">
           <div class="stat-value">{{ reportData.data_shape?.rows || 0 }}</div>
           <div class="stat-label">总行数</div>
         </div>
-        <!-- 2. 总列数 -->
         <div class="stat-card">
           <div class="stat-value">{{ reportData.data_shape?.columns || 0 }}</div>
           <div class="stat-label">总列数</div>
         </div>
-        <!-- 3. 异常字段（前置） -->
         <div class="stat-card" :class="outlierClass">
           <div class="stat-value">{{ outlierCount }}</div>
           <div class="stat-label">异常字段</div>
         </div>
-        <!-- 4. 高缺失字段（前置） -->
         <div class="stat-card" :class="highMissingClass">
           <div class="stat-value">{{ highMissingCount }}</div>
           <div class="stat-label">高缺失字段</div>
         </div>
-        <!-- 5. 勾稽规则（前置） -->
         <div class="stat-card" :class="ruleClass">
           <div class="stat-value">{{ auditRulesTotal }}</div>
           <div class="stat-label">勾稽规则</div>
         </div>
-        <!-- 6. 强相关对数（后置） -->
         <div class="stat-card" :class="corrCountClass">
           <div class="stat-value">{{ highCorrCount }}</div>
           <div class="stat-label">强相关对数</div>
         </div>
-        <!-- 7. 可预测模型（后置） -->
         <div class="stat-card" :class="modelCountClass">
           <div class="stat-value">{{ modelRecommendCount }}</div>
           <div class="stat-label">可预测模型</div>
@@ -80,15 +73,6 @@
           />
           <div v-else class="chart-empty">暂无评分数据</div>
         </div>
-      </div>
-
-      <!-- 缺失率柱状图（保留TOP5） -->
-      <div class="chart-card full-width">
-        <div class="chart-header">
-          <span class="chart-title">📋 缺失率最高的字段</span>
-        </div>
-        <v-chart v-if="hasMissingChartData" :option="missingBarOption" class="chart-container" style="height: 280px;" />
-        <div v-else class="chart-empty">暂无缺失数据</div>
       </div>
 
       <!-- ==================== 核心发现 ==================== -->
@@ -129,7 +113,7 @@
             </div>
           </div>
 
-          <!-- 质量发现（保留缺失重复） -->
+          <!-- 质量发现 -->
           <div v-if="qualityDiscoveries.length > 0" class="discovery-group quality-group">
             <div class="group-header">
               <span class="group-icon">🔍</span>
@@ -382,59 +366,6 @@ const gaugeOption = computed(() => {
         offsetCenter: [0, '30%']
       },
       data: [{ value: score }]
-    }]
-  }
-})
-
-// ==================== 缺失率柱状图 ====================
-const hasMissingChartData = computed(() => {
-  const missing = reportData.value?.quality_report?.missing || []
-  return missing.length > 0
-})
-
-const missingBarOption = computed(() => {
-  const missing = reportData.value?.quality_report?.missing || []
-  const sorted = [...missing].sort((a, b) => (b.percent || 0) - (a.percent || 0))
-  const top = sorted.slice(0, 5)
-  return {
-    tooltip: {
-      trigger: 'axis',
-      formatter: function(params) {
-        const p = params[0]
-        return `<strong>${p.name}</strong><br/>缺失率：${p.value}%`
-      }
-    },
-    grid: { left: '10%', right: '8%', top: '10%', bottom: '20%' },
-    xAxis: {
-      type: 'category',
-      data: top.map(m => m.column || '未知'),
-      axisLabel: { rotate: 30, fontSize: 10, interval: 0 },
-      axisLine: { show: false },
-      axisTick: { show: false }
-    },
-    yAxis: {
-      type: 'value',
-      max: 100,
-      name: '缺失率 (%)',
-      nameLocation: 'middle',
-      nameGap: 35,
-      nameTextStyle: { fontSize: 11, color: '#909399' }
-    },
-    series: [{
-      type: 'bar',
-      data: top.map(m => ({
-        value: Math.round(m.percent || 0),
-        itemStyle: {
-          color: (m.percent || 0) > 50 ? '#F56C6C' : (m.percent || 0) > 20 ? '#E6A23C' : '#67C23A'
-        }
-      })),
-      barWidth: '50%',
-      label: {
-        show: true,
-        position: 'top',
-        formatter: '{c}%',
-        fontSize: 10
-      }
     }]
   }
 })

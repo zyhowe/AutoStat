@@ -17,15 +17,7 @@ router = APIRouter()
 
 def get_client_ip(request: Request) -> str:
     """从请求中获取客户端IP"""
-    # 优先从 X-Client-IP 请求头获取（前端主动传递）
-    client_ip = request.headers.get("X-Client-IP")
-    if client_ip:
-        return client_ip
-    # 从 X-Forwarded-For 获取
-    forwarded = request.headers.get("X-Forwarded-For")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
-    # 从 client.host 获取
+    # 直接使用 remote_addr（TCP连接IP）
     if request.client:
         return request.client.host
     return "localhost"

@@ -402,16 +402,19 @@ class TimeSeriesAnalyzer:
                 print(f"     ❌ 随机游走序列 → 推荐 简单趋势线")
 
         key = f"{value_col}_{entity_name}" if entity_name and entity_name != "整体" else value_col
+
+        # ============================================================
+        # 🔥 修复：确保 is_stationary、has_autocorrelation、has_seasonality 是布尔值
+        # ============================================================
         self.time_series_diagnostics[key] = {
-            'is_stationary': is_stationary,
-            'has_autocorrelation': has_autocorrelation,
-            'has_seasonality': has_seasonality,
-            'n_samples': len(series),
-            'mean': series.mean(),
-            'std': series.std(),
-            'last_value': series.iloc[-1]
+            'is_stationary': bool(is_stationary) if is_stationary is not None else False,
+            'has_autocorrelation': bool(has_autocorrelation) if has_autocorrelation is not None else False,
+            'has_seasonality': bool(has_seasonality) if has_seasonality is not None else False,
+            'n_samples': int(len(series)),
+            'mean': float(series.mean()),
+            'std': float(series.std()),
+            'last_value': float(series.iloc[-1])
         }
 
-        # 使用统一模块显示图表
         if detailed:
             plot_timeseries(series, value_col)

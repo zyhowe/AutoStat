@@ -1,3 +1,4 @@
+// src/App.vue
 <template>
   <div id="app">
     <el-container>
@@ -13,12 +14,22 @@
         </el-main>
       </el-container>
     </el-container>
+    <!-- 全局字段详情弹窗 -->
+    <FieldDetailDialog
+      v-model="fieldDetailStore.visible"
+      :field-name="fieldDetailStore.fieldName"
+      :field-data="fieldDetailStore.fieldData"
+    />
   </div>
 </template>
 
 <script setup>
 import Header from './components/Header.vue'
 import Sidebar from './components/Sidebar.vue'
+import FieldDetailDialog from './components/FieldDetailDialog.vue'
+import { useFieldDetailStore } from './stores/fieldDetail'
+
+const fieldDetailStore = useFieldDetailStore()
 </script>
 
 <style>

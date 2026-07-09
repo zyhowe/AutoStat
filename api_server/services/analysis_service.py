@@ -59,9 +59,56 @@ class AnalysisService:
                 base._infer_variable_types()
                 filtered_types = base.variable_types
 
+            # ============================================================
+            # 🔥 获取真实表名（带调试日志）
+            # ============================================================
+            print("\n" + "=" * 70)
+            print("[DEBUG] ===== analysis_service.py: 获取真实表名 =====")
+            print("=" * 70)
+
+            real_table_name = None
+            session_meta = self.session_service.get_session(session_id)
+
+            print(f"[DEBUG] session_id: {session_id}")
+            print(f"[DEBUG] session_meta: {session_meta is not None}")
+
+            if session_meta:
+                tables_info = session_meta.get('tables_info', {})
+                print(f"[DEBUG] tables_info: {tables_info}")
+
+                if isinstance(tables_info, dict):
+                    tables = tables_info.get('tables', [])
+                    print(f"[DEBUG] tables (dict): {tables}")
+                    if tables and len(tables) > 0:
+                        real_table_name = tables[0]
+                elif isinstance(tables_info, list):
+                    print(f"[DEBUG] tables (list): {tables_info}")
+                    if tables_info:
+                        real_table_name = tables_info[0]
+
+            # 如果从 tables_info 没取到，使用 source_name 作为备选
+            if not real_table_name and session_meta:
+                source_name = session_meta.get('source_name', '')
+                print(f"[DEBUG] source_name: {source_name}")
+                # 去掉 _db、_demo 等后缀
+                if source_name.endswith('_db'):
+                    real_table_name = source_name[:-3]
+                elif source_name.endswith('_demo'):
+                    real_table_name = source_name[:-5]
+                else:
+                    real_table_name = source_name
+                print(f"[DEBUG] real_table_name from source_name: {real_table_name}")
+
+            if not real_table_name:
+                real_table_name = session_id
+                print(f"[DEBUG] real_table_name fallback to session_id: {real_table_name}")
+
+            print(f"[DEBUG] ✅ 最终 real_table_name: {real_table_name}")
+            print("=" * 70 + "\n")
+
             analyzer = AutoStatisticalAnalyzer(
                 df,
-                source_table_name=session_id,
+                source_table_name=real_table_name,  # 🔥 使用真实表名
                 predefined_types=filtered_types,
                 skip_auto_inference=bool(filtered_types),
                 quiet=True
@@ -87,31 +134,27 @@ class AnalysisService:
             json_result = json.loads(analyzer.to_json())
             self.session_service.save_analysis_result(session_id, json_result)
 
+            print(f"[DEBUG] ✅ analysis_result.source_table = {json_result.get('source_table')}")
 
             # ============================================================
-            # 🆕 补充时间序列真实数据点（最近30个）
+            # 补充时间序列真实数据点（最近30个）
             # ============================================================
             try:
-                # 获取数据框
                 data = analyzer.data
                 variable_types_dict = analyzer.variable_types
 
-                # 找出日期列
                 date_cols = [col for col, typ in variable_types_dict.items() if typ == 'datetime' and col in data.columns]
                 if date_cols:
                     date_col = date_cols[0]
                     numeric_cols = [col for col, typ in variable_types_dict.items() if typ == 'continuous' and col in data.columns]
 
-                    # 获取时间序列诊断结果
                     ts_diag = json_result.get('time_series_diagnostics', {})
 
                     for col in numeric_cols:
                         try:
-                            # 按日期分组取均值
                             ts_data = data.groupby(date_col)[col].mean().reset_index()
                             ts_data = ts_data.dropna()
                             if len(ts_data) > 0:
-                                # 取最近30个数据点
                                 points = ts_data.tail(30)
                                 data_points = []
                                 for _, row in points.iterrows():
@@ -125,15 +168,12 @@ class AnalysisService:
                                         'value': float(row[col])
                                     })
 
-                                # 找到对应的诊断条目并添加 data_points
-                                # 诊断条目的 key 可能是 col 或 col_分组
                                 found = False
                                 for key in list(ts_diag.keys()):
                                     if key == col or key.startswith(col + '_'):
                                         ts_diag[key]['data_points'] = data_points
                                         found = True
                                         break
-                                # 如果没有精确匹配，将数据点添加到第一个包含该字段名的条目
                                 if not found:
                                     for key in list(ts_diag.keys()):
                                         if col in key:
@@ -143,7 +183,6 @@ class AnalysisService:
                             print(f"⚠️ 保存时间序列数据点失败 ({col}): {e}")
                             continue
 
-                    # 更新 json_result 并重新保存
                     json_result['time_series_diagnostics'] = ts_diag
                     self.session_service.save_analysis_result(session_id, json_result)
                     print(f"✅ 已保存时间序列真实数据点")
@@ -153,7 +192,7 @@ class AnalysisService:
                 tb.print_exc()
 
             # ============================================================
-            # 🆕 生成核心结论
+            # 生成核心结论
             # ============================================================
             try:
                 from autostat.core.insight import InsightService
@@ -167,7 +206,7 @@ class AnalysisService:
                 import traceback as tb
                 tb.print_exc()
 
-            # 🆕 生成并保存 HTML 报告
+            # 生成 HTML 报告
             reporter = Reporter(analyzer)
             html_content = reporter.to_html()
             self.session_service.save_html(session_id, html_content)
@@ -176,7 +215,7 @@ class AnalysisService:
             self.session_service.save_analyzer(session_id, analyzer)
 
             # ============================================================
-            # 🆕 生成个性化推荐问题
+            # 生成个性化推荐问题
             # ============================================================
             try:
                 questions = self.recommendation_service.generate(json_result)

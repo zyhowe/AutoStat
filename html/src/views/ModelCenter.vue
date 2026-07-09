@@ -1,7 +1,7 @@
 <template>
   <div class="model-center">
     <h2>🤖 智能预测</h2>
-    <p class="subtitle">训练、预测一体化管理</p>
+    <p class="subtitle">模型推荐、训练、预测一体化管理</p>
 
     <el-tabs v-model="activeTab">
       <!-- ==================== 训练 ==================== -->
@@ -17,178 +17,30 @@
           <div v-else>
             <!-- 模型推荐列表 -->
             <div class="recommendations">
-              <h4>📊 推荐模型 <el-tag size="small" type="info">点击卡片自动配置</el-tag></h4>
+              <h4>📊 推荐模型 <el-tag size="small" type="info">点击卡片打开训练配置</el-tag></h4>
               <div v-if="recommendations.length === 0" class="empty-hint">
                 暂无模型推荐，请先完成数据分析
               </div>
-              <div v-else class="recommend-wrapper">
-                <div class="recommend-list">
-                  <el-card
-                    v-for="(rec, idx) in recommendations"
-                    :key="idx"
-                    class="recommend-card"
-                    shadow="hover"
-                    :class="{ active: selectedRecIndex === idx }"
-                    @click="applyRecommendation(rec, idx)"
-                  >
-                    <div class="rec-priority" :class="rec.priority">
-                      {{ rec.priority === '高' ? '🔴' : rec.priority === '中' ? '🟠' : '🟢' }}
-                    </div>
-                    <div class="rec-task">{{ rec.task_type }}</div>
-                    <div class="rec-model">{{ rec.ml }}</div>
-                    <div class="rec-target" v-if="rec.target_column">🎯 {{ rec.target_column }}</div>
-                    <div class="rec-features" v-if="rec.feature_columns && rec.feature_columns.length > 0">
-                      📊 相关特征：{{ rec.feature_columns.slice(0, 5).join('、') }}{{ rec.feature_columns.length > 5 ? `等${rec.feature_columns.length}个` : '' }}
-                    </div>
-                    <el-button
-                      size="small"
-                      type="primary"
-                      class="rec-btn"
-                      :class="{ active: selectedRecIndex === idx }"
-                    >
-                      {{ selectedRecIndex === idx ? '✅ 已选中' : '📋 使用此配置' }}
-                    </el-button>
-                  </el-card>
-                </div>
-              </div>
-            </div>
-
-            <el-divider />
-
-            <!-- 训练表单 -->
-            <h4>⚙️ 训练配置</h4>
-            <el-form label-width="120px">
-              <el-form-item label="任务类型">
-                <el-select v-model="trainForm.taskType" @change="onTaskTypeChange">
-                  <el-option label="📊 分类" value="classification" />
-                  <el-option label="📈 回归" value="regression" />
-                  <el-option label="🔘 聚类" value="clustering" />
-                  <el-option label="📅 时间序列" value="time_series" />
-                </el-select>
-              </el-form-item>
-
-              <el-form-item label="目标列" v-if="trainForm.taskType !== 'clustering'">
-                <el-select v-model="trainForm.targetColumn" placeholder="选择目标列">
-                  <el-option
-                    v-for="col in numericColumns"
-                    :key="col"
-                    :label="col"
-                    :value="col"
-                  />
-                </el-select>
-              </el-form-item>
-
-              <el-form-item label="特征列">
-                <el-select
-                  v-model="trainForm.features"
-                  multiple
-                  filterable
-                  placeholder="选择特征列"
-                  style="width: 100%"
+              <div v-else class="recommend-list">
+                <el-card
+                  v-for="(rec, idx) in recommendations"
+                  :key="idx"
+                  class="recommend-card"
+                  shadow="hover"
+                  @click="openTrainDialog(rec, idx)"
                 >
-                  <el-option
-                    v-for="col in allColumns"
-                    :key="col"
-                    :label="col"
-                    :value="col"
-                    :disabled="col === trainForm.targetColumn"
-                  />
-                </el-select>
-                <span class="hint">已选 {{ trainForm.features.length }} 个特征</span>
-              </el-form-item>
-
-              <el-form-item label="模型">
-                <el-select v-model="trainForm.modelKey" @change="onModelChange">
-                  <el-option
-                    v-for="model in availableModels"
-                    :key="model.key"
-                    :label="model.name"
-                    :value="model.key"
-                  />
-                </el-select>
-                <span class="hint">{{ getModelDescription() }}</span>
-              </el-form-item>
-
-              <!-- 模型参数 -->
-              <el-form-item label="模型参数" v-if="modelParams.length > 0">
-                <div class="params-grid">
-                  <div
-                    v-for="param in modelParams"
-                    :key="param.name"
-                    class="param-item"
-                  >
-                    <label>{{ param.label }}</label>
-                    <el-input-number
-                      v-if="param.type === 'number'"
-                      v-model="trainForm.params[param.name]"
-                      :min="param.min || 0"
-                      :max="param.max || 9999"
-                      :step="param.step || 1"
-                      size="small"
-                    />
-                    <el-input
-                      v-else-if="param.type === 'text'"
-                      v-model="trainForm.params[param.name]"
-                      size="small"
-                      :placeholder="param.placeholder || ''"
-                    />
-                    <el-select
-                      v-else-if="param.type === 'select'"
-                      v-model="trainForm.params[param.name]"
-                      size="small"
-                    >
-                      <el-option
-                        v-for="opt in param.options"
-                        :key="opt"
-                        :label="opt"
-                        :value="opt"
-                      />
-                    </el-select>
-                    <el-switch
-                      v-else-if="param.type === 'boolean'"
-                      v-model="trainForm.params[param.name]"
-                      size="small"
-                    />
-                    <span class="param-hint">{{ param.hint }}</span>
+                  <div class="rec-priority" :class="rec.priority">
+                    {{ rec.priority === '高' ? '🔴' : rec.priority === '中' ? '🟠' : '🟢' }}
                   </div>
-                </div>
-              </el-form-item>
-
-              <el-form-item label="模型名称">
-                <el-input v-model="trainForm.userModelName" placeholder="自动生成" />
-              </el-form-item>
-
-              <el-form-item>
-                <el-button
-                  type="primary"
-                  :loading="training"
-                  :disabled="!canTrain"
-                  @click="handleTrain"
-                >
-                  {{ training ? '训练中...' : '🚀 开始训练' }}
-                </el-button>
-              </el-form-item>
-            </el-form>
-
-            <!-- 训练进度 -->
-            <div v-if="training || trainLogs.length > 0" class="train-progress">
-              <el-progress :percentage="trainProgress" :format="formatProgress" />
-              <p class="status-message">{{ trainStatusMessage }}</p>
-
-              <!-- 训练日志 -->
-              <div v-if="trainLogs.length > 0" class="train-logs">
-                <h4>📋 训练日志</h4>
-                <div class="log-container">
-                  <div
-                    v-for="(log, idx) in trainLogs"
-                    :key="idx"
-                    class="log-line"
-                    :class="log.type"
-                  >
-                    <span class="log-time">{{ log.time }}</span>
-                    <span class="log-content">{{ log.message }}</span>
+                  <div class="rec-task">{{ rec.task_type }}</div>
+                  <div class="rec-model">{{ rec.ml }}</div>
+                  <div class="rec-target" v-if="rec.target_column">🎯 {{ rec.target_column }}</div>
+                  <div class="rec-features" v-if="rec.feature_columns && rec.feature_columns.length > 0">
+                    📊 {{ rec.feature_columns.slice(0, 4).join('、') }}{{ rec.feature_columns.length > 4 ? `等${rec.feature_columns.length}个` : '' }}
                   </div>
-                </div>
+                  <div class="rec-reason" v-if="rec.reason">💡 {{ rec.reason }}</div>
+                  <el-button size="small" type="primary" class="rec-btn">📋 配置训练</el-button>
+                </el-card>
               </div>
             </div>
           </div>
@@ -204,18 +56,13 @@
             </el-empty>
           </div>
           <div v-else>
-            <el-form label-width="140px" label-position="left">
-              <el-form-item label="选择模型" class="model-select-item">
-                <el-select
-                  v-model="predictForm.modelKey"
-                  @change="onModelSelect"
-                  placeholder="请选择已训练的模型"
-                  style="width: 100%"
-                >
+            <el-form label-width="120px">
+              <el-form-item label="选择模型">
+                <el-select v-model="predictForm.modelKey" @change="onModelSelect" style="width: 100%;">
                   <el-option
                     v-for="model in savedModels"
                     :key="model.model_key"
-                    :label="getModelLabel(model)"
+                    :label="model.user_model_name || model.model_key"
                     :value="model.model_key"
                   />
                 </el-select>
@@ -223,7 +70,7 @@
 
               <div v-if="selectedModel" class="model-info">
                 <el-descriptions :column="2" border size="small">
-                  <el-descriptions-item label="类型">{{ selectedModel.task_type || '未知' }}</el-descriptions-item>
+                  <el-descriptions-item label="类型">{{ selectedModel.task_type }}</el-descriptions-item>
                   <el-descriptions-item label="目标">{{ selectedModel.target_column || '无' }}</el-descriptions-item>
                   <el-descriptions-item label="特征" :span="2">
                     {{ (selectedModel.features || []).join('、') }}
@@ -234,7 +81,7 @@
                 </el-descriptions>
               </div>
 
-              <div v-if="selectedModel && selectedModel.features && selectedModel.features.length > 0" class="input-fields">
+              <div v-if="selectedModel && selectedModel.features" class="input-fields">
                 <el-form-item
                   v-for="feature in selectedModel.features"
                   :key="feature"
@@ -248,12 +95,7 @@
               </div>
             </el-form>
 
-            <el-button
-              type="primary"
-              :loading="predicting"
-              :disabled="!canPredict"
-              @click="handlePredict"
-            >
+            <el-button type="primary" :loading="predicting" :disabled="!canPredict" @click="handlePredict">
               🔍 执行预测
             </el-button>
 
@@ -284,6 +126,169 @@
         </div>
       </el-tab-pane>
     </el-tabs>
+
+    <!-- ==================== 训练配置弹窗 ==================== -->
+    <el-dialog
+      v-model="trainDialogVisible"
+      :title="`⚙️ 训练配置 - ${selectedRec?.task_type || ''}`"
+      width="780px"
+      destroy-on-close
+      :close-on-click-modal="false"
+      :close-on-press-escape="!training"
+    >
+      <div v-if="selectedRec" class="dialog-body">
+        <!-- 推荐摘要 -->
+        <div class="dialog-summary">
+          <el-alert
+            :title="`${selectedRec.task_type}：${selectedRec.ml}`"
+            :description="selectedRec.reason || '基于数据特征推荐'"
+            type="info"
+            show-icon
+            :closable="false"
+          />
+        </div>
+
+        <!-- 训练表单 -->
+        <el-form label-width="120px" :disabled="training">
+          <el-form-item label="任务类型">
+            <el-select v-model="trainForm.taskType" @change="onTaskTypeChange" style="width: 100%;">
+              <el-option label="📊 分类" value="classification" />
+              <el-option label="📈 回归" value="regression" />
+              <el-option label="🔘 聚类" value="clustering" />
+              <el-option label="📅 时间序列" value="time_series" />
+            </el-select>
+          </el-form-item>
+
+          <el-form-item label="目标列" v-if="trainForm.taskType !== 'clustering'">
+            <el-select v-model="trainForm.targetColumn" placeholder="选择目标列" style="width: 100%;">
+              <el-option
+                v-for="col in numericColumns"
+                :key="col"
+                :label="col"
+                :value="col"
+              />
+            </el-select>
+          </el-form-item>
+
+          <el-form-item label="特征列">
+            <el-select
+              v-model="trainForm.features"
+              multiple
+              filterable
+              placeholder="选择特征列"
+              style="width: 100%;"
+            >
+              <el-option
+                v-for="col in allColumns"
+                :key="col"
+                :label="col"
+                :value="col"
+                :disabled="col === trainForm.targetColumn"
+              />
+            </el-select>
+            <span class="hint">已选 {{ trainForm.features.length }} 个特征</span>
+          </el-form-item>
+
+          <el-form-item label="模型">
+            <el-select v-model="trainForm.modelKey" @change="onModelChange" style="width: 100%;">
+              <el-option
+                v-for="model in availableModels"
+                :key="model.key"
+                :label="model.name"
+                :value="model.key"
+              />
+            </el-select>
+            <span class="hint">{{ getModelDescription() }}</span>
+          </el-form-item>
+
+          <el-form-item label="模型参数" v-if="modelParams.length > 0">
+            <div class="params-grid">
+              <div
+                v-for="param in modelParams"
+                :key="param.name"
+                class="param-item"
+              >
+                <label>{{ param.label }}</label>
+                <el-input-number
+                  v-if="param.type === 'number'"
+                  v-model="trainForm.params[param.name]"
+                  :min="param.min || 0"
+                  :max="param.max || 9999"
+                  :step="param.step || 1"
+                  size="small"
+                  style="width: 100%;"
+                />
+                <el-input
+                  v-else-if="param.type === 'text'"
+                  v-model="trainForm.params[param.name]"
+                  size="small"
+                  :placeholder="param.placeholder || ''"
+                />
+                <el-select
+                  v-else-if="param.type === 'select'"
+                  v-model="trainForm.params[param.name]"
+                  size="small"
+                  style="width: 100%;"
+                >
+                  <el-option
+                    v-for="opt in param.options"
+                    :key="opt"
+                    :label="opt"
+                    :value="opt"
+                  />
+                </el-select>
+                <el-switch
+                  v-else-if="param.type === 'boolean'"
+                  v-model="trainForm.params[param.name]"
+                  size="small"
+                />
+                <span class="param-hint">{{ param.hint }}</span>
+              </div>
+            </div>
+          </el-form-item>
+
+          <el-form-item label="模型名称">
+            <el-input v-model="trainForm.userModelName" placeholder="自动生成" />
+          </el-form-item>
+        </el-form>
+
+        <!-- 训练进度和日志 -->
+        <div v-if="training || trainLogs.length > 0" class="train-progress-dialog">
+          <el-divider />
+          <el-progress :percentage="trainProgress" :format="formatProgress" />
+          <p class="status-message">{{ trainStatusMessage }}</p>
+
+          <div v-if="trainLogs.length > 0" class="train-logs">
+            <h4>📋 训练日志</h4>
+            <div class="log-container">
+              <div
+                v-for="(log, idx) in trainLogs"
+                :key="idx"
+                class="log-line"
+                :class="log.type"
+              >
+                <span class="log-time">{{ log.time }}</span>
+                <span class="log-content">{{ log.message }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <template #footer>
+        <div class="dialog-footer">
+          <el-button @click="closeDialog" :disabled="training">取消</el-button>
+          <el-button
+            type="primary"
+            :loading="training"
+            :disabled="!canTrain || training"
+            @click="handleTrain"
+          >
+            {{ training ? '训练中...' : '🚀 开始训练' }}
+          </el-button>
+        </div>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -306,11 +311,10 @@ const trainLogs = ref([])
 const predicting = ref(false)
 const predictResult = ref(null)
 
-// 推荐列表
 const recommendations = ref([])
-const selectedRecIndex = ref(-1)
+const selectedRec = ref(null)
+const trainDialogVisible = ref(false)
 
-// 训练表单
 const trainForm = ref({
   taskType: 'classification',
   targetColumn: '',
@@ -320,23 +324,17 @@ const trainForm = ref({
   params: {}
 })
 
-// 预测表单
 const predictForm = ref({
   modelKey: '',
   inputValues: {}
 })
 
-// 已保存模型
 const savedModels = ref([])
 const selectedModel = ref(null)
 
-// 可用模型
 const availableModels = ref([])
-
-// 模型参数配置
 const modelParams = ref([])
 
-// 列信息
 const allColumns = ref([])
 const numericColumns = ref([])
 
@@ -382,10 +380,7 @@ async function loadModels() {
 }
 
 async function loadRecommendations() {
-  if (!sessionStore.currentSessionId) {
-    console.warn('没有 session_id，无法加载推荐')
-    return
-  }
+  if (!sessionStore.currentSessionId) return
   try {
     const sessionId = sessionStore.currentSessionId
     const result = await reportApi.get(sessionId)
@@ -400,9 +395,9 @@ async function loadRecommendations() {
   }
 }
 
-// ==================== 推荐应用 ====================
-function applyRecommendation(rec, index) {
-  selectedRecIndex.value = index
+// ==================== 打开/关闭训练弹窗 ====================
+function openTrainDialog(rec, index) {
+  selectedRec.value = rec
 
   const taskTypeMap = {
     '回归预测': 'regression',
@@ -435,10 +430,22 @@ function applyRecommendation(rec, index) {
   const modelName = rec.ml?.split('/')[0]?.trim() || 'model'
   trainForm.value.userModelName = `${taskType}_${targetName}_${modelName}`
 
+  trainLogs.value = []
+  trainProgress.value = 0
+  trainStatusMessage.value = ''
+
   onTaskTypeChange()
   onModelChange()
 
-  ElMessage.success('已应用推荐配置')
+  trainDialogVisible.value = true
+}
+
+function closeDialog() {
+  if (training.value) {
+    ElMessage.warning('训练正在进行中，请等待完成')
+    return
+  }
+  trainDialogVisible.value = false
 }
 
 // ==================== 任务类型切换 ====================
@@ -562,11 +569,16 @@ async function handleTrain() {
         addLog('success', '训练完成', `模型: ${status.user_model_name || status.model_key}`)
         ElMessage.success('训练完成！')
         await loadModels()
+        setTimeout(() => {
+          trainDialogVisible.value = false
+          training.value = false
+        }, 1000)
         break
       }
       if (status.status === 'failed') {
         addLog('error', '训练失败', status.message || '未知错误')
         ElMessage.error(status.message || '训练失败')
+        training.value = false
         break
       }
       attempts++
@@ -575,7 +587,6 @@ async function handleTrain() {
   } catch (err) {
     addLog('error', '训练异常', err.message)
     ElMessage.error('训练失败: ' + err.message)
-  } finally {
     training.value = false
   }
 }
@@ -595,44 +606,21 @@ function formatProgress(percentage) {
 }
 
 // ==================== 预测 ====================
-
-// ✅ 下拉框显示：模型名（目标：目标列）
-function getModelLabel(model) {
-  const name = model.user_model_name || model.model_key || '未命名模型'
-  const config = model.config || {}
-  const target = config.target_column || model.target_column || ''
-  if (target) {
-    return `${name}（目标：${target}）`
-  }
-  return name
-}
-
 function onModelSelect() {
   const model = savedModels.value.find(
     m => m.model_key === predictForm.value.modelKey
   )
   if (!model) return
 
-  // ✅ 从 config 中取数据
   const config = model.config || {}
-  const taskType = config.task_type || model.task_type || '未知'
-  const targetColumn = config.target_column || model.target_column || '无'
-  const features = config.features || model.features || []
+  const features = config.features || []
 
   selectedModel.value = {
     ...model,
-    task_type: taskType,
-    target_column: targetColumn,
     features: features
   }
 
   predictForm.value.inputValues = {}
-
-  if (features.length === 0) {
-    ElMessage.warning('该模型没有特征信息，请重新训练')
-    return
-  }
-
   features.forEach(f => {
     predictForm.value.inputValues[f] = ''
   })
@@ -671,7 +659,7 @@ async function handlePredict() {
 .model-center {
   max-width: 1200px;
   margin: 0 auto;
-  padding: 20px 20px 80px 20px;
+  padding: 20px;
 }
 .subtitle {
   color: #909399;
@@ -691,20 +679,11 @@ async function handlePredict() {
   margin-bottom: 12px;
   color: #2c3e50;
 }
-
-.recommend-wrapper {
-  border: 1px solid #e4e7ed;
-  border-radius: 8px;
-  padding: 16px;
-  background: #fafafa;
-}
-
 .recommend-list {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
   gap: 12px;
 }
-
 .recommend-card {
   cursor: pointer;
   transition: all 0.2s;
@@ -715,10 +694,6 @@ async function handlePredict() {
 .recommend-card:hover {
   transform: translateY(-2px);
   box-shadow: 0 4px 12px rgba(0,0,0,0.12);
-}
-.recommend-card.active {
-  border-color: #409eff;
-  background: #ecf5ff;
 }
 .recommend-card .rec-priority {
   position: absolute;
@@ -747,13 +722,17 @@ async function handlePredict() {
   color: #909399;
   margin-top: 4px;
 }
+.recommend-card .rec-reason {
+  font-size: 12px;
+  color: #67c23a;
+  margin-top: 4px;
+  background: #f0f9eb;
+  padding: 4px 8px;
+  border-radius: 4px;
+}
 .recommend-card .rec-btn {
   margin-top: 10px;
   width: 100%;
-}
-.recommend-card .rec-btn.active {
-  background: #67c23a;
-  border-color: #67c23a;
 }
 .empty-hint {
   padding: 20px;
@@ -769,11 +748,32 @@ async function handlePredict() {
   margin-left: 12px;
 }
 
-/* ===== 参数配置 ===== */
+/* ===== 弹窗 ===== */
+.dialog-body {
+  max-height: 70vh;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+.dialog-body::-webkit-scrollbar {
+  width: 6px;
+}
+.dialog-body::-webkit-scrollbar-thumb {
+  background: #c0c4cc;
+  border-radius: 3px;
+}
+.dialog-body::-webkit-scrollbar-track {
+  background: #f0f2f6;
+  border-radius: 3px;
+}
+
+.dialog-summary {
+  margin-bottom: 16px;
+}
+
 .params-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: 12px 20px;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 12px 16px;
   padding: 12px;
   background: #f5f7fa;
   border-radius: 8px;
@@ -793,13 +793,17 @@ async function handlePredict() {
   color: #909399;
 }
 
-/* ===== 训练进度 ===== */
-.train-progress {
-  margin-top: 20px;
-  padding: 16px;
-  background: #f5f7fa;
-  border-radius: 8px;
+.dialog-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
 }
+
+/* ===== 弹窗内的训练进度 ===== */
+.train-progress-dialog {
+  margin-top: 8px;
+}
+
 .status-message {
   margin-top: 8px;
   color: #909399;
@@ -807,15 +811,15 @@ async function handlePredict() {
 }
 
 .train-logs {
-  margin-top: 16px;
+  margin-top: 12px;
 }
 .train-logs h4 {
   margin-bottom: 8px;
-  font-size: 14px;
+  font-size: 13px;
   color: #2c3e50;
 }
 .log-container {
-  max-height: 200px;
+  max-height: 150px;
   overflow-y: auto;
   background: #1e1e1e;
   border-radius: 6px;
@@ -844,43 +848,12 @@ async function handlePredict() {
 }
 
 /* ===== 预测 ===== */
-.model-select-item .el-form-item__label {
-  text-align: left !important;
-  justify-content: flex-start !important;
-}
-
-.model-select-item .el-select {
-  width: 100%;
-}
-
 .model-info {
   margin: 16px 0;
 }
-
-/* 特征区域 - 滚动防止遮挡 */
 .input-fields {
   margin: 16px 0;
-  max-height: 400px;
-  overflow-y: auto;
-  padding-right: 8px;
 }
-
-.input-fields .el-form-item {
-  margin-bottom: 16px;
-}
-
-.input-fields::-webkit-scrollbar {
-  width: 6px;
-}
-.input-fields::-webkit-scrollbar-thumb {
-  background: #c0c4cc;
-  border-radius: 3px;
-}
-.input-fields::-webkit-scrollbar-track {
-  background: #f0f2f6;
-  border-radius: 3px;
-}
-
 .predict-result {
   margin-top: 20px;
 }

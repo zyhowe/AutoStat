@@ -1,3 +1,4 @@
+// src/views/PatternDiscovery.vue
 <template>
   <div class="pattern-discovery">
     <h2>📈 规律发现</h2>
@@ -18,7 +19,6 @@
             <div class="chart-header">
               <span class="chart-title">🔗 相关性热力图</span>
               <div class="filter-bar">
-                <!-- 字段选择 -->
                 <el-select
                   v-model="selectedHeatmapFields"
                   multiple
@@ -37,7 +37,6 @@
                     :value="field"
                   />
                 </el-select>
-                <!-- 阈值下限 -->
                 <el-input-number
                   v-model="heatmapThresholdMin"
                   :min="0"
@@ -76,7 +75,9 @@
             <div class="chart-header">
               <span class="chart-title">📊 散点图</span>
               <span v-if="selectedCorrPair" class="corr-info">
-                {{ selectedCorrPair.var1 }} ↔ {{ selectedCorrPair.var2 }}
+                <span class="field-name-link" @click="openFieldDetail(selectedCorrPair.var1)">{{ selectedCorrPair.var1 }}</span>
+                ↔
+                <span class="field-name-link" @click="openFieldDetail(selectedCorrPair.var2)">{{ selectedCorrPair.var2 }}</span>
                 (r={{ selectedCorrPair.value }})
               </span>
               <span v-else class="corr-info">点击热力图格子查看</span>
@@ -98,8 +99,16 @@
           <div v-else>
             <p>发现 <strong>{{ highCorrelations.length }}</strong> 对强相关关系：</p>
             <el-table :data="highCorrelations" border size="small" max-height="400">
-              <el-table-column prop="var1" label="变量1" width="150" fixed="left" />
-              <el-table-column prop="var2" label="变量2" width="150" />
+              <el-table-column prop="var1" label="变量1" width="150" fixed="left">
+                <template #default="{ row }">
+                  <span class="field-name-link" @click="openFieldDetail(row.var1)">{{ row.var1 }}</span>
+                </template>
+              </el-table-column>
+              <el-table-column prop="var2" label="变量2" width="150">
+                <template #default="{ row }">
+                  <span class="field-name-link" @click="openFieldDetail(row.var2)">{{ row.var2 }}</span>
+                </template>
+              </el-table-column>
               <el-table-column prop="value" label="相关系数" width="120" align="center">
                 <template #default="{ row }">
                   {{ row.value.toFixed(3) }}
@@ -125,7 +134,6 @@
             <div class="chart-header">
               <span class="chart-title">📈 时间序列趋势</span>
               <div class="filter-bar">
-                <!-- 字段多选 -->
                 <el-select
                   v-model="selectedTsFields"
                   multiple
@@ -144,7 +152,6 @@
                     :value="key"
                   />
                 </el-select>
-                <!-- 分组选择 -->
                 <el-select
                   v-model="selectedTsGroup"
                   placeholder="选择分组"
@@ -181,7 +188,11 @@
           </div>
           <div v-else>
             <el-table :data="timeSeriesData" border size="small" max-height="400">
-              <el-table-column prop="key" label="变量/分组" width="180" fixed="left" />
+              <el-table-column prop="key" label="变量/分组" width="180" fixed="left">
+                <template #default="{ row }">
+                  <span class="field-name-link" @click="openFieldDetail(row.key)">{{ row.key }}</span>
+                </template>
+              </el-table-column>
               <el-table-column prop="n_samples" label="样本量" width="100" align="center" />
               <el-table-column prop="stationary" label="平稳性" width="120" align="center" />
               <el-table-column prop="autocorrelation" label="自相关性" width="120" align="center" />
@@ -205,10 +216,12 @@ import { ref, computed, onMounted, watch, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { useSessionStore } from '../stores/session'
+import { useFieldDetailStore } from '../stores/fieldDetail'
 import { reportApi } from '../api/report'
 
 const router = useRouter()
 const sessionStore = useSessionStore()
+const fieldDetailStore = useFieldDetailStore()
 
 const loading = ref(false)
 const reportData = ref(null)
@@ -228,6 +241,116 @@ const selectedCorrPair = ref(null)
 // ==================== 时间序列相关 ====================
 const selectedTsFields = ref([])
 const selectedTsGroup = ref('')
+
+// ==================== 字段详情弹窗 ====================
+const typeDisplay = {
+  continuous: '连续变量',
+  categorical: '分类变量',
+  categorical_numeric: '数值型分类',
+  ordinal: '有序分类',
+  datetime: '日期时间',
+  identifier: '标识符',
+  text: '文本'
+}
+
+function buildFieldData(fieldName) {
+  const summary = reportData.value?.variable_summaries?.[fieldName] || {}
+  const varType = reportData.value?.variable_types?.[fieldName]?.type || 'unknown'
+  const varTypeDesc = reportData.value?.variable_types?.[fieldName]?.type_desc || typeDisplay[varType] || varType
+
+  const tsDiag = reportData.value?.time_series_diagnostics?.[fieldName] || null
+  const outlier = reportData.value?.quality_report?.outliers?.[fieldName] || null
+  const missing = reportData.value?.quality_report?.missing?.find(m => m.column === fieldName) || null
+  const dupInfo = reportData.value?.quality_report?.duplicates || null
+
+  const correlations = []
+  const matrix = reportData.value?.correlations?.matrix || {}
+  if (matrix[fieldName]) {
+    const entries = Object.entries(matrix[fieldName])
+    for (const [varName, value] of entries) {
+      if (varName !== fieldName && value !== null && value !== undefined && Math.abs(value) >= 0.7) {
+        correlations.push({ var: varName, value: parseFloat(value.toFixed(4)) })
+      }
+    }
+    correlations.sort((a, b) => Math.abs(b.value) - Math.abs(a.value))
+  }
+
+  const rules = []
+  const auditRules = reportData.value?.quality_report?.audit_rules || {}
+  const allRules = [
+    ...(auditRules.arithmetic_rules || []),
+    ...(auditRules.functional_dependencies || []),
+    ...(auditRules.temporal_rules || [])
+  ]
+  for (const rule of allRules) {
+    if (rule.fields && rule.fields.includes(fieldName)) {
+      rules.push({
+        type: rule.relation_type === 'additive' ? '数值' :
+              rule.rule?.includes('→') ? '函数依赖' : '时序约束',
+        rule: rule.rule,
+        confidence: rule.confidence || 1.0
+      })
+    }
+  }
+
+  const models = []
+  const modelRecs = reportData.value?.model_recommendations || []
+  for (const rec of modelRecs) {
+    let role = ''
+    if (rec.target_column === fieldName) {
+      role = '🎯 目标'
+    } else if (rec.feature_columns && rec.feature_columns.includes(fieldName) && rec.target_column !== fieldName) {
+      role = '📊 特征'
+    }
+    if (role) {
+      models.push({
+        role: role,
+        task_type: rec.task_type || '',
+        model: rec.ml || rec.model || '',
+        target: rec.target_column || ''
+      })
+    }
+  }
+
+  let topCategories = []
+  if (summary.top_categories && Object.keys(summary.top_categories).length > 0) {
+    const entries = Object.entries(summary.top_categories)
+    const total = entries.reduce((s, e) => s + e[1], 0)
+    topCategories = entries.map(([name, count]) => ({
+      name: String(name),
+      count: count,
+      pct: total > 0 ? (count / total * 100) : 0
+    })).sort((a, b) => b.count - a.count)
+  } else if (summary.value_counts && Object.keys(summary.value_counts).length > 0) {
+    const entries = Object.entries(summary.value_counts)
+    const total = entries.reduce((s, e) => s + e[1], 0)
+    topCategories = entries.map(([name, count]) => ({
+      name: String(name),
+      count: count,
+      pct: total > 0 ? (count / total * 100) : 0
+    })).sort((a, b) => b.count - a.count)
+  }
+
+  return {
+    fieldName,
+    varType,
+    varTypeDesc,
+    summary: { ...summary, topCategories },
+    tsDiag,
+    outlier,
+    missing,
+    duplicateInfo: dupInfo,
+    correlations,
+    rules,
+    models,
+    topCategories
+  }
+}
+
+function openFieldDetail(fieldName) {
+  const data = buildFieldData(fieldName)
+  fieldDetailStore.open(fieldName, data)
+}
 
 // ==================== Watch ====================
 watch(() => reportData.value, () => {
@@ -329,7 +452,6 @@ const heatmapOption = computed(() => {
   const data = []
   for (let i = 0; i < filteredVars.length; i++) {
     for (let j = 0; j < filteredVars.length; j++) {
-      // ✅ 对角线显示为 null（白色）
       if (i === j) {
         data.push([i, j, null])
         continue
@@ -337,7 +459,6 @@ const heatmapOption = computed(() => {
       const val = matrix[filteredVars[i]]?.[filteredVars[j]]
       if (val !== undefined && val !== null) {
         const absVal = Math.abs(val)
-        // ✅ 阈值过滤：在阈值区间内的显示，否则为 null（白色）
         if (absVal >= minThreshold && absVal <= maxThreshold) {
           data.push([i, j, parseFloat(val.toFixed(2))])
         } else {
@@ -349,7 +470,6 @@ const heatmapOption = computed(() => {
     }
   }
 
-  // 获取有效数据的最大最小值
   const validData = data.filter(d => d[2] !== null && d[2] !== undefined)
   const hasValid = validData.length > 0
   const minVal = hasValid ? Math.min(...validData.map(d => d[2])) : 0
@@ -408,7 +528,6 @@ const heatmapOption = computed(() => {
           }
           const val = params.data[2]
           const absVal = Math.abs(val)
-          // 颜色映射
           if (absVal >= 0.9) return val > 0 ? '#F56C6C' : '#409EFF'
           if (absVal >= 0.7) return val > 0 ? '#E6A23C' : '#67C23A'
           return '#FFFFFF'
@@ -425,12 +544,10 @@ const hasScatterData = computed(() => {
     const matrix = reportData.value?.correlations?.matrix || {}
     return matrix[pair.var1] && matrix[pair.var1][pair.var2] !== undefined
   }
-  // 默认使用第一个强相关对
   return highCorrelations.value.length > 0
 })
 
 const scatterOption = computed(() => {
-  // 使用选中的变量对，如果没有则用第一个强相关对
   let pair = selectedCorrPair.value
   if (!pair) {
     const corrs = highCorrelations.value
@@ -443,11 +560,9 @@ const scatterOption = computed(() => {
   const var2 = pair.var2
   const corr = pair.value
 
-  // 从原始数据中提取散点数据
   let scatterData = []
   const data = reportData.value?.data
   if (data && data.length > 0) {
-    // 如果 reportData 中有原始数据，直接使用
     const sampleData = data.slice(0, 100)
     scatterData = sampleData.map(row => {
       const x = row[var1] !== undefined ? parseFloat(row[var1]) : null
@@ -459,7 +574,6 @@ const scatterOption = computed(() => {
     }).filter(d => d !== null)
   }
 
-  // 如果没有原始数据，生成模拟数据
   if (scatterData.length < 3) {
     const n = 50
     let seed = 42
@@ -530,13 +644,11 @@ const highCorrelations = computed(() => {
   return reportData.value?.correlations?.high_correlations || []
 })
 
-// 可用的时间序列字段
 const availableTsFields = computed(() => {
   const diag = reportData.value?.time_series_diagnostics || {}
   return Object.keys(diag)
 })
 
-// 可用的分组字段（分类变量）
 const availableTsGroups = computed(() => {
   const variableTypes = reportData.value?.variable_types || {}
   const groups = []
@@ -571,7 +683,6 @@ const hasRealTimeseriesData = computed(() => {
   return Object.values(diag).some(d => d.data_points && d.data_points.length > 0)
 })
 
-// 默认选中前5个时间序列字段
 const getDefaultTsFields = () => {
   const fields = availableTsFields.value
   return fields.slice(0, Math.min(5, fields.length))
@@ -604,10 +715,7 @@ const timeseriesOption = computed(() => {
 
   const colors = ['#409EFF', '#67C23A', '#E6A23C', '#F56C6C', '#9B59B6', '#1ABC9C', '#3498DB', '#2ECC71', '#E67E22', '#E74C3C']
 
-  // 如果有分组，按分组聚合数据（简化处理）
   const useGroup = group && group !== '' && group !== '无分组'
-
-  // 获取数据
   const useRealData = keys.some(k => diag[k]?.data_points && diag[k].data_points.length > 0)
 
   if (useRealData) {
@@ -747,18 +855,9 @@ async function loadData() {
   try {
     const result = await reportApi.get(sessionId)
     reportData.value = result
-
-    // 解析 reportData 中的原始数据（如果存在）
-    if (result.data && result.data.length > 0) {
-      // 原始数据已经存在，直接使用
-    }
-
-    // 初始化热力图字段
     resetHeatmapFields()
-    // 初始化时间序列字段
     selectedTsFields.value = getDefaultTsFields()
     selectedTsGroup.value = ''
-
     console.log('✅ 规律发现加载完成')
   } catch (err) {
     ElMessage.error('加载数据失败: ' + err.message)
@@ -846,6 +945,17 @@ onMounted(() => {
   font-size: 13px;
   color: #409EFF;
   font-weight: 500;
+}
+
+.field-name-link {
+  color: #409EFF;
+  cursor: pointer;
+  font-weight: 500;
+  transition: color 0.2s;
+}
+.field-name-link:hover {
+  color: #66b1ff;
+  text-decoration: underline;
 }
 
 @media (max-width: 768px) {

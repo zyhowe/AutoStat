@@ -48,7 +48,7 @@
                   v-for="(q, idx) in getPersonalizedQuestions(sub.toolId)"
                   :key="'p_' + idx"
                   class="question-item personalized"
-                  @click="onQuestionClick(q, sub.dataKey)"
+                  @click="onQuestionClick(q)"
                 >
                   <span class="q-icon">{{ q.icon || '💡' }}</span>
                   <span class="q-text personalized-text">{{ q.text }}</span>
@@ -59,7 +59,7 @@
                   v-for="(q, idx) in getCommonQuestions(sub.toolId)"
                   :key="'c_' + idx"
                   class="question-item common"
-                  @click="onQuestionClick(q, sub.dataKey)"
+                  @click="onQuestionClick(q)"
                 >
                   <span class="q-icon">{{ q.icon || '💡' }}</span>
                   <span class="q-text common-text">{{ q.text }}</span>
@@ -86,6 +86,7 @@ const props = defineProps({
     type: String,
     default: ''
   },
+  // 个性化推荐：从 analysis_result.recommended_questions 传入
   personalizedQuestions: {
     type: Object,
     default: () => ({})
@@ -106,17 +107,17 @@ const expandedGroups = ref({
 
 const activeGroup = ref('')
 
-// ===== 大项配置（含 dataKey 映射） =====
+// ===== 大项配置 =====
 const questionGroups = [
   {
     key: 'explore',
     icon: '📈',
     label: '探索分析',
     subItems: [
-      { toolId: 'describe_distribution', icon: '📊', label: '描述字段分布', dataKey: 'data_overview.distribution' },
-      { toolId: 'analyze_correlation', icon: '🔗', label: '分析变量相关性', dataKey: 'pattern_discovery.correlation' },
-      { toolId: 'detect_timeseries', icon: '📈', label: '检测时间序列规律', dataKey: 'pattern_discovery.timeseries' },
-      { toolId: 'identify_categorical', icon: '🏷️', label: '识别分类特征', dataKey: 'data_overview.categorical' }
+      { toolId: 'describe_distribution', icon: '📊', label: '描述字段分布' },
+      { toolId: 'analyze_correlation', icon: '🔗', label: '分析变量相关性' },
+      { toolId: 'detect_timeseries', icon: '📈', label: '检测时间序列规律' },
+      { toolId: 'identify_categorical', icon: '🏷️', label: '识别分类特征' }
     ]
   },
   {
@@ -124,10 +125,10 @@ const questionGroups = [
     icon: '✅',
     label: '质量诊断',
     subItems: [
-      { toolId: 'interpret_quality', icon: '📊', label: '解读质量评分', dataKey: 'quality.overall' },
-      { toolId: 'check_outliers', icon: '🚨', label: '检查异常与缺失', dataKey: 'data_validation.outliers' },
-      { toolId: 'validate_rules', icon: '🔗', label: '验证勾稽规则', dataKey: 'data_validation.audit_rules' },
-      { toolId: 'detect_duplicates', icon: '📋', label: '检测重复记录', dataKey: 'data_validation.duplicates' }
+      { toolId: 'interpret_quality', icon: '📊', label: '解读质量评分' },
+      { toolId: 'check_outliers', icon: '🚨', label: '检查异常与缺失' },
+      { toolId: 'validate_rules', icon: '🔗', label: '验证勾稽规则' },
+      { toolId: 'detect_duplicates', icon: '📋', label: '检测重复记录' }
     ]
   },
   {
@@ -135,8 +136,8 @@ const questionGroups = [
     icon: '🔍',
     label: '数据查询',
     subItems: [
-      { toolId: 'natural_query', icon: '🔍', label: '自然语言查数', dataKey: 'data_overview.natural_query' },
-      { toolId: 'generate_sql', icon: '📝', label: '生成 SQL', dataKey: 'data_overview.generate_sql' }
+      { toolId: 'natural_query', icon: '🔍', label: '自然语言查数' },
+      { toolId: 'generate_sql', icon: '📝', label: '生成 SQL' }
     ]
   },
   {
@@ -144,8 +145,8 @@ const questionGroups = [
     icon: '🤖',
     label: '智能预测',
     subItems: [
-      { toolId: 'recommend_model', icon: '🤖', label: '推荐建模方案', dataKey: 'smart_prediction.model_recommend' },
-      { toolId: 'execute_predict', icon: '🔮', label: '执行预测', dataKey: 'smart_prediction.forecast' }
+      { toolId: 'recommend_model', icon: '🤖', label: '推荐建模方案' },
+      { toolId: 'execute_predict', icon: '🔮', label: '执行预测' }
     ]
   },
   {
@@ -153,8 +154,8 @@ const questionGroups = [
     icon: '📋',
     label: '报告摘要',
     subItems: [
-      { toolId: 'generate_conclusions', icon: '📋', label: '生成核心结论', dataKey: 'report_summary.conclusions' },
-      { toolId: 'extract_insights', icon: '💡', label: '提炼业务洞察', dataKey: 'report_summary.insights' }
+      { toolId: 'generate_conclusions', icon: '📋', label: '生成核心结论' },
+      { toolId: 'extract_insights', icon: '💡', label: '提炼业务洞察' }
     ]
   }
 ]
@@ -218,10 +219,14 @@ function toggleGroup(groupKey) {
   } catch (e) { /* ignore */ }
 }
 
-// ===== 点击问题：传递问题文本 + dataKey =====
-function onQuestionClick(q, dataKey) {
+// ===== 点击问题：直接发送 prompt 和 dataKey =====
+function onQuestionClick(q) {
+  // q 包含 icon, text, prompt, dataKey
+  // 发送 prompt（如果存在），否则发送 text
+  const prompt = q.prompt || q.text
+  const dataKey = q.dataKey || null
   emit('question-click', {
-    text: q.text,
+    text: prompt,
     dataKey: dataKey
   })
 }

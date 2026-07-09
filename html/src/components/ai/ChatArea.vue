@@ -2,7 +2,15 @@
   <div class="chat-area">
     <!-- ===== 对话头部 ===== -->
     <div class="chat-header">
-      <span class="chat-title">💬 对话</span>
+      <div class="header-left">
+        <span class="chat-title">💬 对话</span>
+        <!-- 上下文选择移到标题旁边 -->
+        <el-checkbox-group v-model="localContexts" @change="onContextChange" class="context-checkboxes">
+          <el-checkbox value="json">📊 JSON</el-checkbox>
+          <el-checkbox value="upload">📁 上传</el-checkbox>
+          <el-checkbox value="source">🗄️ 源数据</el-checkbox>
+        </el-checkbox-group>
+      </div>
       <div class="header-actions">
         <el-button size="small" text @click="scrollToBottom">⬇ 到底</el-button>
         <el-button size="small" text @click="emit('clear')">清空</el-button>
@@ -101,9 +109,9 @@
           </template>
         </el-input>
       </div>
-      <div class="input-hint">
-        <span>按 Enter 发送</span>
-        <span v-if="pendingTool" class="tool-hint">
+      <!-- 去掉 "按 Enter 发送" 提示 -->
+      <div class="input-hint" v-if="pendingTool">
+        <span class="tool-hint">
           🛠️ {{ pendingTool.name }}
           <el-button size="small" text @click="clearPendingTool">取消</el-button>
         </span>
@@ -131,15 +139,34 @@ const props = defineProps({
   pendingTool: {
     type: Object,
     default: null
+  },
+  // 上下文选择（由父组件传入，双向绑定）
+  contextValue: {
+    type: Array,
+    default: () => ['json']
   }
 })
 
-const emit = defineEmits(['send', 'clear', 'tool-clear'])
+const emit = defineEmits(['send', 'clear', 'tool-clear', 'context-change'])
 
 const inputText = ref('')
 const inputRef = ref(null)
 const messagesRef = ref(null)
 const inputPlaceholder = ref('输入问题...')
+
+// 本地上下文（双向绑定）
+const localContexts = ref([...props.contextValue])
+
+// 监听外部变化
+watch(() => props.contextValue, (newVal) => {
+  if (newVal && newVal.length > 0) {
+    localContexts.value = [...newVal]
+  }
+}, { deep: true })
+
+function onContextChange(value) {
+  emit('context-change', value)
+}
 
 function handleSend() {
   const text = inputText.value.trim()
@@ -191,7 +218,7 @@ watch(() => props.pendingTool, (tool) => {
     } else {
       inputText.value = tool.prompt || ''
     }
-    inputPlaceholder.value = `🛠️ ${tool.name}，按 Enter 发送`
+    inputPlaceholder.value = `🛠️ ${tool.name}`
     nextTick(() => {
       inputRef.value?.focus()
       const input = inputRef.value?.$el?.querySelector('input')
@@ -225,12 +252,32 @@ defineExpose({ scrollToBottom, focus: () => inputRef.value?.focus() })
   padding: 12px 20px;
   border-bottom: 1px solid #e4e7ed;
   flex-shrink: 0;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
 }
 
 .chat-title {
   font-size: 15px;
   font-weight: 600;
   color: #2c3e50;
+}
+
+.context-checkboxes {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.context-checkboxes .el-checkbox {
+  margin-right: 0;
+  font-size: 12px;
 }
 
 .header-actions {
@@ -241,7 +288,7 @@ defineExpose({ scrollToBottom, focus: () => inputRef.value?.focus() })
 .chat-messages {
   flex: 1;
   overflow-y: auto;
-  padding: 16px 20px;
+  padding: 16px 24px;
 }
 
 .empty-state {
@@ -275,16 +322,22 @@ defineExpose({ scrollToBottom, focus: () => inputRef.value?.focus() })
   gap: 12px;
   margin-bottom: 16px;
   align-items: flex-start;
+  max-width: 92%;
 }
 
 .message-wrapper.user {
   flex-direction: row-reverse;
+  margin-left: auto;
 }
 
 .message-wrapper.user .message-bubble {
   background: #409eff;
   color: white;
   border-radius: 14px 14px 4px 14px;
+}
+
+.message-wrapper.assistant {
+  margin-right: auto;
 }
 
 .message-wrapper.assistant .message-bubble {
@@ -300,10 +353,10 @@ defineExpose({ scrollToBottom, focus: () => inputRef.value?.focus() })
 }
 
 .message-bubble {
-  max-width: 75%;
-  padding: 10px 16px;
+  max-width: 85%;
+  padding: 12px 18px;
   word-break: break-word;
-  line-height: 1.7;
+  line-height: 1.8;
   font-size: 14px;
 }
 
@@ -314,6 +367,9 @@ defineExpose({ scrollToBottom, focus: () => inputRef.value?.focus() })
 
 .message-content {
   white-space: pre-wrap;
+  font-size: 14px;
+  line-height: 1.8;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
 }
 
 .message-content :deep(pre) {
@@ -322,12 +378,14 @@ defineExpose({ scrollToBottom, focus: () => inputRef.value?.focus() })
   padding: 12px;
   border-radius: 6px;
   overflow-x: auto;
-  font-size: 12px;
+  font-size: 13px;
   margin: 8px 0;
+  font-family: 'Consolas', 'Courier New', monospace;
 }
 
 .message-content :deep(code) {
   font-family: 'Consolas', 'Courier New', monospace;
+  font-size: 13px;
 }
 
 .message-footer {
@@ -438,7 +496,6 @@ defineExpose({ scrollToBottom, focus: () => inputRef.value?.focus() })
   background: transparent;
 }
 
-/* ===== 输入区域 ===== */
 .chat-input-area {
   padding: 12px 20px;
   border-top: 1px solid #e4e7ed;
@@ -454,7 +511,6 @@ defineExpose({ scrollToBottom, focus: () => inputRef.value?.focus() })
   flex: 1;
 }
 
-/* 关键修复：让输入框和按钮在同一行 */
 .chat-input :deep(.el-input-group) {
   display: flex;
   width: 100%;
@@ -480,18 +536,19 @@ defineExpose({ scrollToBottom, focus: () => inputRef.value?.focus() })
   height: 100%;
   min-height: 40px;
   white-space: nowrap;
-  padding: 0 24px;
+  padding: 0 20px;
   border-top-left-radius: 0;
   border-bottom-left-radius: 0;
 }
 
 .input-hint {
   display: flex;
-  justify-content: space-between;
+  justify-content: flex-end;
   align-items: center;
-  margin-top: 6px;
+  margin-top: 4px;
   font-size: 12px;
   color: #c0c4cc;
+  min-height: 20px;
 }
 
 .tool-hint {

@@ -1,3 +1,4 @@
+// src/views/Quality.vue
 <template>
   <div class="quality-page">
     <h2>📊 数据质量看板</h2>
@@ -31,7 +32,7 @@
         </div>
       </div>
 
-      <!-- 四维评分卡片（带解释 Tooltip） -->
+      <!-- 四维评分卡片 -->
       <div class="dimensions">
         <el-card
           v-for="(score, name) in filteredDimensions"
@@ -69,7 +70,11 @@
               </el-tag>
             </template>
           </el-table-column>
-          <el-table-column prop="field" label="字段" width="150" />
+          <el-table-column prop="field" label="字段" width="150">
+            <template #default="{ row }">
+              <span class="field-name-link" @click="openFieldDetail(row.field)">{{ row.field }}</span>
+            </template>
+          </el-table-column>
           <el-table-column prop="message" label="问题描述" min-width="200" />
           <el-table-column prop="current" label="当前值" width="120" align="center" />
           <el-table-column prop="threshold" label="阈值" width="120" align="center" />
@@ -92,15 +97,28 @@ import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { QuestionFilled } from '@element-plus/icons-vue'
 import { useSessionStore } from '../stores/session'
+import { useFieldDetailStore } from '../stores/fieldDetail'
 import { reportApi } from '../api/report'
 
 const router = useRouter()
 const sessionStore = useSessionStore()
+const fieldDetailStore = useFieldDetailStore()
 
 const loading = ref(true)
 const qualityData = ref(null)
+const reportData = ref(null)
 const issues = ref([])
 const gaugeKey = ref(0)
+
+const typeDisplay = {
+  continuous: '连续变量',
+  categorical: '分类变量',
+  categorical_numeric: '数值型分类',
+  ordinal: '有序分类',
+  datetime: '日期时间',
+  identifier: '标识符',
+  text: '文本'
+}
 
 watch(() => qualityData.value?.overall_score, (newVal) => {
   if (newVal !== undefined && newVal !== null) {
@@ -130,11 +148,17 @@ async function loadQuality() {
 
   loading.value = true
   try {
-    const result = await reportApi.getQuality(sessionId)
-    qualityData.value = result
+    const [qualityResult, reportResult] = await Promise.all([
+      reportApi.getQuality(sessionId),
+      reportApi.get(sessionId)
+    ])
+    qualityData.value = qualityResult
+    reportData.value = reportResult
 
     const allIssues = []
-    result?.alerts?.forEach(alert => {
+    // 🔥 修复：使用 qualityResult 而不是 result
+    const alerts = qualityResult?.alerts || []
+    alerts.forEach(alert => {
       if (alert.level === 'error' || alert.level === 'warning') {
         allIssues.push({
           level: alert.level,
@@ -180,7 +204,7 @@ function getProgressColor(score) {
   return '#f56c6c'
 }
 
-// ==================== 过滤 timeliness ====================
+// ===== 过滤 timeliness =====
 const filteredDimensions = computed(() => {
   const dims = qualityData.value?.dimensions || {}
   const filtered = {}
@@ -192,7 +216,7 @@ const filteredDimensions = computed(() => {
   return filtered
 })
 
-// ==================== 仪表盘 ====================
+// ===== 仪表盘 =====
 const hasGaugeData = computed(() => {
   const score = qualityData.value?.overall_score
   return score !== undefined && score !== null && !isNaN(Number(score))
@@ -250,7 +274,7 @@ const gaugeOption = computed(() => {
   }
 })
 
-// ==================== 雷达图 ====================
+// ===== 雷达图 =====
 const hasRadarData = computed(() => {
   return Object.keys(filteredDimensions.value).length > 0
 })
@@ -288,6 +312,106 @@ const radarOption = computed(() => {
     }]
   }
 })
+
+// ===== 字段详情 =====
+function buildFieldData(fieldName) {
+  const summary = reportData.value?.variable_summaries?.[fieldName] || {}
+  const varType = reportData.value?.variable_types?.[fieldName]?.type || 'unknown'
+  const varTypeDesc = reportData.value?.variable_types?.[fieldName]?.type_desc || typeDisplay[varType] || varType
+
+  const tsDiag = reportData.value?.time_series_diagnostics?.[fieldName] || null
+  const outlier = reportData.value?.quality_report?.outliers?.[fieldName] || null
+  const missing = reportData.value?.quality_report?.missing?.find(m => m.column === fieldName) || null
+  const dupInfo = reportData.value?.quality_report?.duplicates || null
+
+  const correlations = []
+  const matrix = reportData.value?.correlations?.matrix || {}
+  if (matrix[fieldName]) {
+    const entries = Object.entries(matrix[fieldName])
+    for (const [varName, value] of entries) {
+      if (varName !== fieldName && value !== null && value !== undefined && Math.abs(value) >= 0.7) {
+        correlations.push({ var: varName, value: parseFloat(value.toFixed(4)) })
+      }
+    }
+    correlations.sort((a, b) => Math.abs(b.value) - Math.abs(a.value))
+  }
+
+  const rules = []
+  const auditRules = reportData.value?.quality_report?.audit_rules || {}
+  const allRules = [
+    ...(auditRules.arithmetic_rules || []),
+    ...(auditRules.functional_dependencies || []),
+    ...(auditRules.temporal_rules || [])
+  ]
+  for (const rule of allRules) {
+    if (rule.fields && rule.fields.includes(fieldName)) {
+      rules.push({
+        type: rule.relation_type === 'additive' ? '数值' :
+              rule.rule?.includes('→') ? '函数依赖' : '时序约束',
+        rule: rule.rule,
+        confidence: rule.confidence || 1.0
+      })
+    }
+  }
+
+  const models = []
+  const modelRecs = reportData.value?.model_recommendations || []
+  for (const rec of modelRecs) {
+    let role = ''
+    if (rec.target_column === fieldName) {
+      role = '🎯 目标'
+    } else if (rec.feature_columns && rec.feature_columns.includes(fieldName)) {
+      role = '📊 特征'
+    }
+    if (role) {
+      models.push({
+        role: role,
+        task_type: rec.task_type || '',
+        model: rec.ml || rec.model || '',
+        target: rec.target_column || ''
+      })
+    }
+  }
+
+  let topCategories = []
+  if (summary.top_categories && Object.keys(summary.top_categories).length > 0) {
+    const entries = Object.entries(summary.top_categories)
+    const total = entries.reduce((s, e) => s + e[1], 0)
+    topCategories = entries.map(([name, count]) => ({
+      name: String(name),
+      count: count,
+      pct: total > 0 ? (count / total * 100) : 0
+    })).sort((a, b) => b.count - a.count)
+  } else if (summary.value_counts && Object.keys(summary.value_counts).length > 0) {
+    const entries = Object.entries(summary.value_counts)
+    const total = entries.reduce((s, e) => s + e[1], 0)
+    topCategories = entries.map(([name, count]) => ({
+      name: String(name),
+      count: count,
+      pct: total > 0 ? (count / total * 100) : 0
+    })).sort((a, b) => b.count - a.count)
+  }
+
+  return {
+    fieldName,
+    varType,
+    varTypeDesc,
+    summary: { ...summary, topCategories },
+    tsDiag,
+    outlier,
+    missing,
+    duplicateInfo: dupInfo,
+    correlations,
+    rules,
+    models,
+    topCategories
+  }
+}
+
+function openFieldDetail(fieldName) {
+  const data = buildFieldData(fieldName)
+  fieldDetailStore.open(fieldName, data)
+}
 
 function goTo(routeName) {
   router.push(`/${routeName}`)
@@ -415,5 +539,16 @@ function goTo(routeName) {
   padding: 20px;
   text-align: center;
   color: #67c23a;
+}
+
+.field-name-link {
+  color: #409EFF;
+  cursor: pointer;
+  font-weight: 500;
+  transition: color 0.2s;
+}
+.field-name-link:hover {
+  color: #66b1ff;
+  text-decoration: underline;
 }
 </style>
