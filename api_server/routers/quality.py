@@ -23,11 +23,11 @@ async def get_quality_report(
         raise HTTPException(status_code=404, detail="会话不存在")
 
     # 获取数据
-    file_info = session_service.get_file(session_id)
+    file_info = session_service.get_data_path(session_id)
     if not file_info:
         raise HTTPException(status_code=400, detail="会话没有关联的数据文件")
 
-    df = data_service.load_file(file_info["path"])
+    df = data_service.load_file(file_info)
     variable_types = session.get("variable_types", {})
 
     if not variable_types:

@@ -26,6 +26,179 @@ class DatabaseLoadResponse(BaseModel):
     session_id: Optional[str] = None
 
 
+# ==================== 数据预览/筛选接口 ====================
+
+class FilterCondition(BaseModel):
+    """筛选条件"""
+    field: str
+    condition: str  # eq, gt, lt, gte, lte, between, contains, is_null, is_not_null, is_outlier, expr
+    value: Any = None
+
+
+class DataPreviewRequest(BaseModel):
+    session_id: str
+    filters: List[FilterCondition] = []
+    fields: Optional[List[str]] = None
+    page: int = 1
+    page_size: int = 100
+
+
+class DataPreviewResponse(BaseModel):
+    total: int
+    page: int
+    page_size: int
+    rows: List[Dict[str, Any]]
+    columns: List[str]
+    filter_desc: str
+
+
+@router.post("/data/preview", response_model=DataPreviewResponse)
+async def preview_data(
+    request: DataPreviewRequest,
+    session_service: SessionService = Depends(Dependencies.get_session_service),
+    data_service: DataService = Depends(Dependencies.get_data_service)
+):
+    """
+    预览/筛选数据
+
+    支持条件:
+    - eq: 等于
+    - gt: 大于
+    - lt: 小于
+    - gte: 大于等于
+    - lte: 小于等于
+    - between: 区间 [min, max]
+    - contains: 包含字符串
+    - is_null: 为空
+    - is_not_null: 不为空
+    - is_outlier: 异常值（基于 IQR）
+    - expr: 表达式（如 "A != B" 或 "abs(A - B) > 0.01"）
+    """
+    session = session_service.get_session(request.session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="会话不存在")
+
+    # 获取数据路径（优先 Parquet）
+    data_path = session_service.get_data_path(request.session_id)
+    if not data_path:
+        raise HTTPException(status_code=400, detail="会话没有关联的数据文件")
+
+    df = data_service.load_file(data_path)
+
+    # 应用筛选条件
+    filter_desc_parts = []
+    for f in request.filters:
+        df, desc = _apply_filter(df, f)
+        if desc:
+            filter_desc_parts.append(desc)
+
+    total_rows = len(df)
+
+    # 字段选择
+    if request.fields:
+        available_fields = [col for col in request.fields if col in df.columns]
+        if available_fields:
+            df = df[available_fields]
+
+    columns = df.columns.tolist()
+
+    # 分页
+    start = (request.page - 1) * request.page_size
+    end = start + request.page_size
+    page_df = df.iloc[start:end]
+
+    return DataPreviewResponse(
+        total=total_rows,
+        page=request.page,
+        page_size=request.page_size,
+        rows=page_df.to_dict(orient="records"),
+        columns=columns,
+        filter_desc="; ".join(filter_desc_parts) if filter_desc_parts else "无筛选条件"
+    )
+
+
+def _apply_filter(df: Any, filter_cond: FilterCondition):
+    """应用单个筛选条件，返回 (过滤后的df, 描述文本)"""
+    import pandas as pd
+    import numpy as np
+
+    field = filter_cond.field
+    cond = filter_cond.condition
+    value = filter_cond.value
+
+    # ==================== 表达式条件（用于勾稽规则违反） ====================
+    if cond == "expr":
+        # value 是一个表达式字符串，如 "A != B" 或 "abs(A - B) > 0.01"
+        try:
+            # 使用 pandas eval 计算布尔掩码
+            mask = df.eval(value)
+            df = df[mask]
+            desc = f" 满足表达式: {value}"
+            return df, desc
+        except Exception as e:
+            print(f"⚠️ 表达式过滤失败: {e}")
+            return df, f" 表达式无效: {value}"
+
+    if field not in df.columns:
+        return df, None
+
+    desc = f"{field}"
+
+    if cond == "eq":
+        df = df[df[field] == value]
+        desc += f" = {value}"
+    elif cond == "gt":
+        df = df[df[field] > value]
+        desc += f" > {value}"
+    elif cond == "lt":
+        df = df[df[field] < value]
+        desc += f" < {value}"
+    elif cond == "gte":
+        df = df[df[field] >= value]
+        desc += f" >= {value}"
+    elif cond == "lte":
+        df = df[df[field] <= value]
+        desc += f" <= {value}"
+    elif cond == "between":
+        if isinstance(value, list) and len(value) == 2:
+            min_val, max_val = value[0], value[1]
+            df = df[(df[field] >= min_val) & (df[field] <= max_val)]
+            desc += f" 在 [{min_val}, {max_val}] 之间"
+    elif cond == "contains":
+        if value:
+            df = df[df[field].astype(str).str.contains(str(value), na=False)]
+            desc += f" 包含 '{value}'"
+    elif cond == "is_null":
+        df = df[df[field].isna()]
+        desc += " 为空"
+    elif cond == "is_not_null":
+        df = df[df[field].notna()]
+        desc += " 不为空"
+    elif cond == "is_outlier":
+        series = df[field].dropna()
+        if len(series) > 0:
+            Q1 = series.quantile(0.25)
+            Q3 = series.quantile(0.75)
+            IQR = Q3 - Q1
+            if IQR > 0:
+                lower = Q1 - 1.5 * IQR
+                upper = Q3 + 1.5 * IQR
+                df = df[(df[field] < lower) | (df[field] > upper)]
+                desc += " 异常值"
+            else:
+                df = df.iloc[0:0]
+                desc += " 异常值 (无)"
+        else:
+            df = df.iloc[0:0]
+            desc += " 异常值 (无数据)"
+    else:
+        return df, None
+
+    return df, desc
+
+
+# ==================== 原有路由 ====================
+
 @router.post("/data/upload", response_model=DataUploadResponse)
 async def upload_file(
     request: Request,
@@ -49,6 +222,10 @@ async def upload_file(
 
     variable_types = data_service.infer_types(df)
 
+    if session_id:
+        parquet_path = session_service.get_data_parquet_path(session_id)
+        data_service.save_to_parquet(df, parquet_path)
+
     return DataUploadResponse(
         file_name=file.filename,
         file_path=str(file_path),
@@ -64,7 +241,8 @@ async def load_database(
     request: Request,
     request_body: DatabaseLoadRequest,
     database_service: DatabaseService = Depends(Dependencies.get_database_service),
-    session_service: SessionService = Depends(Dependencies.get_session_service)
+    session_service: SessionService = Depends(Dependencies.get_session_service),
+    data_service: DataService = Depends(Dependencies.get_data_service)  # ✅ 新增依赖注入
 ):
     """从数据库加载表"""
     try:
@@ -83,12 +261,12 @@ async def load_database(
 
     source_name = f"{request_body.table_names[0]}_db"
     client_ip = get_client_ip(request)
-    # ✅ 设置客户端IP到service实例
     session_service.set_client_ip(client_ip)
     session_id = session_service.create_session(source_name, "database", {"tables": request_body.table_names})
 
     result = {}
     first_table = None
+    first_df = None
 
     for name, df in tables.items():
         if df is not None and not df.empty:
@@ -103,6 +281,12 @@ async def load_database(
 
             if first_table is None:
                 first_table = (name, df)
+                first_df = df
+
+    if first_df is not None:
+        parquet_path = session_service.get_data_parquet_path(session_id)
+        data_service.save_to_parquet(first_df, parquet_path)
+        print(f"✅ Parquet 缓存已保存: {parquet_path}")
 
     if first_table:
         import tempfile
@@ -129,7 +313,6 @@ async def load_demo_data(
     import pandas as pd
     import numpy as np
 
-    # 生成示例数据
     if dataset == "sales":
         np.random.seed(42)
         n = 5000
@@ -181,18 +364,18 @@ async def load_demo_data(
     else:
         raise HTTPException(status_code=400, detail="不支持的示例数据集")
 
-    # 创建会话
     source_name = f"{dataset}_demo"
     client_ip = get_client_ip(request)
-    # ✅ 设置客户端IP到service实例
     session_service.set_client_ip(client_ip)
     session_id = session_service.create_session(source_name, "single")
 
-    # 保存文件
     import tempfile
     with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False, encoding='utf-8') as tmp:
         df.to_csv(tmp.name, index=False)
         session_service.add_file(session_id, f"{dataset}_demo.csv", tmp.name)
+
+    parquet_path = session_service.get_data_parquet_path(session_id)
+    data_service.save_to_parquet(df, parquet_path)
 
     variable_types = data_service.infer_types(df)
     session_service.save_variable_types(session_id, variable_types)

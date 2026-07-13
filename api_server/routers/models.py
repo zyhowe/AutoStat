@@ -27,7 +27,7 @@ async def train_model(
     if not session:
         raise HTTPException(status_code=404, detail="会话不存在")
 
-    file_info = session_service.get_file(request.session_id)
+    file_info = session_service.get_data_path(request.session_id)
     if not file_info:
         raise HTTPException(status_code=400, detail="会话没有关联的数据文件")
 
@@ -36,7 +36,7 @@ async def train_model(
     background_tasks.add_task(
         models_service.train_model,
         request.session_id,
-        file_info["path"],
+        file_info,
         request.task_type,
         request.model_key,
         request.target_column,

@@ -1,4 +1,4 @@
-// src/App.vue
+<!-- src/App.vue -->
 <template>
   <div id="app">
     <el-container>
@@ -20,6 +20,15 @@
       :field-name="fieldDetailStore.fieldName"
       :field-data="fieldDetailStore.fieldData"
     />
+    <!-- 全局数据预览弹窗 -->
+    <DataPreviewDialog
+      v-model="previewStore.visible"
+      :session-id="previewStore.sessionId"
+      :title="previewStore.title"
+      :filters="previewStore.filters"
+      :fields="previewStore.fields"
+      @close="previewStore.close"
+    />
   </div>
 </template>
 
@@ -27,9 +36,12 @@
 import Header from './components/Header.vue'
 import Sidebar from './components/Sidebar.vue'
 import FieldDetailDialog from './components/FieldDetailDialog.vue'
+import DataPreviewDialog from './components/DataPreviewDialog.vue'
 import { useFieldDetailStore } from './stores/fieldDetail'
+import { usePreviewStore } from './stores/preview'
 
 const fieldDetailStore = useFieldDetailStore()
+const previewStore = usePreviewStore()
 </script>
 
 <style>

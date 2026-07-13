@@ -117,6 +117,9 @@ class RelationshipAnalyzer:
                     corr_value = corr_data.iloc[i, j]
                     if abs(corr_value) > 0.3:
                         valid_data = self.data[[v1, v2]].dropna()
+                        valid_count = len(valid_data)
+                        total_count = len(self.data)
+
                         if len(valid_data) >= 3:
                             is_norm1, _, _ = self._check_normality(valid_data[v1])
                             is_norm2, _, _ = self._check_normality(valid_data[v2])
@@ -127,8 +130,12 @@ class RelationshipAnalyzer:
                             if p_value < 0.05:
                                 significant_pairs.append({
                                     'var1': v1, 'var2': v2, 'type': '数值-数值',
-                                    'statistic': corr_value, 'p_value': p_value, 'strength': abs(corr_value)
+                                    'statistic': corr_value, 'p_value': p_value, 'strength': abs(corr_value),
+                                    'valid_count': valid_count,
+                                    'total_count': total_count,
+                                    'confidence': valid_count / total_count if total_count > 0 else 0
                                 })
+
 
     # ==================== 向量化改造：分类-分类关联 (Cramer's V) ====================
     def _analyze_categorical_categorical_vectorized(self, categorical_vars, exclude_pairs, significant_pairs):

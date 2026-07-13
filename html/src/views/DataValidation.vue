@@ -1,4 +1,5 @@
 // src/views/DataValidation.vue
+// 只修改 parseRuleToExpr 和 showRuleViolations 方法，其余不变
 <template>
   <div class="data-validation">
     <h2>📋 数据核验</h2>
@@ -59,7 +60,16 @@
                     </el-tag>
                   </template>
                 </el-table-column>
-                <el-table-column prop="violation_count" label="违反数" width="80" align="center" />
+                <el-table-column prop="violation_count" label="违反数" width="80" align="center">
+                  <template #default="{ row }">
+                    <span
+                      class="field-name-link"
+                      @click="showRuleViolations(row)"
+                    >
+                      {{ row.violation_count }}
+                    </span>
+                  </template>
+                </el-table-column>
               </el-table>
             </div>
 
@@ -129,10 +139,18 @@
                 <span class="field-name-link" @click="openFieldDetail(row.field)">{{ row.field }}</span>
               </template>
             </el-table-column>
-            <el-table-column prop="count" label="异常数量" width="120" align="center" />
+            <el-table-column prop="count" label="异常数量" width="120" align="center">
+              <template #default="{ row }">
+                <span class="field-name-link" @click="showOutlierRows(row.field)">
+                  {{ row.count }}
+                </span>
+              </template>
+            </el-table-column>
             <el-table-column prop="percent" label="异常比例" width="120" align="center">
               <template #default="{ row }">
-                {{ row.percent.toFixed(1) }}%
+                <span class="field-name-link" @click="showOutlierRows(row.field)">
+                  {{ row.percent.toFixed(1) }}%
+                </span>
               </template>
             </el-table-column>
             <el-table-column prop="lower_bound" label="下界" width="120" align="center" />
@@ -166,10 +184,18 @@
                 <span class="field-name-link" @click="openFieldDetail(row.column)">{{ row.column }}</span>
               </template>
             </el-table-column>
-            <el-table-column prop="count" label="缺失数量" width="120" align="center" />
+            <el-table-column prop="count" label="缺失数量" width="120" align="center">
+              <template #default="{ row }">
+                <span class="field-name-link" @click="showMissingRows(row.column)">
+                  {{ row.count }}
+                </span>
+              </template>
+            </el-table-column>
             <el-table-column prop="percent" label="缺失比例" width="120" align="center">
               <template #default="{ row }">
-                {{ row.percent.toFixed(1) }}%
+                <span class="field-name-link" @click="showMissingRows(row.column)">
+                  {{ row.percent.toFixed(1) }}%
+                </span>
               </template>
             </el-table-column>
           </el-table>
@@ -226,6 +252,7 @@ import { ElMessage } from 'element-plus'
 import { useSessionStore } from '../stores/session'
 import { useFieldDetailStore } from '../stores/fieldDetail'
 import { reportApi } from '../api/report'
+import { openDataPreview } from '../components/DataPreviewDialog'
 
 const router = useRouter()
 const sessionStore = useSessionStore()
@@ -461,7 +488,7 @@ function buildFieldData(fieldName) {
     const entries = Object.entries(matrix[fieldName])
     for (const [varName, value] of entries) {
       if (varName !== fieldName && value !== null && value !== undefined && Math.abs(value) >= 0.7) {
-        correlations.push({ var: varName, value: parseFloat(value.toFixed(4)) })
+        correlations.push({ var: varName, value: parseFloat(Number(value).toFixed(4)) })
       }
     }
     correlations.sort((a, b) => Math.abs(b.value) - Math.abs(a.value))
@@ -542,6 +569,193 @@ function buildFieldData(fieldName) {
 function openFieldDetail(fieldName) {
   const data = buildFieldData(fieldName)
   fieldDetailStore.open(fieldName, data)
+}
+
+// ==================== 数据预览联动 ====================
+
+/**
+ * 解析规则表达式，生成用于筛选违反记录的表达式字符串
+ * 增强版：处理更多规则格式
+ */
+function parseRuleToExpr(rule) {
+  const ruleStr = rule.rule || ''
+  const fields = rule.fields || []
+
+  // 清理规则字符串：去除多余空格
+  const cleanRule = ruleStr.replace(/\s+/g, ' ').trim()
+
+  // 1. 处理 "A = B" 格式（两字段相等）
+  if (cleanRule.includes(' = ') && !cleanRule.includes(' + ') && fields.length >= 2) {
+    const parts = cleanRule.split(' = ')
+    if (parts.length === 2) {
+      const left = parts[0].trim()
+      const right = parts[1].trim()
+      // 检查是否都是字段名（不是数字或常量）
+      if (fields.includes(left) && fields.includes(right)) {
+        return `abs(${left} - ${right}) > 0.000001`
+      }
+    }
+  }
+
+  // 2. 处理 "A → B" 格式（函数依赖）
+  if (cleanRule.includes(' → ')) {
+    const parts = cleanRule.split(' → ')
+    if (parts.length === 2) {
+      const left = parts[0].trim()
+      const right = parts[1].trim()
+      if (fields.includes(left) && fields.includes(right)) {
+        return `${left}.notna() & ${right}.isna()`
+      }
+    }
+  }
+
+  // 3. 处理 "A = B + C" 格式（加法关系，右边有加号）
+  if (cleanRule.includes(' = ') && cleanRule.includes(' + ')) {
+    const parts = cleanRule.split(' = ')
+    if (parts.length === 2) {
+      const left = parts[0].trim()
+      const right = parts[1].trim()
+      // 检查左侧是否是字段，右侧是否包含字段
+      if (fields.includes(left)) {
+        return `abs(${left} - (${right})) > 0.000001`
+      }
+      // 检查右侧是否是字段，左侧是否包含字段
+      if (fields.includes(right)) {
+        // 左侧可能是 "A + B" 形式
+        return `abs((${left}) - ${right}) > 0.000001`
+      }
+    }
+  }
+
+  // 4. 处理 "A + B = C" 格式（加法关系，左边有加号）
+  if (cleanRule.includes(' + ') && cleanRule.includes(' = ')) {
+    const parts = cleanRule.split(' = ')
+    if (parts.length === 2) {
+      const left = parts[0].trim()
+      const right = parts[1].trim()
+      if (fields.includes(right)) {
+        return `abs((${left}) - ${right}) > 0.000001`
+      }
+    }
+  }
+
+  // 5. 处理 "A = B + C + D" 等复杂加法
+  if (cleanRule.includes(' = ') && cleanRule.includes(' + ')) {
+    const parts = cleanRule.split(' = ')
+    if (parts.length === 2) {
+      const left = parts[0].trim()
+      const right = parts[1].trim()
+      // 尝试提取所有字段
+      const leftFields = left.split('+').map(s => s.trim())
+      const rightFields = right.split('+').map(s => s.trim())
+      // 检查是否所有部分都是字段
+      const allLeftAreFields = leftFields.every(f => fields.includes(f))
+      const allRightAreFields = rightFields.every(f => fields.includes(f))
+      if (allLeftAreFields && allRightAreFields) {
+        return `abs((${left}) - (${right})) > 0.000001`
+      }
+    }
+  }
+
+  // 6. 如果规则字符串包含 "="，尝试简单解析
+  if (cleanRule.includes('=') && fields.length >= 2) {
+    // 尝试按 "=" 分割，取两边所有字段
+    const parts = cleanRule.split('=')
+    if (parts.length === 2) {
+      const leftPart = parts[0].trim()
+      const rightPart = parts[1].trim()
+      // 提取左右两边包含的字段
+      const leftFieldsInRule = fields.filter(f => leftPart.includes(f))
+      const rightFieldsInRule = fields.filter(f => rightPart.includes(f))
+      if (leftFieldsInRule.length > 0 && rightFieldsInRule.length > 0) {
+        // 构建表达式：左边字段的表达式 = 右边字段的表达式
+        const leftExpr = leftFieldsInRule.join(' + ')
+        const rightExpr = rightFieldsInRule.join(' + ')
+        return `abs((${leftExpr}) - (${rightExpr})) > 0.000001`
+      }
+    }
+  }
+
+  // 无法解析，返回 null
+  console.warn('⚠️ 无法解析规则表达式:', cleanRule)
+  return null
+}
+
+function showRuleViolations(rule) {
+  const sessionId = sessionStore.currentSessionId || localStorage.getItem('lastSessionId')
+  if (!sessionId) {
+    ElMessage.warning('请先加载项目')
+    return
+  }
+
+  const fields = rule.fields || []
+  if (fields.length === 0) {
+    ElMessage.warning('该规则没有关联字段，无法查看')
+    return
+  }
+
+  // 尝试解析规则表达式
+  const expr = parseRuleToExpr(rule)
+  const violationCount = rule.violation_count || 0
+
+  let filters = []
+  let title = ''
+  let warningMsg = ''
+
+  if (expr) {
+    // 精确筛选：使用 expr 条件
+    filters = [{ field: 'expr', condition: 'expr', value: expr }]
+    title = `违反规则「${rule.rule}」的记录（共 ${fields.length} 个字段，违反 ${violationCount} 条）`
+  } else {
+    // 回退：所有字段非空
+    filters = fields.map(f => ({
+      field: f,
+      condition: 'is_not_null',
+      value: true
+    }))
+    title = `规则「${rule.rule}」涉及字段数据（共 ${fields.length} 个字段，均非空）`
+    warningMsg = '⚠️ 无法精确筛选违反记录，仅显示所有相关字段非空的数据'
+  }
+
+  openDataPreview({
+    sessionId: sessionId,
+    title: title,
+    fields: fields,
+    filters: filters,
+    warning: warningMsg
+  })
+}
+
+function showOutlierRows(fieldName) {
+  const sessionId = sessionStore.currentSessionId || localStorage.getItem('lastSessionId')
+  if (!sessionId) {
+    ElMessage.warning('请先加载项目')
+    return
+  }
+
+  openDataPreview({
+    sessionId: sessionId,
+    title: `「${fieldName}」异常值数据`,
+    filters: [
+      { field: fieldName, condition: 'is_outlier', value: true }
+    ]
+  })
+}
+
+function showMissingRows(fieldName) {
+  const sessionId = sessionStore.currentSessionId || localStorage.getItem('lastSessionId')
+  if (!sessionId) {
+    ElMessage.warning('请先加载项目')
+    return
+  }
+
+  openDataPreview({
+    sessionId: sessionId,
+    title: `「${fieldName}」为空的数据`,
+    filters: [
+      { field: fieldName, condition: 'is_null', value: true }
+    ]
+  })
 }
 
 // ==================== 加载数据 ====================

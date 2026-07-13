@@ -17,6 +17,8 @@ from autostat.core.timeseries import TimeSeriesAnalyzer
 from autostat.core.relationship import RelationshipAnalyzer
 from autostat.core.recommendation import RecommendationAnalyzer
 from autostat.core.plots import plot_categorical, plot_continuous, plot_timeseries, plot_correlation, plot_categorical_correlation, plot_numeric_categorical_eta
+from autostat.core.audit import discover_audit_rules
+#from autostat.core.audit_optimized import discover_audit_rules
 
 plt.rcParams['font.sans-serif'] = ['SimHei']
 plt.rcParams['axes.unicode_minus'] = False
@@ -34,7 +36,8 @@ class AutoStatisticalAnalyzer:
     def __init__(self, data, target_col=None, source_table_name=None,
                  predefined_types=None, auto_clean=False, quiet=False,
                  parse_dates=True, date_columns=None, date_features_level="basic",
-                 skip_auto_inference=False):
+                 skip_auto_inference=False,
+                 use_optimized_audit=False):
         """
         初始化分析器
 
@@ -86,6 +89,8 @@ class AutoStatisticalAnalyzer:
         self.quality_report = {}
         self.cleaning_suggestions = []
         self.condition_checker = None
+
+        self.use_optimized_audit = use_optimized_audit
 
         if not quiet:
             print("\n" + "=" * 70)
@@ -573,15 +578,21 @@ class AutoStatisticalAnalyzer:
             print("\n【勾稽关系发现】")
 
         try:
-            from autostat.core.audit import discover_audit_rules, verify_audit_rules
+            # 根据参数选择使用原版还是优化版
+            # if getattr(self, 'use_optimized_audit', False):
+            #     discover_func =discover_audit_rules
+            #     version_info = "优化版"
+            # else:
+            #     discover_func = discover_audit_rules
+            #     version_info = "标准版"
 
-            # 自动发现勾稽规则
+            # # 自动发现勾稽规则
             audit_rules = discover_audit_rules(
                 # ========== 1. 基础参数 ==========
                 data=self.data,  # 输入数据，DataFrame格式
                 variable_types=self.variable_types,  # 变量类型字典，标识每个字段是数值型还是分类型
                 foreign_keys=[],  # 外键列表，用于关联表之间的勾稽关系
-                debug=True,  # 是否开启调试模式，输出详细日志
+                debug=False,  # 是否开启调试模式，输出详细日志
 
                 # ========== 2. 数值精度参数 ==========
                 precision=1e-6,  # 数值比较精度，判断两个数值是否相等
@@ -607,7 +618,7 @@ class AutoStatisticalAnalyzer:
                 strong_coverage_threshold=0.8,  # 强相等覆盖比例阈值，用于验证强相等关系
 
                 # ========== 7. RANSAC拟合参数 ==========
-                ransac_iter=50,  # RANSAC迭代次数，用于线性关系拟合
+                ransac_iter=20,  # RANSAC迭代次数，用于线性关系拟合
                 ransac_sample_size=20,  # RANSAC采样大小，每次迭代随机抽取的样本数
                 inlier_ratio=0.7,  # 内点比例阈值，RANSAC拟合时的内点比例要求
 
@@ -632,6 +643,7 @@ class AutoStatisticalAnalyzer:
                 print(f"  ✅ 发现 {arithmetic_count} 条数值关系")
                 print(f"  ✅ 发现 {fd_count} 条函数依赖")
                 print(f"  ✅ 发现 {temporal_count} 条时序约束")
+                print(f"  ℹ️ 使用 {version_info}")
 
         except Exception as e:
             if not self.quiet:
@@ -705,48 +717,80 @@ class AutoStatisticalAnalyzer:
 
         # ========== 修改 generate_full_report 增加 include_html 参数 ==========
 
-    def generate_full_report(self, show_outlier_details=False, include_html=False):  # ✅ 新增 include_html
-        """生成完整报告"""
+    # core/analyzer.py - generate_full_report 方法修改
+
+    def generate_full_report(self, show_outlier_details=False, include_html=False):
+        import time  # 新增导入
+
         print("\n" + "=" * 70)
         print("📋 完整自动分析报告")
         print("=" * 70)
 
+        # 步骤1: 数据质量摘要
+        step_start = time.time()
         print("\n【数据质量摘要】")
         base = BaseAnalyzer(self.data, self.variable_types, self.type_reasons, self.quiet)
         base.quality_report = self.quality_report
         base._print_quality_summary()
+        print(f"⏱️ [质量摘要] 耗时: {time.time() - step_start:.2f}s")
 
+        # 步骤2: 变量类型识别
+        step_start = time.time()
         print("\n【1. 变量类型识别】")
         for col, var_type in list(self.variable_types.items())[:20]:
             type_desc = self._get_type_description(var_type)
             reason = self.type_reasons.get(col, '')
             print(f"  {col}: {type_desc} ({reason})")
-
         if self.cleaning_suggestions:
             print("\n【清洗建议】")
             for suggestion in self.cleaning_suggestions[:5]:
                 print(f"  {suggestion}")
+        print(f"⏱️ [类型识别] 耗时: {time.time() - step_start:.2f}s")
 
+        # 步骤3: 自动描述
+        step_start = time.time()
+        print("\n【2. 自动描述】")
         self.auto_describe()
+        print(f"⏱️ [自动描述] 耗时: {time.time() - step_start:.2f}s")
+
+        # 步骤4: 时间序列分析
+        step_start = time.time()
+        print("\n【3. 时间序列分析】")
         self.auto_time_series_analysis()
+        print(f"⏱️ [时间序列分析] 耗时: {time.time() - step_start:.2f}s")
+
+        # 步骤5: 关系分析
+        step_start = time.time()
+        print("\n【4. 关系分析】")
         self.auto_analyze_relationships()
+        print(f"⏱️ [关系分析] 耗时: {time.time() - step_start:.2f}s")
 
-        # 勾稽关系发现（在时间序列和关系分析之后）
+        # 步骤6: 勾稽规则发现
+        step_start = time.time()
+        print("\n【5. 勾稽规则发现】")
         self._discover_audit_rules()
-        self._discover_date_rules()
+        print(f"⏱️ [勾稽规则] 耗时: {time.time() - step_start:.2f}s")
 
+        # 步骤7: 日期规则发现
+        step_start = time.time()
+        print("\n【6. 日期规则发现】")
+        self._discover_date_rules()
+        print(f"⏱️ [日期规则] 耗时: {time.time() - step_start:.2f}s")
+
+        # 步骤8: 场景推荐
+        step_start = time.time()
+        print("\n【7. 场景推荐】")
         self.recommend_scenarios()
+        print(f"⏱️ [场景推荐] 耗时: {time.time() - step_start:.2f}s")
 
         try:
+            import matplotlib.pyplot as plt
             plt.show(block=False)
             plt.pause(0.5)
         except Exception as e:
             if not self.quiet:
                 print(f"⚠️ 图表显示失败: {e}")
 
-        # 如果 include_html 为 True，可以在外部调用 Reporter，这里不做重复生成
-        # 因为外部 analysis_service 会单独调用 Reporter，所以这里不再生成 HTML
-        # 仅打印提示
         if include_html:
             print("✅ 将在外部生成 HTML 报告（由调用方控制）")
         else:

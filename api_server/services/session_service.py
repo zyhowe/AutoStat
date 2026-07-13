@@ -44,6 +44,11 @@ class SessionService:
         ip_key = ip.replace('.', '_')
         return self.projects_dir / f"{ip_key}.json"
 
+    # ==================== ✅ 新增：获取 Parquet 缓存路径 ====================
+    def get_data_parquet_path(self, session_id: str) -> Path:
+        """获取当前会话的 Parquet 缓存文件路径"""
+        return self._get_session_path(session_id) / "data.parquet"
+
     def _load_metadata(self, session_id: str) -> Optional[Dict]:
         metadata_path = self._get_metadata_path(session_id)
         if metadata_path.exists():
@@ -252,3 +257,26 @@ class SessionService:
         if questions:
             return questions.get(scene, [])
         return []
+
+    def get_data_path(self, session_id: str) -> Optional[str]:
+        """
+        获取会话的数据文件路径，优先返回 Parquet 缓存
+
+        返回:
+        - 如果 Parquet 存在，返回 Parquet 路径
+        - 否则返回原始文件路径（如果有）
+        - 否则返回 None
+        """
+        # 1. 优先 Parquet
+        parquet_path = self.get_data_parquet_path(session_id)
+        if parquet_path.exists():
+            print(f"📂 使用 Parquet 缓存: {parquet_path}")
+            return str(parquet_path)
+
+        # 2. 回退到原始文件
+        file_info = self.get_file(session_id)
+        if file_info:
+            print(f"📂 Parquet 不存在，使用原始文件: {file_info['path']}")
+            return file_info['path']
+
+        return None

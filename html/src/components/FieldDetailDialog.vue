@@ -17,11 +17,11 @@
             <div class="overview-cards">
               <div class="ov-card"><span class="ov-label">类型</span><span class="ov-value">{{ fieldData.varTypeDesc || fieldData.varType || '-' }}</span></div>
               <div class="ov-card"><span class="ov-label">样本量</span><span class="ov-value">{{ fieldData.summary?.count || 0 }}</span></div>
-              <div class="ov-card"><span class="ov-label">缺失率</span><span class="ov-value">{{ fieldData.summary?.missing_pct?.toFixed(1) || 0 }}%</span></div>
+              <div class="ov-card"><span class="ov-label">缺失率</span><span class="ov-value">{{ safePercent(fieldData.summary?.missing_pct) }}</span></div>
               <div class="ov-card">
                 <span class="ov-label">{{ isContinuous ? '均值' : isCategorical ? '众数' : isDatetime ? '起始日期' : '中心值' }}</span>
                 <span class="ov-value">
-                  {{ isContinuous ? (fieldData.summary?.mean?.toFixed(2) || '-') :
+                  {{ isContinuous ? safeNumber(fieldData.summary?.mean) :
                      isCategorical ? (fieldData.summary?.mode || '-') :
                      isDatetime ? (fieldData.summary?.min_date || '-') : '-' }}
                 </span>
@@ -29,7 +29,7 @@
               <div class="ov-card">
                 <span class="ov-label">{{ isContinuous ? '范围' : isCategorical ? '类别数' : isDatetime ? '时间跨度' : '范围' }}</span>
                 <span class="ov-value">
-                  {{ isContinuous ? (fieldData.summary?.min !== undefined && fieldData.summary?.max !== undefined ? `${fieldData.summary.min.toFixed(1)}~${fieldData.summary.max.toFixed(1)}` : '-') :
+                  {{ isContinuous ? safeRange(fieldData.summary?.min, fieldData.summary?.max) :
                      isCategorical ? (fieldData.summary?.n_unique || 0) :
                      isDatetime ? (fieldData.summary?.date_range_days || 0) + '天' : '-' }}
                 </span>
@@ -52,18 +52,18 @@
               <el-descriptions :column="3" border size="small">
                 <el-descriptions-item label="样本量">{{ fieldData.summary?.count || 0 }}</el-descriptions-item>
                 <el-descriptions-item label="缺失数">{{ fieldData.summary?.missing || 0 }}</el-descriptions-item>
-                <el-descriptions-item label="缺失率">{{ fieldData.summary?.missing_pct?.toFixed(1) || 0 }}%</el-descriptions-item>
-                <el-descriptions-item label="均值">{{ fieldData.summary?.mean?.toFixed(4) || '-' }}</el-descriptions-item>
-                <el-descriptions-item label="中位数">{{ fieldData.summary?.median?.toFixed(4) || '-' }}</el-descriptions-item>
-                <el-descriptions-item label="标准差">{{ fieldData.summary?.std?.toFixed(4) || '-' }}</el-descriptions-item>
-                <el-descriptions-item label="最小值">{{ fieldData.summary?.min?.toFixed(4) || '-' }}</el-descriptions-item>
-                <el-descriptions-item label="最大值">{{ fieldData.summary?.max?.toFixed(4) || '-' }}</el-descriptions-item>
-                <el-descriptions-item label="极差">{{ fieldData.summary?.max !== undefined && fieldData.summary?.min !== undefined ? (fieldData.summary.max - fieldData.summary.min).toFixed(4) : '-' }}</el-descriptions-item>
-                <el-descriptions-item label="Q1 (25%)">{{ fieldData.summary?.q1?.toFixed(4) || '-' }}</el-descriptions-item>
-                <el-descriptions-item label="Q3 (75%)">{{ fieldData.summary?.q3?.toFixed(4) || '-' }}</el-descriptions-item>
-                <el-descriptions-item label="IQR">{{ fieldData.summary?.q3 !== undefined && fieldData.summary?.q1 !== undefined ? (fieldData.summary.q3 - fieldData.summary.q1).toFixed(4) : '-' }}</el-descriptions-item>
-                <el-descriptions-item label="偏度">{{ fieldData.summary?.skew?.toFixed(4) || '-' }}</el-descriptions-item>
-                <el-descriptions-item label="峰度">{{ fieldData.summary?.kurtosis?.toFixed(4) || '-' }}</el-descriptions-item>
+                <el-descriptions-item label="缺失率">{{ safePercent(fieldData.summary?.missing_pct) }}</el-descriptions-item>
+                <el-descriptions-item label="均值">{{ safeNumber(fieldData.summary?.mean) }}</el-descriptions-item>
+                <el-descriptions-item label="中位数">{{ safeNumber(fieldData.summary?.median) }}</el-descriptions-item>
+                <el-descriptions-item label="标准差">{{ safeNumber(fieldData.summary?.std) }}</el-descriptions-item>
+                <el-descriptions-item label="最小值">{{ safeNumber(fieldData.summary?.min) }}</el-descriptions-item>
+                <el-descriptions-item label="最大值">{{ safeNumber(fieldData.summary?.max) }}</el-descriptions-item>
+                <el-descriptions-item label="极差">{{ safeRange(fieldData.summary?.min, fieldData.summary?.max) }}</el-descriptions-item>
+                <el-descriptions-item label="Q1 (25%)">{{ safeNumber(fieldData.summary?.q1) }}</el-descriptions-item>
+                <el-descriptions-item label="Q3 (75%)">{{ safeNumber(fieldData.summary?.q3) }}</el-descriptions-item>
+                <el-descriptions-item label="IQR">{{ safeRange(fieldData.summary?.q1, fieldData.summary?.q3) }}</el-descriptions-item>
+                <el-descriptions-item label="偏度">{{ safeNumber(fieldData.summary?.skew) }}</el-descriptions-item>
+                <el-descriptions-item label="峰度">{{ safeNumber(fieldData.summary?.kurtosis) }}</el-descriptions-item>
                 <el-descriptions-item label="正态性">{{ fieldData.summary?.is_normal ? '✅ 是' : '❌ 否' }}</el-descriptions-item>
               </el-descriptions>
               <div v-if="hasBoxPlotData" class="stats-chart">
@@ -74,11 +74,11 @@
               <el-descriptions :column="3" border size="small">
                 <el-descriptions-item label="样本量">{{ fieldData.summary?.count || 0 }}</el-descriptions-item>
                 <el-descriptions-item label="缺失数">{{ fieldData.summary?.missing || 0 }}</el-descriptions-item>
-                <el-descriptions-item label="缺失率">{{ fieldData.summary?.missing_pct?.toFixed(1) || 0 }}%</el-descriptions-item>
+                <el-descriptions-item label="缺失率">{{ safePercent(fieldData.summary?.missing_pct) }}</el-descriptions-item>
                 <el-descriptions-item label="类别数">{{ fieldData.summary?.n_unique || 0 }}</el-descriptions-item>
                 <el-descriptions-item label="众数">{{ fieldData.summary?.mode || '-' }}</el-descriptions-item>
                 <el-descriptions-item label="众数频数">{{ fieldData.summary?.mode_freq || 0 }}</el-descriptions-item>
-                <el-descriptions-item label="众数占比" :span="1">{{ fieldData.summary?.mode_pct?.toFixed(1) || 0 }}%</el-descriptions-item>
+                <el-descriptions-item label="众数占比" :span="1">{{ safePercent(fieldData.summary?.mode_pct) }}</el-descriptions-item>
               </el-descriptions>
               <div v-if="fieldData.topCategories && fieldData.topCategories.length > 0" class="category-full-list">
                 <h5>类别分布</h5>
@@ -88,7 +88,7 @@
                     <div class="category-bar-track-full">
                       <div class="category-bar-fill-full" :style="{ width: item.pct + '%', backgroundColor: getCategoryColor(idx) }" />
                     </div>
-                    <span class="category-pct-full">{{ item.pct.toFixed(1) }}% ({{ item.count }})</span>
+                    <span class="category-pct-full">{{ safePercent(item.pct) }} ({{ item.count }})</span>
                   </div>
                 </div>
               </div>
@@ -97,7 +97,7 @@
               <el-descriptions :column="3" border size="small">
                 <el-descriptions-item label="样本量">{{ fieldData.summary?.count || 0 }}</el-descriptions-item>
                 <el-descriptions-item label="缺失数">{{ fieldData.summary?.missing || 0 }}</el-descriptions-item>
-                <el-descriptions-item label="缺失率">{{ fieldData.summary?.missing_pct?.toFixed(1) || 0 }}%</el-descriptions-item>
+                <el-descriptions-item label="缺失率">{{ safePercent(fieldData.summary?.missing_pct) }}</el-descriptions-item>
                 <el-descriptions-item label="起始日期">{{ fieldData.summary?.min_date || '-' }}</el-descriptions-item>
                 <el-descriptions-item label="结束日期">{{ fieldData.summary?.max_date || '-' }}</el-descriptions-item>
                 <el-descriptions-item label="时间跨度">{{ fieldData.summary?.date_range_days || 0 }} 天</el-descriptions-item>
@@ -118,8 +118,8 @@
               <div class="ts-card"><span class="ts-label">平稳性</span><span class="ts-value" :class="fieldData.tsDiag?.is_stationary ? 'pass' : 'fail'">{{ fieldData.tsDiag?.is_stationary ? '✅ 平稳' : '⚠️ 非平稳' }}</span></div>
               <div class="ts-card"><span class="ts-label">自相关性</span><span class="ts-value" :class="fieldData.tsDiag?.has_autocorrelation ? 'pass' : 'fail'">{{ fieldData.tsDiag?.has_autocorrelation ? '✅ 有' : '❌ 无' }}</span></div>
               <div class="ts-card"><span class="ts-label">季节性</span><span class="ts-value" :class="fieldData.tsDiag?.has_seasonality ? 'pass' : 'fail'">{{ fieldData.tsDiag?.has_seasonality ? '✅ 有' : '❌ 无' }}</span></div>
-              <div class="ts-card"><span class="ts-label">均值</span><span class="ts-value">{{ fieldData.tsDiag?.mean?.toFixed(2) || '-' }}</span></div>
-              <div class="ts-card"><span class="ts-label">标准差</span><span class="ts-value">{{ fieldData.tsDiag?.std?.toFixed(2) || '-' }}</span></div>
+              <div class="ts-card"><span class="ts-label">均值</span><span class="ts-value">{{ safeNumber(fieldData.tsDiag?.mean) }}</span></div>
+              <div class="ts-card"><span class="ts-label">标准差</span><span class="ts-value">{{ safeNumber(fieldData.tsDiag?.std) }}</span></div>
             </div>
             <div v-if="hasTimeseriesChartData" class="timeseries-chart">
               <v-chart :option="timeseriesChartOption" class="timeseries-chart-container" autoresize />
@@ -139,7 +139,7 @@
                 <div class="qc-title">📋 完整性</div>
                 <div v-if="fieldData.missing" class="qc-content">
                   <span>缺失数：{{ fieldData.missing.count || 0 }}</span>
-                  <span>缺失率：{{ fieldData.missing.percent?.toFixed(1) || 0 }}%</span>
+                  <span>缺失率：{{ safePercent(fieldData.missing.percent) }}</span>
                 </div>
                 <div v-else class="qc-empty">✅ 无缺失值</div>
               </div>
@@ -147,9 +147,9 @@
                 <div class="qc-title">🎯 准确性</div>
                 <div v-if="fieldData.outlier" class="qc-content">
                   <span>异常数：{{ fieldData.outlier.count || 0 }}</span>
-                  <span>异常率：{{ fieldData.outlier.percent?.toFixed(1) || 0 }}%</span>
-                  <span>下界：{{ fieldData.outlier.lower_bound?.toFixed(2) || '-' }}</span>
-                  <span>上界：{{ fieldData.outlier.upper_bound?.toFixed(2) || '-' }}</span>
+                  <span>异常率：{{ safePercent(fieldData.outlier.percent) }}</span>
+                  <span>下界：{{ safeNumber(fieldData.outlier.lower_bound) }}</span>
+                  <span>上界：{{ safeNumber(fieldData.outlier.upper_bound) }}</span>
                 </div>
                 <div v-else class="qc-empty">✅ 无异常值</div>
               </div>
@@ -165,7 +165,7 @@
                 <div class="qc-title">🆔 唯一性</div>
                 <div v-if="fieldData.duplicateInfo" class="qc-content">
                   <span>重复数：{{ fieldData.duplicateInfo.count || 0 }}</span>
-                  <span>重复率：{{ fieldData.duplicateInfo.percent?.toFixed(1) || 0 }}%</span>
+                  <span>重复率：{{ safePercent(fieldData.duplicateInfo.percent) }}</span>
                 </div>
                 <div v-else class="qc-empty">✅ 无重复记录</div>
               </div>
@@ -180,7 +180,7 @@
               <div v-for="(item, idx) in fieldData.correlations" :key="idx" class="corr-item">
                 <span class="corr-var">{{ item.var }}</span>
                 <span class="corr-value" :style="{ color: Math.abs(item.value) >= 0.9 ? '#F56C6C' : '#E6A23C' }">
-                  r = {{ item.value.toFixed(3) }}
+                  r = {{ safeNumber(item.value) }}
                 </span>
                 <span class="corr-strength">{{ getStrengthLabel(item.value) }}</span>
               </div>
@@ -199,7 +199,7 @@
               <div v-for="(rule, idx) in fieldData.rules" :key="idx" class="rule-item">
                 <span class="rule-type">{{ rule.type }}</span>
                 <code class="rule-expr">{{ rule.rule }}</code>
-                <span class="rule-conf">{{ (rule.confidence * 100).toFixed(1) }}%</span>
+                <span class="rule-conf">{{ safePercent(rule.confidence) }}</span>
               </div>
             </div>
           </div>
@@ -265,6 +265,29 @@ function handleClose() {
   emit('update:modelValue', false)
 }
 
+// ==================== 类型安全辅助函数 ====================
+function safeNumber(value, decimals = 2) {
+  if (value === undefined || value === null) return '-'
+  const num = Number(value)
+  if (isNaN(num)) return '-'
+  if (!Number.isFinite(num)) return '-'
+  return num.toFixed(decimals)
+}
+
+function safePercent(value) {
+  if (value === undefined || value === null) return '0%'
+  const num = Number(value)
+  if (isNaN(num)) return '0%'
+  return num.toFixed(1) + '%'
+}
+
+function safeRange(min, max) {
+  const minNum = Number(min)
+  const maxNum = Number(max)
+  if (isNaN(minNum) || isNaN(maxNum)) return '-'
+  return minNum.toFixed(2) + ' ~ ' + maxNum.toFixed(2)
+}
+
 // ===== 类型判断 =====
 const isContinuous = computed(() => props.fieldData?.varType === 'continuous')
 const isCategorical = computed(() => props.fieldData?.varType === 'categorical' || props.fieldData?.varType === 'categorical_numeric' || props.fieldData?.varType === 'ordinal')
@@ -275,7 +298,9 @@ const isDatetime = computed(() => props.fieldData?.varType === 'datetime')
 // ============================================================
 const hasDistributionChart = computed(() => {
   if (isContinuous.value) {
-    return props.fieldData?.summary?.min !== undefined && props.fieldData?.summary?.max !== undefined
+    const min = props.fieldData?.summary?.min
+    const max = props.fieldData?.summary?.max
+    return min !== undefined && min !== null && max !== undefined && max !== null
   }
   if (isCategorical.value) {
     return props.fieldData?.topCategories && props.fieldData.topCategories.length > 0
@@ -286,12 +311,12 @@ const hasDistributionChart = computed(() => {
 const distributionChartOption = computed(() => {
   const summary = props.fieldData?.summary || {}
 
-  if (isContinuous.value && summary.min !== undefined && summary.max !== undefined) {
-    const min = summary.min || 0
-    const max = summary.max || 0
-    const mean = summary.mean || 0
-    const median = summary.median || 0
-    const std = summary.std || 1
+  if (isContinuous.value && summary.min !== undefined && summary.min !== null && summary.max !== undefined && summary.max !== null) {
+    const min = Number(summary.min) || 0
+    const max = Number(summary.max) || 0
+    const mean = Number(summary.mean) || 0
+    const median = Number(summary.median) || 0
+    const std = Number(summary.std) || 1
     const bins = 20
     const binWidth = (max - min) / bins
 
@@ -388,11 +413,16 @@ const distributionChartOption = computed(() => {
 // Tab2: 统计详情 - 箱线图
 // ============================================================
 const hasBoxPlotData = computed(() => {
-  return isContinuous.value && props.fieldData?.summary?.q1 !== undefined
+  return isContinuous.value && props.fieldData?.summary?.q1 !== undefined && props.fieldData?.summary?.q1 !== null
 })
 
 const boxPlotOption = computed(() => {
   const summary = props.fieldData?.summary || {}
+  const min = Number(summary.min) || 0
+  const q1 = Number(summary.q1) || 0
+  const median = Number(summary.median) || 0
+  const q3 = Number(summary.q3) || 0
+  const max = Number(summary.max) || 0
   return {
     tooltip: { trigger: 'item' },
     grid: { left: '12%', right: '10%', top: '10%', bottom: '18%' },
@@ -400,13 +430,7 @@ const boxPlotOption = computed(() => {
     yAxis: { type: 'value', name: '值', nameTextStyle: { fontSize: 11 }, nameLocation: 'center', nameGap: 40 },
     series: [{
       type: 'boxplot',
-      data: [[
-        summary.min || 0,
-        summary.q1 || 0,
-        summary.median || 0,
-        summary.q3 || 0,
-        summary.max || 0
-      ]],
+      data: [[min, q1, median, q3, max]],
       itemStyle: { color: '#409EFF' }
     }]
   }
@@ -428,7 +452,7 @@ const timeseriesChartOption = computed(() => {
   const points = props.fieldData?.tsDiag?.data_points || []
   if (points.length < 2) return {}
   const dates = points.map(p => p.date || '')
-  const values = points.map(p => p.value || 0)
+  const values = points.map(p => Number(p.value) || 0)
   return {
     tooltip: {
       trigger: 'axis',
@@ -477,7 +501,7 @@ const acfChartOption = computed(() => {
   const points = props.fieldData?.tsDiag?.data_points || []
   if (points.length < 5) return {}
 
-  const values = points.map(p => p.value || 0)
+  const values = points.map(p => Number(p.value) || 0)
   const n = values.length
   const maxLag = Math.min(20, n - 1)
   const mean = values.reduce((s, v) => s + v, 0) / n
@@ -559,12 +583,55 @@ function getCategoryColor(idx) {
 }
 
 function getStrengthLabel(value) {
-  const abs = Math.abs(value)
+  const abs = Math.abs(Number(value) || 0)
   if (abs >= 0.9) return '极强'
   if (abs >= 0.7) return '强'
   if (abs >= 0.5) return '中'
   return '弱'
 }
+
+// corrBarChartOption 简单实现
+const corrBarChartOption = computed(() => {
+  const correlations = props.fieldData?.correlations || []
+  if (correlations.length < 2) return {}
+  const data = correlations.slice(0, 10).map(item => ({
+    name: item.var,
+    value: Number(item.value) || 0
+  }))
+  return {
+    tooltip: {
+      trigger: 'axis',
+      formatter: (params) => {
+        const p = params[0]
+        return `<strong>${p.name}</strong><br/>相关系数：${p.value.toFixed(3)}`
+      }
+    },
+    grid: { left: '14%', right: '8%', top: '10%', bottom: '20%' },
+    xAxis: {
+      type: 'category',
+      data: data.map(d => d.name),
+      axisLabel: { rotate: 20, fontSize: 10, interval: 1 }
+    },
+    yAxis: {
+      type: 'value',
+      name: '相关系数',
+      min: -1,
+      max: 1,
+      nameLocation: 'center',
+      nameGap: 40,
+      nameTextStyle: { fontSize: 11 }
+    },
+    series: [{
+      type: 'bar',
+      data: data.map(d => ({
+        value: d.value,
+        itemStyle: { color: Math.abs(d.value) >= 0.7 ? '#F56C6C' : '#E6A23C' }
+      })),
+      barWidth: '45%',
+      label: { show: true, position: 'top', formatter: (p) => p.value.toFixed(3), fontSize: 9 }
+    }]
+  }
+})
 
 defineExpose({
   open: () => {

@@ -1,4 +1,5 @@
 // src/views/PatternDiscovery.vue
+// 只修改强相关表格部分，其余不变
 <template>
   <div class="pattern-discovery">
     <h2>📈 规律发现</h2>
@@ -99,26 +100,46 @@
           <div v-else>
             <p>发现 <strong>{{ highCorrelations.length }}</strong> 对强相关关系：</p>
             <el-table :data="highCorrelations" border size="small" max-height="400">
-              <el-table-column prop="var1" label="变量1" width="150" fixed="left">
+              <el-table-column prop="var1" label="变量1" width="130" fixed="left">
                 <template #default="{ row }">
                   <span class="field-name-link" @click="openFieldDetail(row.var1)">{{ row.var1 }}</span>
                 </template>
               </el-table-column>
-              <el-table-column prop="var2" label="变量2" width="150">
+              <el-table-column prop="var2" label="变量2" width="130">
                 <template #default="{ row }">
                   <span class="field-name-link" @click="openFieldDetail(row.var2)">{{ row.var2 }}</span>
                 </template>
               </el-table-column>
-              <el-table-column prop="value" label="相关系数" width="120" align="center">
+              <el-table-column prop="value" label="相关系数" width="110" align="center">
                 <template #default="{ row }">
-                  {{ row.value.toFixed(3) }}
+                  <span class="field-name-link" @click="showCorrelationData(row)">
+                    {{ Number(row.value).toFixed(3) }}
+                  </span>
                 </template>
               </el-table-column>
               <el-table-column label="方向" width="80" align="center">
                 <template #default="{ row }">
-                  <el-tag :type="row.value > 0 ? 'danger' : 'success'" size="small">
-                    {{ row.value > 0 ? '正相关' : '负相关' }}
-                  </el-tag>
+                  <span class="field-name-link" @click="showCorrelationData(row)">
+                    <el-tag :type="Number(row.value) > 0 ? 'danger' : 'success'" size="small">
+                      {{ Number(row.value) > 0 ? '正相关' : '负相关' }}
+                    </el-tag>
+                  </span>
+                </template>
+              </el-table-column>
+              <!-- ✅ 有效记录数（修复显示逻辑） -->
+              <el-table-column label="有效记录数" width="110" align="center">
+                <template #default="{ row }">
+                  <span class="field-name-link" @click="showCorrelationData(row)">
+                    {{ getValidDisplay(row) }}
+                  </span>
+                </template>
+              </el-table-column>
+              <!-- ✅ 置信度（修复显示逻辑） -->
+              <el-table-column label="置信度" width="100" align="center">
+                <template #default="{ row }">
+                  <span class="field-name-link" @click="showCorrelationData(row)">
+                    {{ getConfidenceDisplay(row) }}
+                  </span>
                 </template>
               </el-table-column>
             </el-table>
@@ -129,7 +150,6 @@
         <!-- Tab2: 时间序列分析 -->
         <!-- ============================================================ -->
         <el-tab-pane label="时间序列分析" name="timeseries">
-          <!-- 时间序列趋势图 -->
           <div class="chart-card">
             <div class="chart-header">
               <span class="chart-title">📈 时间序列趋势</span>
@@ -182,7 +202,6 @@
             <div v-else class="chart-empty">暂无时间序列数据</div>
           </div>
 
-          <!-- 时间序列诊断表格 -->
           <div v-if="timeSeriesData.length === 0" class="empty-tip">
             未检测到时间序列数据
           </div>
@@ -218,6 +237,7 @@ import { ElMessage } from 'element-plus'
 import { useSessionStore } from '../stores/session'
 import { useFieldDetailStore } from '../stores/fieldDetail'
 import { reportApi } from '../api/report'
+import { openDataPreview } from '../components/DataPreviewDialog'
 
 const router = useRouter()
 const sessionStore = useSessionStore()
@@ -269,7 +289,7 @@ function buildFieldData(fieldName) {
     const entries = Object.entries(matrix[fieldName])
     for (const [varName, value] of entries) {
       if (varName !== fieldName && value !== null && value !== undefined && Math.abs(value) >= 0.7) {
-        correlations.push({ var: varName, value: parseFloat(value.toFixed(4)) })
+        correlations.push({ var: varName, value: parseFloat(Number(value).toFixed(4)) })
       }
     }
     correlations.sort((a, b) => Math.abs(b.value) - Math.abs(a.value))
@@ -299,7 +319,7 @@ function buildFieldData(fieldName) {
     let role = ''
     if (rec.target_column === fieldName) {
       role = '🎯 目标'
-    } else if (rec.feature_columns && rec.feature_columns.includes(fieldName) && rec.target_column !== fieldName) {
+    } else if (rec.feature_columns && rec.feature_columns.includes(fieldName)) {
       role = '📊 特征'
     }
     if (role) {
@@ -460,7 +480,7 @@ const heatmapOption = computed(() => {
       if (val !== undefined && val !== null) {
         const absVal = Math.abs(val)
         if (absVal >= minThreshold && absVal <= maxThreshold) {
-          data.push([i, j, parseFloat(val.toFixed(2))])
+          data.push([i, j, parseFloat(Number(val).toFixed(2))])
         } else {
           data.push([i, j, null])
         }
@@ -586,7 +606,7 @@ const scatterOption = computed(() => {
     }
   }
 
-  const isPositive = corr > 0
+  const isPositive = Number(corr) > 0
   return {
     tooltip: {
       trigger: 'item',
@@ -715,7 +735,6 @@ const timeseriesOption = computed(() => {
 
   const colors = ['#409EFF', '#67C23A', '#E6A23C', '#F56C6C', '#9B59B6', '#1ABC9C', '#3498DB', '#2ECC71', '#E67E22', '#E74C3C']
 
-  const useGroup = group && group !== '' && group !== '无分组'
   const useRealData = keys.some(k => diag[k]?.data_points && diag[k].data_points.length > 0)
 
   if (useRealData) {
@@ -835,6 +854,44 @@ function generateMockTimeseriesOption(keys, colors) {
     },
     series: seriesData
   }
+}
+
+// ==================== 有效记录数 & 置信度显示函数 ====================
+function getValidDisplay(row) {
+  if (row.valid_count !== undefined && row.valid_count !== null) {
+    return row.valid_count
+  }
+  return '--'
+}
+
+function getConfidenceDisplay(row) {
+  if (row.confidence !== undefined && row.confidence !== null) {
+    return (row.confidence * 100).toFixed(1) + '%'
+  }
+  return '--'
+}
+
+// ==================== 数据预览联动 ====================
+function showCorrelationData(row) {
+  const sessionId = sessionStore.currentSessionId || localStorage.getItem('lastSessionId')
+  if (!sessionId) {
+    ElMessage.warning('请先加载项目')
+    return
+  }
+
+  const validCount = row.valid_count !== undefined && row.valid_count !== null ? row.valid_count : '--'
+  const confidence = row.confidence !== undefined && row.confidence !== null ? (row.confidence * 100).toFixed(1) + '%' : '--'
+  const validDisplay = typeof validCount === 'number' ? `${validCount}条有效，${confidence}置信度` : ''
+
+  openDataPreview({
+    sessionId: sessionId,
+    title: `${row.var1} ↔ ${row.var2} (r=${Number(row.value).toFixed(3)}) 数据${validDisplay ? '（' + validDisplay + '）' : ''}`,
+    fields: [row.var1, row.var2],
+    filters: [
+      { field: row.var1, condition: 'is_not_null', value: true },
+      { field: row.var2, condition: 'is_not_null', value: true }
+    ]
+  })
 }
 
 // ==================== 加载数据 ====================

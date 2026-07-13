@@ -1,4 +1,4 @@
-// src/views/DataOverview.vue（完整代码，已修复 toFixed 报错）
+// src/views/DataOverview.vue（完整代码）
 <template>
   <div class="data-overview">
     <h2>📊 数据概览</h2>
@@ -70,7 +70,11 @@
               <el-table-column prop="count" label="样本量" width="80" align="center" />
               <el-table-column prop="missing_pct" label="缺失率" width="80" align="center">
                 <template #default="{ row }">
-                  <span :style="{ color: row.missing_pct > 20 ? '#F56C6C' : '#909399' }">
+                  <span
+                    class="field-name-link"
+                    :style="{ color: row.missing_pct > 20 ? '#F56C6C' : '#909399' }"
+                    @click="showMissingRows(row.name)"
+                  >
                     {{ row.missing_pct.toFixed(1) }}%
                   </span>
                 </template>
@@ -197,6 +201,7 @@ import { ElMessage } from 'element-plus'
 import { useSessionStore } from '../stores/session'
 import { useFieldDetailStore } from '../stores/fieldDetail'
 import { reportApi } from '../api/report'
+import { openDataPreview } from '../components/DataPreviewDialog'
 
 const router = useRouter()
 const sessionStore = useSessionStore()
@@ -244,7 +249,6 @@ const continuousVarList = computed(() => {
   const result = []
   Object.entries(summaries).forEach(([name, info]) => {
     if (info.type === 'continuous') {
-      // ✅ 强制转换为 number，避免 toFixed 报错
       const minVal = info.min !== undefined && info.min !== null ? Number(info.min) : 0
       const maxVal = info.max !== undefined && info.max !== null ? Number(info.max) : 0
       const meanVal = info.mean !== undefined && info.mean !== null ? Number(info.mean) : 0
@@ -342,7 +346,7 @@ const otherVarList = computed(() => {
   return result
 })
 
-// ==================== 区间条辅助（带类型安全） ====================
+// ==================== 区间条辅助 ====================
 function getRangeBarLeft(row) {
   const min = row._min !== undefined && row._min !== null ? Number(row._min) : 0
   const max = row._max !== undefined && row._max !== null ? Number(row._max) : 0
@@ -441,7 +445,7 @@ const categoryCountOption = computed(() => {
   }
 })
 
-// ==================== 连续变量取值范围（修复 toFixed 报错） ====================
+// ==================== 连续变量取值范围 ====================
 const hasContinuousRangeData = computed(() => {
   const summaries = reportData.value?.variable_summaries || {}
   return Object.keys(summaries).filter(key => summaries[key]?.type === 'continuous').length > 0
@@ -455,7 +459,6 @@ const continuousRangeOption = computed(() => {
   const topVars = contVars.slice(0, 8)
   const colors = ['#409EFF', '#67C23A', '#E6A23C', '#F56C6C', '#9B59B6', '#1ABC9C', '#3498DB', '#2ECC71']
 
-  // ✅ 强制转换为 number
   const data = topVars.map((key, idx) => {
     const info = summaries[key]
     return {
@@ -606,6 +609,23 @@ function buildFieldData(fieldName) {
 function openFieldDetail(fieldName) {
   const data = buildFieldData(fieldName)
   fieldDetailStore.open(fieldName, data)
+}
+
+// ==================== 数据预览联动 ====================
+function showMissingRows(fieldName) {
+  const sessionId = sessionStore.currentSessionId || localStorage.getItem('lastSessionId')
+  if (!sessionId) {
+    ElMessage.warning('请先加载项目')
+    return
+  }
+
+  openDataPreview({
+    sessionId: sessionId,
+    title: `「${fieldName}」为空的数据`,
+    filters: [
+      { field: fieldName, condition: 'is_null', value: true }
+    ]
+  })
 }
 
 // ==================== 加载数据 ====================

@@ -30,7 +30,7 @@ async def run_analysis(
         raise HTTPException(status_code=404, detail="会话不存在")
 
     # 获取文件路径
-    file_info = session_service.get_file(analysis_request.session_id)
+    file_info = session_service.get_data_path(analysis_request.session_id)
     if not file_info:
         raise HTTPException(status_code=400, detail="会话没有关联的数据文件")
 
@@ -52,7 +52,7 @@ async def run_analysis(
     background_tasks.add_task(
         analysis_service.run_analysis,
         analysis_request.session_id,
-        file_info["path"],
+        file_info,
         analysis_request.variable_types or {},
         task_id,
         analysis_request.include_html  # ✅ 新增传递

@@ -3,6 +3,7 @@ import json
 import sys
 import io
 import traceback
+import time
 
 import logging
 import warnings
@@ -36,17 +37,37 @@ class AnalysisService:
     def set_client_ip(self, client_ip: str):
         self._client_ip = client_ip
 
-    def run_analysis(self, session_id: str, file_path: str, variable_types: Dict, task_id: str, include_html: bool = False):  # ✅ 新增参数
+    def run_analysis(self, session_id: str, file_path: str, variable_types: Dict, task_id: str, include_html: bool = False):
         from api_server.routers.analysis import task_status
+
+        total_start = time.time()
+        print(f"\n⏱️ [分析开始] session_id={session_id}")
 
         if self._client_ip:
             self.session_service.set_client_ip(self._client_ip)
 
         try:
+            # ==================== 1. 加载数据 ====================
+            step_start = time.time()
             task_status[task_id] = {"status": "running", "progress": 10, "message": "加载数据中..."}
 
-            df = DataLoader.load_from_file(file_path)
+            parquet_path = self.session_service.get_data_parquet_path(session_id)
 
+            if parquet_path.exists():
+                print(f"📂 从 Parquet 缓存加载数据: {parquet_path}")
+                from api_server.services.data_service import DataService
+                df = DataService.load_parquet(parquet_path)
+                print(f"✅ 从 Parquet 加载完成: {len(df)} 行 x {len(df.columns)} 列")
+            else:
+                print(f"📂 Parquet 缓存不存在，从原始文件加载: {file_path}")
+                df = DataLoader.load_from_file(file_path)
+                print(f"✅ 从原始文件加载完成: {len(df)} 行 x {len(df.columns)} 列")
+
+            elapsed = time.time() - step_start
+            print(f"⏱️ [加载数据] 耗时: {elapsed:.2f}s")
+
+            # ==================== 2. 过滤变量类型 ====================
+            step_start = time.time()
             task_status[task_id] = {"status": "running", "progress": 30, "message": "分析数据中..."}
 
             filtered_types = {}
@@ -59,7 +80,11 @@ class AnalysisService:
                 base._infer_variable_types()
                 filtered_types = base.variable_types
 
-            # 获取真实表名（带调试日志）
+            elapsed = time.time() - step_start
+            print(f"⏱️ [过滤变量类型] 耗时: {elapsed:.2f}s")
+
+            # ==================== 3. 获取真实表名 ====================
+            step_start = time.time()
             print("\n" + "=" * 70)
             print("[DEBUG] ===== analysis_service.py: 获取真实表名 =====")
             print("=" * 70)
@@ -72,7 +97,7 @@ class AnalysisService:
 
             if session_meta:
                 tables_info = session_meta.get('tables_info', {})
-                print(f"[DEBUG] tables_info: {tables_info}")
+                print(f"[DEBUG] tables_info: {tables_info}")  # ✅ 修复语法错误
 
                 if isinstance(tables_info, dict):
                     tables = tables_info.get('tables', [])
@@ -102,23 +127,31 @@ class AnalysisService:
             print(f"[DEBUG] ✅ 最终 real_table_name: {real_table_name}")
             print("=" * 70 + "\n")
 
+            elapsed = time.time() - step_start
+            print(f"⏱️ [获取真实表名] 耗时: {elapsed:.2f}s")
+
+            # ==================== 4. 创建分析器 ====================
+            step_start = time.time()
             analyzer = AutoStatisticalAnalyzer(
                 df,
                 source_table_name=real_table_name,
                 predefined_types=filtered_types,
                 skip_auto_inference=bool(filtered_types),
-                quiet=True
+                quiet=True,
+                use_optimized_audit=True
             )
+            elapsed = time.time() - step_start
+            print(f"⏱️ [创建分析器] 耗时: {elapsed:.2f}s")
 
+            # ==================== 5. 生成报告 ====================
+            step_start = time.time()
             task_status[task_id] = {"status": "running", "progress": 60, "message": "生成报告中..."}
 
-            # 捕获日志
             log_capture = io.StringIO()
             old_stdout = sys.stdout
             sys.stdout = log_capture
 
             try:
-                # ✅ 传递 include_html 参数给 generate_full_report
                 analyzer.generate_full_report(include_html=include_html)
                 log_content = log_capture.getvalue()
             finally:
@@ -126,14 +159,20 @@ class AnalysisService:
                 log_capture.close()
 
             self.session_service.save_log(session_id, log_content)
+            elapsed = time.time() - step_start
+            print(f"⏱️ [生成报告] 耗时: {elapsed:.2f}s")
 
-            # 保存 JSON 结果
+            # ==================== 6. 保存 JSON 结果 ====================
+            step_start = time.time()
             json_result = json.loads(analyzer.to_json())
             self.session_service.save_analysis_result(session_id, json_result)
+            elapsed = time.time() - step_start
+            print(f"⏱️ [保存 JSON 结果] 耗时: {elapsed:.2f}s")
 
             print(f"[DEBUG] ✅ analysis_result.source_table = {json_result.get('source_table')}")
 
-            # 补充时间序列真实数据点（最近30个）
+            # ==================== 7. 补充时间序列数据点 ====================
+            step_start = time.time()
             try:
                 data = analyzer.data
                 variable_types_dict = analyzer.variable_types
@@ -186,7 +225,11 @@ class AnalysisService:
                 import traceback as tb
                 tb.print_exc()
 
-            # 生成核心结论
+            elapsed = time.time() - step_start
+            print(f"⏱️ [补充时间序列数据点] 耗时: {elapsed:.2f}s")
+
+            # ==================== 8. 生成核心结论 ====================
+            step_start = time.time()
             try:
                 from autostat.core.insight import InsightService
                 insight_service = InsightService()
@@ -199,9 +242,11 @@ class AnalysisService:
                 import traceback as tb
                 tb.print_exc()
 
-            # ============================================================
-            # HTML 报告：仅在 include_html=True 时生成
-            # ============================================================
+            elapsed = time.time() - step_start
+            print(f"⏱️ [生成核心结论] 耗时: {elapsed:.2f}s")
+
+            # ==================== 9. HTML 报告 ====================
+            step_start = time.time()
             if include_html:
                 reporter = Reporter(analyzer)
                 html_content = reporter.to_html()
@@ -210,10 +255,18 @@ class AnalysisService:
             else:
                 print(f"⏩ 跳过 HTML 报告生成 (include_html=False)")
 
+            elapsed = time.time() - step_start
+            print(f"⏱️ [HTML 报告] 耗时: {elapsed:.2f}s")
+
+            # ==================== 10. 保存变量类型和分析器 ====================
+            step_start = time.time()
             self.session_service.save_variable_types(session_id, analyzer.variable_types)
             self.session_service.save_analyzer(session_id, analyzer)
+            elapsed = time.time() - step_start
+            print(f"⏱️ [保存变量类型和分析器] 耗时: {elapsed:.2f}s")
 
-            # 生成个性化推荐问题
+            # ==================== 11. 生成推荐问题 ====================
+            step_start = time.time()
             try:
                 questions = self.recommendation_service.generate(json_result)
                 self.session_service.save_recommended_questions(session_id, questions)
@@ -223,6 +276,12 @@ class AnalysisService:
                 import traceback as tb
                 tb.print_exc()
 
+            elapsed = time.time() - step_start
+            print(f"⏱️ [生成推荐问题] 耗时: {elapsed:.2f}s")
+
+            total_elapsed = time.time() - total_start
+            print(f"\n⏱️ [分析完成] 总耗时: {total_elapsed:.2f}s")
+
             task_status[task_id] = {
                 "status": "completed",
                 "progress": 100,
@@ -231,6 +290,8 @@ class AnalysisService:
             }
 
         except Exception as e:
+            total_elapsed = time.time() - total_start
+            print(f"\n❌ [分析失败] 总耗时: {total_elapsed:.2f}s, 错误: {str(e)}")
             task_status[task_id] = {
                 "status": "failed",
                 "progress": 0,

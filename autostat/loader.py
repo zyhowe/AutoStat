@@ -452,7 +452,30 @@ class DataLoader:
 
                 df = pd.concat(all_dfs, ignore_index=True) if all_dfs else pd.DataFrame()
         else:
-            final_query = f"SELECT TOP {limit} {columns_str} FROM {full_table_name}"
+            # ✅ 优化：显式创建游标并设置 arraysize
+            # cursor = conn.cursor()
+            # cursor.arraysize = 5000  # 减少网络往返次数
+            # final_query = f"SELECT TOP {limit} {columns_str} FROM {full_table_name}"
+            # print(f"📊 普通采样: {final_query}")
+            # df = pd.read_sql(final_query, cursor)
+
+            # cursor = conn.cursor()
+            # cursor.arraysize = 5000
+            # final_query = f"SELECT TOP {limit} {columns_str} FROM {full_table_name} ORDER BY 1 DESC"
+            # print(f"📊 普通采样: {final_query}")
+            # cursor.execute(final_query)
+            # # 获取列名
+            # columns = [desc[0] for desc in cursor.description]
+            # # 分批获取数据（利用 arraysize）
+            # rows = []
+            # while True:
+            #     batch = cursor.fetchmany(5000)
+            #     if not batch:
+            #         break
+            #     rows.extend(batch)
+            # df = pd.DataFrame(rows, columns=columns)
+
+            final_query = f"SELECT TOP {limit} {columns_str} FROM {full_table_name} ORDER BY 1 DESC"
             print(f"📊 普通采样: {final_query}")
             df = pd.read_sql(final_query, conn)
 
@@ -796,18 +819,49 @@ class DataLoader:
             raise Exception(f"获取表结构失败: {e}")
 
     @staticmethod
+    # autostat/loader.py - 仅修改 load_from_file 方法，其他保持不变
+
+    @staticmethod
     def load_from_file(file_path, parse_dates=True, date_columns=None, **kwargs):
         """根据文件扩展名自动加载数据（增强健壮性）"""
+        import time
+        start_total = time.time()
+
         ext = os.path.splitext(file_path)[1].lower()
         print(f"  📂 文件扩展名: {ext}")
 
+        # Parquet 支持
+        if ext == '.parquet':
+            print(f"  📂 加载 Parquet 文件: {file_path}")
+            start = time.time()
+            df = pd.read_parquet(file_path)
+            elapsed = time.time() - start
+            print(f"  ⏱️ Parquet 加载完成，耗时: {elapsed:.2f}s")
+            print(f"  ⏱️ 总加载耗时: {time.time() - start_total:.2f}s")
+            return df
+
         if ext == '.csv':
-            return DataLoader.load_csv(file_path, parse_dates=parse_dates, date_columns=date_columns, **kwargs)
+            start = time.time()
+            df = DataLoader.load_csv(file_path, parse_dates=parse_dates, date_columns=date_columns, **kwargs)
+            elapsed = time.time() - start
+            print(f"  ⏱️ CSV 加载完成，耗时: {elapsed:.2f}s")
         elif ext in ['.xlsx', '.xls']:
-            return DataLoader.load_excel(file_path, **kwargs)
+            start = time.time()
+            df = DataLoader.load_excel(file_path, **kwargs)
+            elapsed = time.time() - start
+            print(f"  ⏱️ Excel 加载完成，耗时: {elapsed:.2f}s")
         elif ext == '.txt':
-            return DataLoader.load_txt(file_path, parse_dates=parse_dates, date_columns=date_columns, **kwargs)
+            start = time.time()
+            df = DataLoader.load_txt(file_path, parse_dates=parse_dates, date_columns=date_columns, **kwargs)
+            elapsed = time.time() - start
+            print(f"  ⏱️ TXT 加载完成，耗时: {elapsed:.2f}s")
         elif ext == '.json':
-            return DataLoader.load_json(file_path, parse_dates=parse_dates, date_columns=date_columns, **kwargs)
+            start = time.time()
+            df = DataLoader.load_json(file_path, parse_dates=parse_dates, date_columns=date_columns, **kwargs)
+            elapsed = time.time() - start
+            print(f"  ⏱️ JSON 加载完成，耗时: {elapsed:.2f}s")
         else:
-            raise ValueError(f"不支持的文件格式: {ext}，支持格式: .csv, .xlsx, .xls, .txt, .json")
+            raise ValueError(f"不支持的文件格式: {ext}，支持格式: .csv, .xlsx, .xls, .txt, .json, .parquet")
+
+        print(f"  ⏱️ 总加载耗时: {time.time() - start_total:.2f}s")
+        return df

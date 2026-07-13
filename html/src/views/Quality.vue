@@ -1,4 +1,4 @@
-// src/views/Quality.vue
+// src/views/Quality.vue（完整代码）
 <template>
   <div class="quality-page">
     <h2>📊 数据质量看板</h2>
@@ -75,7 +75,13 @@
               <span class="field-name-link" @click="openFieldDetail(row.field)">{{ row.field }}</span>
             </template>
           </el-table-column>
-          <el-table-column prop="message" label="问题描述" min-width="200" />
+          <el-table-column prop="message" label="问题描述" min-width="200">
+            <template #default="{ row }">
+              <span class="field-name-link" @click="showDataByAlert(row)">
+                {{ row.message }}
+              </span>
+            </template>
+          </el-table-column>
           <el-table-column prop="current" label="当前值" width="120" align="center" />
           <el-table-column prop="threshold" label="阈值" width="120" align="center" />
         </el-table>
@@ -99,6 +105,7 @@ import { QuestionFilled } from '@element-plus/icons-vue'
 import { useSessionStore } from '../stores/session'
 import { useFieldDetailStore } from '../stores/fieldDetail'
 import { reportApi } from '../api/report'
+import { openDataPreview } from '../components/DataPreviewDialog'
 
 const router = useRouter()
 const sessionStore = useSessionStore()
@@ -156,7 +163,6 @@ async function loadQuality() {
     reportData.value = reportResult
 
     const allIssues = []
-    // 🔥 修复：使用 qualityResult 而不是 result
     const alerts = qualityResult?.alerts || []
     alerts.forEach(alert => {
       if (alert.level === 'error' || alert.level === 'warning') {
@@ -330,7 +336,7 @@ function buildFieldData(fieldName) {
     const entries = Object.entries(matrix[fieldName])
     for (const [varName, value] of entries) {
       if (varName !== fieldName && value !== null && value !== undefined && Math.abs(value) >= 0.7) {
-        correlations.push({ var: varName, value: parseFloat(value.toFixed(4)) })
+        correlations.push({ var: varName, value: parseFloat(Number(value).toFixed(4)) })
       }
     }
     correlations.sort((a, b) => Math.abs(b.value) - Math.abs(a.value))
@@ -413,6 +419,43 @@ function openFieldDetail(fieldName) {
   fieldDetailStore.open(fieldName, data)
 }
 
+// ==================== 数据预览联动 ====================
+function showDataByAlert(alert) {
+  const sessionId = sessionStore.currentSessionId || localStorage.getItem('lastSessionId')
+  if (!sessionId) {
+    ElMessage.warning('请先加载项目')
+    return
+  }
+
+  const field = alert.field || alert.dimension
+  const message = alert.message || ''
+
+  let filters = []
+  let title = '数据详情'
+
+  if (field) {
+    if (message.includes('缺失')) {
+      filters = [{ field: field, condition: 'is_null', value: true }]
+      title = `「${field}」缺失的数据`
+    } else if (message.includes('异常')) {
+      filters = [{ field: field, condition: 'is_outlier', value: true }]
+      title = `「${field}」异常值数据`
+    } else {
+      filters = []
+      title = `「${field}」所有数据`
+    }
+  } else {
+    ElMessage.warning('无法解析该告警的筛选条件')
+    return
+  }
+
+  openDataPreview({
+    sessionId: sessionId,
+    title: title,
+    filters: filters
+  })
+}
+
 function goTo(routeName) {
   router.push(`/${routeName}`)
 }
@@ -491,7 +534,6 @@ function goTo(routeName) {
   }
 }
 
-/* ===== 维度评分卡片 ===== */
 .dimensions {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
