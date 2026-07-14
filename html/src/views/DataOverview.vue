@@ -1,4 +1,4 @@
-// src/views/DataOverview.vue（完整代码）
+// src/views/DataOverview.vue
 <template>
   <div class="data-overview">
     <h2>📊 数据概览</h2>
@@ -60,6 +60,7 @@
       <div class="section">
         <h4>📋 字段详情</h4>
         <el-tabs v-model="fieldTab" class="field-tabs">
+          <!-- 连续变量 -->
           <el-tab-pane label="连续变量" name="continuous">
             <el-table :data="continuousVarList" border size="small" max-height="420" style="width: 100%;">
               <el-table-column prop="name" label="字段名" width="120" fixed="left">
@@ -67,7 +68,15 @@
                   <span class="field-name-link" @click="openFieldDetail(row.name)">{{ row.name }}</span>
                 </template>
               </el-table-column>
-              <el-table-column prop="count" label="样本量" width="80" align="center" />
+              <!-- 样本量 增加点击 -->
+              <el-table-column prop="count" label="样本量" width="80" align="center">
+                <template #default="{ row }">
+                  <span class="field-name-link" @click="showNonMissingRows(row.name)">
+                    {{ row.count }}
+                  </span>
+                </template>
+              </el-table-column>
+              <!-- 缺失率 已有点击显示空值 -->
               <el-table-column prop="missing_pct" label="缺失率" width="80" align="center">
                 <template #default="{ row }">
                   <span
@@ -122,6 +131,7 @@
             <div v-if="continuousVarList.length === 0" class="empty-tip">暂无连续变量</div>
           </el-tab-pane>
 
+          <!-- 分类变量 -->
           <el-tab-pane label="分类变量" name="categorical">
             <el-table :data="categoricalVarList" border size="small" max-height="420" style="width: 100%;">
               <el-table-column prop="name" label="字段名" width="120" fixed="left">
@@ -129,10 +139,18 @@
                   <span class="field-name-link" @click="openFieldDetail(row.name)">{{ row.name }}</span>
                 </template>
               </el-table-column>
-              <el-table-column prop="count" label="样本量" width="80" align="center" />
+              <!-- 样本量 增加点击 -->
+              <el-table-column prop="count" label="样本量" width="80" align="center">
+                <template #default="{ row }">
+                  <span class="field-name-link" @click="showNonMissingRows(row.name)">
+                    {{ row.count }}
+                  </span>
+                </template>
+              </el-table-column>
+              <!-- 缺失率 已有点击 -->
               <el-table-column prop="missing_pct" label="缺失率" width="80" align="center">
                 <template #default="{ row }">
-                  <span :style="{ color: row.missing_pct > 20 ? '#F56C6C' : '#909399' }">
+                  <span :style="{ color: row.missing_pct > 20 ? '#F56C6C' : '#909399' }" class="field-name-link" @click="showMissingRows(row.name)">
                     {{ row.missing_pct.toFixed(1) }}%
                   </span>
                 </template>
@@ -162,6 +180,7 @@
             <div v-if="categoricalVarList.length === 0" class="empty-tip">暂无分类变量</div>
           </el-tab-pane>
 
+          <!-- 其他类型 -->
           <el-tab-pane label="其他类型" name="other">
             <el-table :data="otherVarList" border size="small" max-height="420" style="width: 100%;">
               <el-table-column prop="name" label="字段名" width="140" fixed="left">
@@ -170,10 +189,18 @@
                 </template>
               </el-table-column>
               <el-table-column prop="type_desc" label="类型" width="100" align="center" />
-              <el-table-column prop="count" label="样本量" width="80" align="center" />
+              <!-- 样本量 增加点击 -->
+              <el-table-column prop="count" label="样本量" width="80" align="center">
+                <template #default="{ row }">
+                  <span class="field-name-link" @click="showNonMissingRows(row.name)">
+                    {{ row.count }}
+                  </span>
+                </template>
+              </el-table-column>
+              <!-- 缺失率 增加点击 -->
               <el-table-column prop="missing_pct" label="缺失率" width="80" align="center">
                 <template #default="{ row }">
-                  <span :style="{ color: row.missing_pct > 20 ? '#F56C6C' : '#909399' }">
+                  <span :style="{ color: row.missing_pct > 20 ? '#F56C6C' : '#909399' }" class="field-name-link" @click="showMissingRows(row.name)">
                     {{ row.missing_pct.toFixed(1) }}%
                   </span>
                 </template>
@@ -624,6 +651,23 @@ function showMissingRows(fieldName) {
     title: `「${fieldName}」为空的数据`,
     filters: [
       { field: fieldName, condition: 'is_null', value: true }
+    ]
+  })
+}
+
+// ✅ 新增：显示非空数据
+function showNonMissingRows(fieldName) {
+  const sessionId = sessionStore.currentSessionId || localStorage.getItem('lastSessionId')
+  if (!sessionId) {
+    ElMessage.warning('请先加载项目')
+    return
+  }
+
+  openDataPreview({
+    sessionId: sessionId,
+    title: `「${fieldName}」非空数据`,
+    filters: [
+      { field: fieldName, condition: 'is_not_null', value: true }
     ]
   })
 }

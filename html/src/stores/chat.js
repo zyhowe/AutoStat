@@ -146,56 +146,65 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
-  // ===== 带上下文的 sendMessage =====
-  async function sendMessageWithContext(payload, onChunk, onComplete, onError) {
-    const { question, context_data } = payload
+  // ===== 带上下文的 sendMessage（不再区分预测，统一走 AI 自主判断） =====
+async function sendMessageWithContext(payload, onChunk, onComplete, onError) {
+  const { question, context_data } = payload
 
-    if (!question || !question.trim()) {
-      if (onError) onError('请输入问题')
-      return
-    }
-    if (!sessionId.value) {
-      if (onError) onError('请先加载项目')
-      return
-    }
-
-    addUserMessage(question.trim())
-
-    isStreaming.value = true
-    streamingContent.value = ''
-    error.value = null
-
-    try {
-      await chatApi.chatStream(
-        sessionId.value,
-        question.trim(),
-        ['json_result'],
-        context_data || null,
-        (chunk) => {
-          streamingContent.value += chunk
-          if (onChunk) onChunk(chunk)
-        },
-        () => {
-          const fullContent = streamingContent.value
-          addAssistantMessage(fullContent)
-          streamingContent.value = ''
-          isStreaming.value = false
-          if (onComplete) onComplete(fullContent)
-        },
-        (err) => {
-          isStreaming.value = false
-          streamingContent.value = ''
-          error.value = err
-          if (onError) onError(err)
-        }
-      )
-    } catch (err) {
-      isStreaming.value = false
-      streamingContent.value = ''
-      error.value = err.message || '发送失败'
-      if (onError) onError(error.value)
-    }
+  if (!question || !question.trim()) {
+    if (onError) onError('请输入问题')
+    return
   }
+  if (!sessionId.value) {
+    if (onError) onError('请先加载项目')
+    return
+  }
+
+  // 构建 context 数组
+  let context = ['json_result']
+  const contextType = context_data?.contextType || 'upload'
+  if (contextType === 'upload') {
+    context.push('upload')
+  } else if (contextType === 'source') {
+    context.push('source')
+  }
+
+  addUserMessage(question.trim())
+
+  isStreaming.value = true
+  streamingContent.value = ''
+  error.value = null
+
+  try {
+    await chatApi.chatStream(
+      sessionId.value,
+      question.trim(),
+      context,
+      context_data || null,
+      (chunk) => {
+        streamingContent.value += chunk
+        if (onChunk) onChunk(chunk)
+      },
+      () => {
+        const fullContent = streamingContent.value
+        addAssistantMessage(fullContent)
+        streamingContent.value = ''
+        isStreaming.value = false
+        if (onComplete) onComplete(fullContent)
+      },
+      (err) => {
+        isStreaming.value = false
+        streamingContent.value = ''
+        error.value = err
+        if (onError) onError(err)
+      }
+    )
+  } catch (err) {
+    isStreaming.value = false
+    streamingContent.value = ''
+    error.value = err.message || '发送失败'
+    if (onError) onError(error.value)
+  }
+}
 
   // ===== 预测 =====
   async function sendPrediction(text, onChunk, onComplete, onError) {

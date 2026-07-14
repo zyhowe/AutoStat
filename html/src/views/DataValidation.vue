@@ -1,5 +1,4 @@
 // src/views/DataValidation.vue
-// 只修改 parseRuleToExpr 和 showRuleViolations 方法，其余不变
 <template>
   <div class="data-validation">
     <h2>📋 数据核验</h2>
@@ -53,6 +52,13 @@
                     {{ (row.confidence * 100).toFixed(1) }}%
                   </template>
                 </el-table-column>
+                <el-table-column label="样本量" width="100" align="center">
+                  <template #default="{ row }">
+                    <span class="field-name-link" @click="showRuleSampleData(row)">
+                      {{ row.valid_count !== undefined && row.valid_count !== null ? row.valid_count : '--' }}
+                    </span>
+                  </template>
+                </el-table-column>
                 <el-table-column label="优先级" width="80" align="center">
                   <template #default="{ row }">
                     <el-tag :type="row.priority === '高' ? 'danger' : row.priority === '中' ? 'warning' : 'info'" size="small">
@@ -82,6 +88,13 @@
                     {{ (row.confidence * 100).toFixed(1) }}%
                   </template>
                 </el-table-column>
+                <el-table-column label="样本量" width="100" align="center">
+                  <template #default="{ row }">
+                    <span class="field-name-link" @click="showRuleSampleData(row)">
+                      {{ row.valid_count !== undefined && row.valid_count !== null ? row.valid_count : '--' }}
+                    </span>
+                  </template>
+                </el-table-column>
                 <el-table-column label="优先级" width="80" align="center">
                   <template #default="{ row }">
                     <el-tag :type="row.priority === '高' ? 'danger' : row.priority === '中' ? 'warning' : 'info'" size="small">
@@ -99,6 +112,13 @@
                 <el-table-column prop="confidence" label="置信度" width="100" align="center">
                   <template #default="{ row }">
                     {{ (row.confidence * 100).toFixed(1) }}%
+                  </template>
+                </el-table-column>
+                <el-table-column label="样本量" width="100" align="center">
+                  <template #default="{ row }">
+                    <span class="field-name-link" @click="showRuleSampleData(row)">
+                      {{ row.valid_count !== undefined && row.valid_count !== null ? row.valid_count : '--' }}
+                    </span>
                   </template>
                 </el-table-column>
                 <el-table-column label="优先级" width="80" align="center">
@@ -137,6 +157,13 @@
             <el-table-column prop="field" label="字段" width="150" fixed="left">
               <template #default="{ row }">
                 <span class="field-name-link" @click="openFieldDetail(row.field)">{{ row.field }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="样本量" width="100" align="center">
+              <template #default="{ row }">
+                <span class="field-name-link" @click="showFieldNonMissing(row.field)">
+                  {{ getFieldNonMissingCount(row.field) }}
+                </span>
               </template>
             </el-table-column>
             <el-table-column prop="count" label="异常数量" width="120" align="center">
@@ -294,9 +321,84 @@ const auditRules = computed(() => {
   return reportData.value?.quality_report?.audit_rules || {}
 })
 
-const arithmeticRules = computed(() => auditRules.value.arithmetic_rules || [])
-const functionalRules = computed(() => auditRules.value.functional_dependencies || [])
-const temporalRules = computed(() => auditRules.value.temporal_rules || [])
+// ✅ 前端重新计算违反数，不再依赖后端
+const arithmeticRules = computed(() => {
+  const rules = reportData.value?.quality_report?.audit_rules?.arithmetic_rules || []
+  const data = reportData.value?.data || []
+  if (!data.length) return rules
+
+  return rules.map(rule => {
+    const expr = parseRuleToExpr(rule)
+    if (!expr) {
+      return { ...rule, violation_count: 0 }
+    }
+    let count = 0
+    for (const row of data) {
+      try {
+        const keys = Object.keys(row)
+        const fn = new Function(...keys, `return ${expr}`)
+        const result = fn(...keys.map(k => row[k]))
+        if (result) count++
+      } catch (e) {
+        // 忽略该行计算错误
+      }
+    }
+    return { ...rule, violation_count: count }
+  })
+})
+
+// ✅ 前端重新计算违反数，不再依赖后端
+const functionalRules = computed(() => {
+  const rules = reportData.value?.quality_report?.audit_rules?.functional_dependencies || []
+  const data = reportData.value?.data || []
+  if (!data.length) return rules
+
+  return rules.map(rule => {
+    const expr = parseRuleToExpr(rule)
+    if (!expr) {
+      return { ...rule, violation_count: 0 }
+    }
+    let count = 0
+    for (const row of data) {
+      try {
+        const keys = Object.keys(row)
+        const fn = new Function(...keys, `return ${expr}`)
+        const result = fn(...keys.map(k => row[k]))
+        if (result) count++
+      } catch (e) {
+        // ignore
+      }
+    }
+    return { ...rule, violation_count: count }
+  })
+})
+
+// ✅ 前端重新计算违反数，不再依赖后端
+const temporalRules = computed(() => {
+  const rules = reportData.value?.quality_report?.audit_rules?.temporal_rules || []
+  const data = reportData.value?.data || []
+  if (!data.length) return rules
+
+  return rules.map(rule => {
+    const expr = parseRuleToExpr(rule)
+    if (!expr) {
+      return { ...rule, violation_count: 0 }
+    }
+    let count = 0
+    for (const row of data) {
+      try {
+        const keys = Object.keys(row)
+        const fn = new Function(...keys, `return ${expr}`)
+        const result = fn(...keys.map(k => row[k]))
+        if (result) count++
+      } catch (e) {
+        // ignore
+      }
+    }
+    return { ...rule, violation_count: count }
+  })
+})
+
 const auditRulesTotal = computed(() => {
   return arithmeticRules.value.length + functionalRules.value.length + temporalRules.value.length
 })
@@ -571,33 +673,78 @@ function openFieldDetail(fieldName) {
   fieldDetailStore.open(fieldName, data)
 }
 
+// ==================== 辅助函数 ====================
+
+// 获取字段非空数
+function getFieldNonMissingCount(fieldName) {
+  const summary = reportData.value?.variable_summaries?.[fieldName]
+  if (!summary) return 0
+  return summary.count || 0
+}
+
 // ==================== 数据预览联动 ====================
 
-/**
- * 解析规则表达式，生成用于筛选违反记录的表达式字符串
- * 增强版：处理更多规则格式
- */
+function showRuleSampleData(rule) {
+  const sessionId = sessionStore.currentSessionId || localStorage.getItem('lastSessionId')
+  if (!sessionId) {
+    ElMessage.warning('请先加载项目')
+    return
+  }
+
+  const fields = rule.fields || []
+  if (fields.length === 0) {
+    ElMessage.warning('该规则没有关联字段')
+    return
+  }
+
+  const validCount = rule.valid_count || 0
+  const filters = fields.map(f => ({
+    field: f,
+    condition: 'is_not_null',
+    value: true
+  }))
+
+  openDataPreview({
+    sessionId: sessionId,
+    title: `规则「${rule.rule?.substring(0, 40) || '未知规则'}」涉及字段均非空的数据（${validCount} 条）`,
+    fields: fields,
+    filters: filters
+  })
+}
+
+function showFieldNonMissing(fieldName) {
+  const sessionId = sessionStore.currentSessionId || localStorage.getItem('lastSessionId')
+  if (!sessionId) {
+    ElMessage.warning('请先加载项目')
+    return
+  }
+
+  openDataPreview({
+    sessionId: sessionId,
+    title: `「${fieldName}」非空数据（${getFieldNonMissingCount(fieldName)} 条）`,
+    filters: [
+      { field: fieldName, condition: 'is_not_null', value: true }
+    ]
+  })
+}
+
 function parseRuleToExpr(rule) {
   const ruleStr = rule.rule || ''
   const fields = rule.fields || []
 
-  // 清理规则字符串：去除多余空格
   const cleanRule = ruleStr.replace(/\s+/g, ' ').trim()
 
-  // 1. 处理 "A = B" 格式（两字段相等）
   if (cleanRule.includes(' = ') && !cleanRule.includes(' + ') && fields.length >= 2) {
     const parts = cleanRule.split(' = ')
     if (parts.length === 2) {
       const left = parts[0].trim()
       const right = parts[1].trim()
-      // 检查是否都是字段名（不是数字或常量）
       if (fields.includes(left) && fields.includes(right)) {
         return `abs(${left} - ${right}) > 0.000001`
       }
     }
   }
 
-  // 2. 处理 "A → B" 格式（函数依赖）
   if (cleanRule.includes(' → ')) {
     const parts = cleanRule.split(' → ')
     if (parts.length === 2) {
@@ -609,75 +756,36 @@ function parseRuleToExpr(rule) {
     }
   }
 
-  // 3. 处理 "A = B + C" 格式（加法关系，右边有加号）
   if (cleanRule.includes(' = ') && cleanRule.includes(' + ')) {
     const parts = cleanRule.split(' = ')
     if (parts.length === 2) {
-      const left = parts[0].trim()
-      const right = parts[1].trim()
-      // 检查左侧是否是字段，右侧是否包含字段
-      if (fields.includes(left)) {
-        return `abs(${left} - (${right})) > 0.000001`
-      }
-      // 检查右侧是否是字段，左侧是否包含字段
-      if (fields.includes(right)) {
-        // 左侧可能是 "A + B" 形式
-        return `abs((${left}) - ${right}) > 0.000001`
-      }
-    }
-  }
-
-  // 4. 处理 "A + B = C" 格式（加法关系，左边有加号）
-  if (cleanRule.includes(' + ') && cleanRule.includes(' = ')) {
-    const parts = cleanRule.split(' = ')
-    if (parts.length === 2) {
-      const left = parts[0].trim()
-      const right = parts[1].trim()
-      if (fields.includes(right)) {
-        return `abs((${left}) - ${right}) > 0.000001`
-      }
-    }
-  }
-
-  // 5. 处理 "A = B + C + D" 等复杂加法
-  if (cleanRule.includes(' = ') && cleanRule.includes(' + ')) {
-    const parts = cleanRule.split(' = ')
-    if (parts.length === 2) {
-      const left = parts[0].trim()
-      const right = parts[1].trim()
-      // 尝试提取所有字段
-      const leftFields = left.split('+').map(s => s.trim())
-      const rightFields = right.split('+').map(s => s.trim())
-      // 检查是否所有部分都是字段
+      let leftExpr = parts[0].trim()
+      let rightExpr = parts[1].trim()
+      const leftFields = leftExpr.split('+').map(s => s.trim())
+      const rightFields = rightExpr.split('+').map(s => s.trim())
       const allLeftAreFields = leftFields.every(f => fields.includes(f))
       const allRightAreFields = rightFields.every(f => fields.includes(f))
       if (allLeftAreFields && allRightAreFields) {
-        return `abs((${left}) - (${right})) > 0.000001`
-      }
-    }
-  }
-
-  // 6. 如果规则字符串包含 "="，尝试简单解析
-  if (cleanRule.includes('=') && fields.length >= 2) {
-    // 尝试按 "=" 分割，取两边所有字段
-    const parts = cleanRule.split('=')
-    if (parts.length === 2) {
-      const leftPart = parts[0].trim()
-      const rightPart = parts[1].trim()
-      // 提取左右两边包含的字段
-      const leftFieldsInRule = fields.filter(f => leftPart.includes(f))
-      const rightFieldsInRule = fields.filter(f => rightPart.includes(f))
-      if (leftFieldsInRule.length > 0 && rightFieldsInRule.length > 0) {
-        // 构建表达式：左边字段的表达式 = 右边字段的表达式
-        const leftExpr = leftFieldsInRule.join(' + ')
-        const rightExpr = rightFieldsInRule.join(' + ')
         return `abs((${leftExpr}) - (${rightExpr})) > 0.000001`
       }
     }
   }
 
-  // 无法解析，返回 null
-  console.warn('⚠️ 无法解析规则表达式:', cleanRule)
+  if (cleanRule.includes(' + ') && cleanRule.includes(' = ')) {
+    const parts = cleanRule.split(' = ')
+    if (parts.length === 2) {
+      let leftExpr = parts[0].trim()
+      let rightExpr = parts[1].trim()
+      const leftFields = leftExpr.split('+').map(s => s.trim())
+      const rightFields = rightExpr.split('+').map(s => s.trim())
+      const allLeftAreFields = leftFields.every(f => fields.includes(f))
+      const allRightAreFields = rightFields.every(f => fields.includes(f))
+      if (allLeftAreFields && allRightAreFields) {
+        return `abs((${leftExpr}) - (${rightExpr})) > 0.000001`
+      }
+    }
+  }
+
   return null
 }
 
@@ -694,35 +802,29 @@ function showRuleViolations(rule) {
     return
   }
 
-  // 尝试解析规则表达式
   const expr = parseRuleToExpr(rule)
   const violationCount = rule.violation_count || 0
 
   let filters = []
   let title = ''
-  let warningMsg = ''
 
   if (expr) {
-    // 精确筛选：使用 expr 条件
     filters = [{ field: 'expr', condition: 'expr', value: expr }]
     title = `违反规则「${rule.rule}」的记录（共 ${fields.length} 个字段，违反 ${violationCount} 条）`
   } else {
-    // 回退：所有字段非空
     filters = fields.map(f => ({
       field: f,
       condition: 'is_not_null',
       value: true
     }))
     title = `规则「${rule.rule}」涉及字段数据（共 ${fields.length} 个字段，均非空）`
-    warningMsg = '⚠️ 无法精确筛选违反记录，仅显示所有相关字段非空的数据'
   }
 
   openDataPreview({
     sessionId: sessionId,
     title: title,
     fields: fields,
-    filters: filters,
-    warning: warningMsg
+    filters: filters
   })
 }
 

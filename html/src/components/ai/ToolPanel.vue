@@ -1,14 +1,15 @@
 <template>
   <div class="tool-panel">
-    <!-- ===== 推荐问题 ===== -->
-    <div class="section">
-      <div class="section-header">
-        <span class="section-title">💡 推荐问题</span>
-        <el-button size="small" text @click="refreshQuestions" :loading="loadingQuestions">
-          🔄
-        </el-button>
-      </div>
+    <!-- ===== 头部 ===== -->
+    <div class="panel-header">
+      <span class="panel-title">💡 推荐问题</span>
+      <el-button size="small" text @click="refreshQuestions" :loading="loadingQuestions">
+        🔄
+      </el-button>
+    </div>
 
+    <!-- ===== 推荐问题列表 ===== -->
+    <div class="panel-body">
       <div v-if="loadingQuestions" class="loading-skeleton">
         <el-skeleton :rows="5" animated />
       </div>
@@ -43,7 +44,6 @@
               </div>
 
               <div v-if="getSubQuestionCount(sub.toolId) > 0" class="question-list">
-                <!-- 个性化推荐（蓝色） -->
                 <div
                   v-for="(q, idx) in getPersonalizedQuestions(sub.toolId)"
                   :key="'p_' + idx"
@@ -54,7 +54,6 @@
                   <span class="q-text personalized-text">{{ q.text }}</span>
                 </div>
 
-                <!-- 共性推荐（灰色） -->
                 <div
                   v-for="(q, idx) in getCommonQuestions(sub.toolId)"
                   :key="'c_' + idx"
@@ -86,7 +85,6 @@ const props = defineProps({
     type: String,
     default: ''
   },
-  // 个性化推荐：从 analysis_result.recommended_questions 传入
   personalizedQuestions: {
     type: Object,
     default: () => ({})
@@ -160,7 +158,7 @@ const questionGroups = [
   }
 ]
 
-// ===== 小项 → 场景/子项映射（用于获取个性化推荐） =====
+// ===== 小项 → 场景/子项映射 =====
 const subToSceneMap = {
   'describe_distribution': { scene: 'data_overview', sub: 'distribution' },
   'analyze_correlation': { scene: 'pattern_discovery', sub: 'correlation' },
@@ -219,10 +217,7 @@ function toggleGroup(groupKey) {
   } catch (e) { /* ignore */ }
 }
 
-// ===== 点击问题：直接发送 prompt 和 dataKey =====
 function onQuestionClick(q) {
-  // q 包含 icon, text, prompt, dataKey
-  // 发送 prompt（如果存在），否则发送 text
   const prompt = q.prompt || q.text
   const dataKey = q.dataKey || null
   emit('question-click', {
@@ -250,28 +245,44 @@ defineExpose({ refreshQuestions })
 
 <style scoped>
 .tool-panel {
-  padding: 12px 16px;
+  display: flex;
+  flex-direction: column;
   height: 100%;
-  overflow-y: auto;
-  background: #f8f9fa;
-  border-right: 1px solid #e4e7ed;
+  background: #fafafa;
+  padding: 12px 14px;
+  overflow: hidden;
 }
 
-.section {
-  margin-bottom: 8px;
-}
-
-.section-header {
+.panel-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 8px;
+  flex-shrink: 0;
+  padding-bottom: 10px;
+  border-bottom: 1px solid #e8ecf1;
 }
 
-.section-title {
+.panel-title {
   font-size: 14px;
   font-weight: 600;
   color: #2c3e50;
+}
+
+.panel-body {
+  flex: 1;
+  overflow-y: auto;
+  padding-top: 10px;
+}
+
+.panel-body::-webkit-scrollbar {
+  width: 4px;
+}
+.panel-body::-webkit-scrollbar-thumb {
+  background: #d0d4dc;
+  border-radius: 2px;
+}
+.panel-body::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 .loading-skeleton {
@@ -279,7 +290,7 @@ defineExpose({ refreshQuestions })
 }
 
 .empty-text {
-  padding: 12px 0;
+  padding: 20px 0;
   text-align: center;
   color: #bbb;
   font-size: 13px;
@@ -413,16 +424,5 @@ defineExpose({ refreshQuestions })
 .q-text {
   flex: 1;
   line-height: 1.4;
-}
-
-.tool-panel::-webkit-scrollbar {
-  width: 4px;
-}
-.tool-panel::-webkit-scrollbar-thumb {
-  background: #d0d4dc;
-  border-radius: 2px;
-}
-.tool-panel::-webkit-scrollbar-track {
-  background: transparent;
 }
 </style>

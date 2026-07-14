@@ -1101,21 +1101,28 @@ class AuditRuleDiscoverer:
 
         return groups
 
-
+    # core/audit.py - 修改 _validate_rule_on_full_data 方法
 
     def _validate_rule_on_full_data(self, df: pd.DataFrame, rule: Dict) -> Dict:
         """
         在全量数据上重新验证单条规则，更新 valid_rows、satisfied_rows、confidence、violation_count
+        并添加 valid_count（所有字段非空的行数）和 total_count（总行数）
         """
         fields = rule.get('fields', [])
         if len(fields) < 2:
             return rule
 
-        # 获取全量数据中所有字段都非空的行
+        # 计算所有字段均非空的行数
         valid_mask = df[fields].notna().all(axis=1)
-        valid_rows = valid_mask.sum()
+        valid_count = valid_mask.sum()
+        total_count = len(df)
 
-        if valid_rows == 0:
+        # 获取全量数据中所有字段都非空的行（用于验证规则）
+        # 但注意：规则验证需要基于所有字段均非空的行，否则无法计算表达式
+        # 此处我们使用 valid_mask 作为有效行
+        if valid_count == 0:
+            rule['valid_count'] = 0
+            rule['total_count'] = total_count
             rule['valid_rows'] = 0
             rule['satisfied_rows'] = 0
             rule['confidence'] = 0.0
@@ -1123,13 +1130,13 @@ class AuditRuleDiscoverer:
             rule['priority'] = '低'
             return rule
 
-        # 解析规则，计算满足条件的行数
+        # 解析规则，计算满足条件的行数（使用 valid_mask 过滤后的数据）
         rule_str = rule['rule']
         left, right = rule_str.split(' = ')
         left_fields = [f.strip() for f in left.split(' + ')] if left != '0' else []
         right_fields = [f.strip() for f in right.split(' + ')] if right != '0' else []
 
-        # 计算左值和右值
+        # 计算左值和右值（只在 valid_mask 为 True 的行上计算）
         if left_fields:
             left_sum = df.loc[valid_mask, left_fields].sum(axis=1)
         else:
@@ -1140,20 +1147,21 @@ class AuditRuleDiscoverer:
         else:
             right_sum = 0
 
-        # 计算误差
         diff = np.abs(left_sum - right_sum)
         scale = np.maximum(np.abs(left_sum), np.abs(right_sum))
         scale = np.maximum(scale, 1)
         satisfied_mask = (diff / scale < 1e-4)
         satisfied_rows = satisfied_mask.sum()
 
-        confidence = satisfied_rows / valid_rows if valid_rows > 0 else 0
+        confidence = satisfied_rows / valid_count if valid_count > 0 else 0
 
         # 更新规则
-        rule['valid_rows'] = int(valid_rows)
+        rule['valid_count'] = int(valid_count)  # 所有字段均非空的行数
+        rule['total_count'] = int(total_count)  # 总行数
+        rule['valid_rows'] = int(valid_count)  # 保持兼容
         rule['satisfied_rows'] = int(satisfied_rows)
         rule['confidence'] = round(confidence, 4)
-        rule['violation_count'] = int(valid_rows - satisfied_rows)
+        rule['violation_count'] = int(valid_count - satisfied_rows)
         rule['priority'] = '高' if confidence == 1.0 else '中'
 
         return rule

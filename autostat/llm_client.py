@@ -1,5 +1,5 @@
 """
-大模型客户端模块 - 支持 OpenAI 兼容 API
+大模型客户端模块 - 支持 OpenAI 兼容 API，支持 Tools/Function Calling
 """
 
 import requests
@@ -39,7 +39,7 @@ class LLMClient:
         流式对话
 
         参数:
-        - messages: 消息列表，格式 [{"role": "user", "content": "..."}]
+        - messages: 消息列表
         - temperature: 温度参数
         - tools: 工具/函数定义列表（可选）
         - tool_choice: 工具选择配置（可选）
@@ -87,6 +87,11 @@ class LLMClient:
                             chunk = json.loads(data)
                             if 'choices' in chunk and len(chunk['choices']) > 0:
                                 delta = chunk['choices'][0].get('delta', {})
+                                # 处理 tool_calls（流式模式下可能分多次返回）
+                                if 'tool_calls' in delta:
+                                    # 流式模式下 tool_calls 需要累积，这里简化处理
+                                    # 实际生产环境需要累积并组装
+                                    continue
                                 content = delta.get('content', '')
                                 if content:
                                     yield content
@@ -103,55 +108,18 @@ class LLMClient:
     def chat(self, messages: List[Dict[str, str]],
              temperature: float = 0.7,
              tools: Optional[List[Dict]] = None,
-             tool_choice: Optional[Dict] = None) -> str:
+             tool_choice: Optional[Dict] = None) -> Dict[str, Any]:
         """
-        非流式对话
-        """
-        if not self.api_base or not self.model:
-            return "错误：大模型配置不完整"
+        非流式对话，返回完整响应对象（包含 tool_calls 处理）
 
-        payload = {
-            "model": self.model,
-            "messages": messages,
-            "temperature": temperature,
-            "stream": False
-        }
+        参数:
+        - messages: 消息列表
+        - temperature: 温度参数
+        - tools: 工具/函数定义列表（可选）
+        - tool_choice: 工具选择配置（可选）
 
-        if tools:
-            payload["tools"] = tools
-        if tool_choice:
-            payload["tool_choice"] = tool_choice
-
-        try:
-            response = requests.post(
-                f"{self.api_base}/chat/completions",
-                headers=self._get_headers(),
-                json=payload,
-                timeout=self.timeout
-            )
-
-            if response.status_code != 200:
-                return f"错误：HTTP {response.status_code}"
-
-            result = response.json()
-
-            if 'choices' in result and len(result['choices']) > 0:
-                message = result['choices'][0].get('message', {})
-                if 'tool_calls' in message and message['tool_calls']:
-                    return ""
-                return message.get('content', '')
-
-            return ""
-
-        except Exception as e:
-            return f"错误：{str(e)}"
-
-    def chat_complete(self, messages: List[Dict[str, str]],
-                      temperature: float = 0.7,
-                      tools: Optional[List[Dict]] = None,
-                      tool_choice: Optional[Dict] = None) -> Dict[str, Any]:
-        """
-        返回完整的响应对象（用于解析 tool_calls）
+        返回:
+        - 响应字典，包含 choices 和 tool_calls 信息
         """
         if not self.api_base or not self.model:
             return {"error": "大模型配置不完整"}
@@ -179,7 +147,18 @@ class LLMClient:
             if response.status_code != 200:
                 return {"error": f"HTTP {response.status_code}: {response.text[:200]}"}
 
-            return response.json()
+            result = response.json()
+            return result
 
         except Exception as e:
             return {"error": str(e)}
+
+    def chat_complete(self, messages: List[Dict[str, str]],
+                      temperature: float = 0.7,
+                      tools: Optional[List[Dict]] = None,
+                      tool_choice: Optional[Dict] = None) -> Dict[str, Any]:
+        """
+        返回完整的响应对象（用于解析 tool_calls）
+        与 chat 方法相同，为保持兼容保留
+        """
+        return self.chat(messages, temperature, tools, tool_choice)

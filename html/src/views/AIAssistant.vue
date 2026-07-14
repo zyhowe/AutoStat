@@ -1,18 +1,6 @@
 <template>
   <div class="ai-assistant">
     <div class="workbench-body">
-      <!-- ===== 左侧：工具面板 ===== -->
-      <div class="tool-panel-wrapper">
-        <ToolPanel
-          ref="toolPanelRef"
-          :scene="currentScene"
-          :session-id="sessionStore.currentSessionId"
-          :personalized-questions="personalizedQuestions"
-          @question-click="handleQuestionClick"
-          @refresh-questions="loadRecommendedQuestions"
-        />
-      </div>
-
       <!-- ===== 中间：对话区域 ===== -->
       <div class="chat-wrapper">
         <ChatArea
@@ -21,11 +9,23 @@
           :is-streaming="chatStore.isStreaming"
           :streaming-content="chatStore.streamingContent"
           :pending-tool="pendingTool"
-          :context-value="currentContexts"
+          :context-value="currentContext"
           @send="handleSend"
           @clear="handleClear"
           @tool-clear="pendingTool = null"
           @context-change="handleContextChange"
+        />
+      </div>
+
+      <!-- ===== 右侧：推荐问题面板 ===== -->
+      <div class="tool-panel-wrapper">
+        <ToolPanel
+          ref="toolPanelRef"
+          :scene="currentScene"
+          :session-id="sessionStore.currentSessionId"
+          :personalized-questions="personalizedQuestions"
+          @question-click="handleQuestionClick"
+          @refresh-questions="loadRecommendedQuestions"
         />
       </div>
     </div>
@@ -37,8 +37,11 @@
       <el-tag v-if="chatStore.messages.length > 0" size="small" type="info">
         {{ chatStore.messages.length }} 条消息
       </el-tag>
-      <el-tag v-if="currentContexts.length > 0 && currentContexts.length < 3" size="small" type="warning">
-        上下文: {{ getContextLabels().join('、') }}
+      <el-tag v-if="currentContext === 'upload'" size="small" type="warning">
+        📁 上传数据
+      </el-tag>
+      <el-tag v-else-if="currentContext === 'source'" size="small" type="warning">
+        🗄️ 源数据
       </el-tag>
     </div>
   </div>
@@ -69,9 +72,8 @@ const reportData = ref(null)
 const personalizedQuestions = ref({})
 const activeToolId = ref('')
 
-// ===== 上下文状态 =====
-const currentContexts = ref(['json'])
-const isManualOverride = ref(false)
+// ===== 上下文状态（单选） =====
+const currentContext = ref('upload')
 
 // ===== 场景映射 =====
 const sceneMap = {
@@ -211,16 +213,12 @@ const insightsList = computed(() => {
 })
 
 // ===== 上下文辅助方法 =====
-function getContextLabels() {
-  return currentContexts.value.map(c => {
-    const labels = { json: 'JSON 结果', upload: '上传数据', source: '源数据' }
-    return labels[c] || c
-  })
+function getContextLabel() {
+  return currentContext.value === 'upload' ? '上传数据' : '源数据'
 }
 
 // ===== 处理点击推荐问题 =====
 function handleQuestionClick(payload) {
-  // 直接使用 ToolPanel 传过来的 text（已经是 prompt）和 dataKey
   const { text, dataKey } = payload
   const contextData = {
     dataKey: dataKey,
@@ -229,6 +227,7 @@ function handleQuestionClick(payload) {
   handleSend(text, contextData)
 }
 
+// ===== 发送消息（移除硬编码预测判断，全部交给 AI 自主决定） =====
 function handleSend(text, contextData = null) {
   const message = text || pendingTool.value?.prompt
   if (!message) return
@@ -238,21 +237,12 @@ function handleSend(text, contextData = null) {
     context_data: contextData || {}
   }
 
-  if (message.includes('预测') || message.includes('forecast') || message.includes('未来趋势')) {
-    chatStore.sendPrediction(
-      message,
-      null,
-      () => { pendingTool.value = null },
-      (err) => ElMessage.error(err)
-    )
-  } else {
-    chatStore.sendMessageWithContext(
-      payload,
-      null,
-      () => { pendingTool.value = null },
-      (err) => ElMessage.error(err)
-    )
-  }
+  chatStore.sendMessageWithContext(
+    payload,
+    null,
+    () => { pendingTool.value = null },
+    (err) => ElMessage.error(err)
+  )
 }
 
 function handleClear() {
@@ -265,9 +255,8 @@ function handleExport() {
   ElMessage.success('导出成功')
 }
 
-function handleContextChange(contexts) {
-  currentContexts.value = contexts
-  isManualOverride.value = true
+function handleContextChange(value) {
+  currentContext.value = value
 }
 
 async function loadRecommendedQuestions() {
@@ -343,9 +332,9 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   height: 100%;
-  max-width: 1400px;
-  margin: 0 auto;
-  padding: 0 16px;
+  max-width: 100%;
+  margin: 0;
+  padding: 0 12px;
 }
 
 .workbench-body {
@@ -360,17 +349,20 @@ onMounted(() => {
   background: #fff;
 }
 
-.tool-panel-wrapper {
-  width: 260px;
-  flex-shrink: 0;
-  height: 100%;
-  overflow: hidden;
-}
-
 .chat-wrapper {
   flex: 1;
   height: 100%;
   overflow: hidden;
+  min-width: 0;
+}
+
+.tool-panel-wrapper {
+  width: 280px;
+  flex-shrink: 0;
+  height: 100%;
+  overflow: hidden;
+  border-left: 1px solid #e4e7ed;
+  background: #fafafa;
 }
 
 .footer-toolbar {
@@ -398,6 +390,8 @@ onMounted(() => {
     height: auto;
     max-height: 200px;
     overflow-y: auto;
+    border-left: none;
+    border-top: 1px solid #e4e7ed;
   }
   .chat-wrapper {
     height: 400px;

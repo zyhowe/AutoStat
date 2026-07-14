@@ -29,12 +29,14 @@ class RelationshipAnalyzer:
         self.date_derived_columns = date_derived_columns or set()
         self.date_column_mapping = date_column_mapping or {}
         self.quiet = quiet
+        self.significant_pairs = []  # ✅ 实例属性，供 analyzer.to_json 读取
 
     def _check_normality(self, x):
+        """检查正态性 - 调用 BaseAnalyzer 静态方法"""
         return BaseAnalyzer.check_normality(x)
 
     def auto_analyze_relationships(self):
-        # 保持不变（调用内部方法）
+        """自动关系分析"""
         print("\n" + "=" * 70)
         print("🔗 自动关系分析报告")
         print("=" * 70)
@@ -44,16 +46,21 @@ class RelationshipAnalyzer:
 
         if len(all_vars) < 2:
             print("变量数量不足，无法进行关系分析")
-            return
+            self.significant_pairs = []
+            return []
 
         numeric_vars = [v for v in all_vars if self.variable_types.get(v) == 'continuous']
         categorical_vars = [v for v in all_vars
                             if self.variable_types.get(v) in ['categorical', 'categorical_numeric', 'ordinal']]
 
+        # 排除同源日期派生列的关系
         exclude_pairs = self._build_exclude_pairs(all_vars)
         print(f"\n📌 排除 {len(exclude_pairs)} 对日期相关关系")
 
         significant_pairs = self._plot_complete_correlation_matrix(all_vars, numeric_vars, categorical_vars, exclude_pairs)
+
+        # ✅ 保存为实例属性
+        self.significant_pairs = significant_pairs
 
         if significant_pairs:
             self._print_significant_pairs(significant_pairs)
@@ -81,18 +88,22 @@ class RelationshipAnalyzer:
         return exclude_pairs
 
     def _plot_complete_correlation_matrix(self, all_vars, numeric_vars, categorical_vars, exclude_pairs):
-        # 调用各子方法
+        """绘制完整相关性矩阵"""
         significant_pairs = []
 
+        # 数值-数值相关性
         if len(numeric_vars) >= 2:
             self._analyze_numeric_numeric(numeric_vars, exclude_pairs, significant_pairs)
 
+        # 分类-分类关联
         if len(categorical_vars) >= 2:
             self._analyze_categorical_categorical_vectorized(categorical_vars, exclude_pairs, significant_pairs)
 
+        # 数值-分类关联
         if numeric_vars and categorical_vars:
             self._analyze_numeric_categorical_vectorized(numeric_vars, categorical_vars, exclude_pairs, significant_pairs)
 
+        # 综合热力图 - 使用统一模块
         if len(numeric_vars) >= 2:
             plot_correlation(self.data, numeric_vars)
         else:
@@ -101,7 +112,7 @@ class RelationshipAnalyzer:
         return significant_pairs
 
     def _analyze_numeric_numeric(self, numeric_vars, exclude_pairs, significant_pairs):
-        """分析数值-数值相关性"""
+        """分析数值-数值相关性（包含有效记录数和置信度）"""
         print("\n【数值变量相关系数】")
         valid_numeric = [v for v in numeric_vars if self._has_valid_pair(v, numeric_vars, exclude_pairs)]
 
@@ -116,10 +127,10 @@ class RelationshipAnalyzer:
                         continue
                     corr_value = corr_data.iloc[i, j]
                     if abs(corr_value) > 0.3:
+                        # ✅ 计算有效记录数
                         valid_data = self.data[[v1, v2]].dropna()
                         valid_count = len(valid_data)
                         total_count = len(self.data)
-
                         if len(valid_data) >= 3:
                             is_norm1, _, _ = self._check_normality(valid_data[v1])
                             is_norm2, _, _ = self._check_normality(valid_data[v2])
@@ -129,15 +140,17 @@ class RelationshipAnalyzer:
                                 _, p_value = spearmanr(valid_data[v1], valid_data[v2])
                             if p_value < 0.05:
                                 significant_pairs.append({
-                                    'var1': v1, 'var2': v2, 'type': '数值-数值',
-                                    'statistic': corr_value, 'p_value': p_value, 'strength': abs(corr_value),
+                                    'var1': v1,
+                                    'var2': v2,
+                                    'type': '数值-数值',
+                                    'statistic': corr_value,
+                                    'p_value': p_value,
+                                    'strength': abs(corr_value),
                                     'valid_count': valid_count,
                                     'total_count': total_count,
                                     'confidence': valid_count / total_count if total_count > 0 else 0
                                 })
 
-
-    # ==================== 向量化改造：分类-分类关联 (Cramer's V) ====================
     def _analyze_categorical_categorical_vectorized(self, categorical_vars, exclude_pairs, significant_pairs):
         """向量化计算所有分类变量对的 Cramer's V"""
         print("\n【分类变量关联矩阵 (Cramer's V)】")
@@ -158,9 +171,6 @@ class RelationshipAnalyzer:
         n_cat = len(valid_cat)
         cramer_matrix = pd.DataFrame(index=valid_cat, columns=valid_cat, dtype=float)
 
-        # 使用笛卡尔积迭代构建所有列对的交叉表（但可以用向量化方式预计算）
-        # 由于 chi2_contingency 需要逐个计算，这里仍然循环，但尽量减少计算量
-        # 优化：先计算所有列对的唯一值数，跳过无变化的列对
         for i in range(n_cat):
             for j in range(i + 1, n_cat):
                 v1, v2 = valid_cat[i], valid_cat[j]
@@ -181,9 +191,20 @@ class RelationshipAnalyzer:
                     cramer_v = np.sqrt(chi2 / (n * min_dim)) if chi2 > 0 and n > 0 else 0
                     cramer_matrix.iloc[i, j] = cramer_v
                     if p_value < 0.05:
+                        # 计算有效记录数（两列均非空）
+                        valid_data = self.data[[v1, v2]].dropna()
+                        valid_count = len(valid_data)
+                        total_count = len(self.data)
                         significant_pairs.append({
-                            'var1': v1, 'var2': v2, 'type': '分类-分类',
-                            'statistic': cramer_v, 'p_value': p_value, 'strength': cramer_v
+                            'var1': v1,
+                            'var2': v2,
+                            'type': '分类-分类',
+                            'statistic': cramer_v,
+                            'p_value': p_value,
+                            'strength': cramer_v,
+                            'valid_count': valid_count,
+                            'total_count': total_count,
+                            'confidence': valid_count / total_count if total_count > 0 else 0
                         })
                 except Exception as e:
                     print(f"  ⚠️ 计算 {v1} vs {v2} 失败: {e}")
@@ -207,14 +228,11 @@ class RelationshipAnalyzer:
         plt.tight_layout()
         plt.show()
 
-    # ==================== 向量化改造：数值-分类关联 (Eta-squared) ====================
-    def _analyze_numeric_categorical_vectorized(self, numeric_vars, categorical_vars, exclude_pairs,
-                                                significant_pairs):
+    def _analyze_numeric_categorical_vectorized(self, numeric_vars, categorical_vars, exclude_pairs, significant_pairs):
         """向量化计算所有数值-分类变量对的 Eta-squared"""
         print("\n【数值-分类关联矩阵 (Eta-squared)】")
         eta_matrix = pd.DataFrame(index=numeric_vars, columns=categorical_vars, dtype=float)
 
-        # 预计算每个数值列的总均值和总平方和（用于计算 Eta）
         for num_var in numeric_vars:
             all_values = self.data[num_var].dropna()
             total_mean = all_values.mean()
@@ -225,18 +243,14 @@ class RelationshipAnalyzer:
                     eta_matrix.loc[num_var, cat_var] = np.nan
                     continue
 
-                # 使用 groupby 一次性计算组内统计量（向量化）
                 grouped = self.data.groupby(cat_var)[num_var]
-                # 过滤掉少于2个样本的组
                 valid_groups = grouped.filter(lambda x: len(x) > 1)
                 if valid_groups.empty:
                     eta_matrix.loc[num_var, cat_var] = np.nan
                     continue
 
-                # 计算组间平方和
                 group_means = grouped.mean()
                 group_counts = grouped.count()
-                # 只保留有效的组
                 valid_mask = group_counts > 1
                 if not valid_mask.any():
                     eta_matrix.loc[num_var, cat_var] = np.nan
@@ -244,17 +258,25 @@ class RelationshipAnalyzer:
                 group_means_valid = group_means[valid_mask]
                 group_counts_valid = group_counts[valid_mask]
 
-                # 组间平方和 = sum( count_i * (mean_i - total_mean)^2 )
                 ss_between = (group_counts_valid * ((group_means_valid - total_mean) ** 2)).sum()
-                # 总平方和 = sum( (x - total_mean)^2 )
-                # 这里复用总平方和（所有样本）
                 ss_total = total_ss
                 eta_sq = ss_between / ss_total if ss_total > 0 else 0
                 eta_matrix.loc[num_var, cat_var] = eta_sq
                 if eta_sq > 0.01:
+                    # 计算有效记录数（两列均非空）
+                    valid_data = self.data[[num_var, cat_var]].dropna()
+                    valid_count = len(valid_data)
+                    total_count = len(self.data)
                     significant_pairs.append({
-                        'var1': num_var, 'var2': cat_var, 'type': '数值-分类',
-                        'statistic': eta_sq, 'p_value': 0.01, 'strength': eta_sq
+                        'var1': num_var,
+                        'var2': cat_var,
+                        'type': '数值-分类',
+                        'statistic': eta_sq,
+                        'p_value': 0.01,
+                        'strength': eta_sq,
+                        'valid_count': valid_count,
+                        'total_count': total_count,
+                        'confidence': valid_count / total_count if total_count > 0 else 0
                     })
 
         print(eta_matrix.round(4))
@@ -270,8 +292,7 @@ class RelationshipAnalyzer:
         self._analyze_categorical_categorical_vectorized(categorical_vars, exclude_pairs, significant_pairs)
 
     def _analyze_numeric_categorical(self, numeric_vars, categorical_vars, exclude_pairs, significant_pairs):
-        self._analyze_numeric_categorical_vectorized(numeric_vars, categorical_vars, exclude_pairs,
-                                                     significant_pairs)
+        self._analyze_numeric_categorical_vectorized(numeric_vars, categorical_vars, exclude_pairs, significant_pairs)
 
     def _print_significant_pairs(self, significant_pairs):
         """打印显著关联对"""
@@ -283,12 +304,15 @@ class RelationshipAnalyzer:
         for i, pair in enumerate(significant_pairs[:20], 1):
             if pair['type'] == '数值-数值':
                 strength_desc = "强" if abs(pair['statistic']) > 0.7 else "中" if abs(pair['statistic']) > 0.3 else "弱"
+                # ✅ 显示有效记录数和置信度
+                valid_info = f"，有效记录数: {pair.get('valid_count', 0)}，置信度: {pair.get('confidence', 0)*100:.1f}%" if pair.get('valid_count') else ""
                 print(f"\n{i:2d}. {pair['var1']} ↔ {pair['var2']}")
-                print(f"     相关系数 r = {pair['statistic']:.4f} ({strength_desc}), p = {pair['p_value']:.4f}")
+                print(f"     相关系数 r = {pair['statistic']:.4f} ({strength_desc}), p = {pair['p_value']:.4f}{valid_info}")
             else:
                 strength_desc = "强" if pair['strength'] > 0.5 else "中" if pair['strength'] > 0.3 else "弱"
+                valid_info = f"，有效记录数: {pair.get('valid_count', 0)}，置信度: {pair.get('confidence', 0)*100:.1f}%" if pair.get('valid_count') else ""
                 print(f"\n{i:2d}. {pair['var1']} ↔ {pair['var2']}")
-                print(f"     效应量 = {pair['statistic']:.4f} ({strength_desc}), p = {pair['p_value']:.4f}")
+                print(f"     效应量 = {pair['statistic']:.4f} ({strength_desc}), p = {pair['p_value']:.4f}{valid_info}")
 
     def _has_valid_pair(self, col, all_cols, exclude_pairs):
         """检查变量是否有有效配对"""

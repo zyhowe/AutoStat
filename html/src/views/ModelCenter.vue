@@ -70,7 +70,7 @@
 
               <div v-if="selectedModel" class="model-info">
                 <el-descriptions :column="2" border size="small">
-                  <el-descriptions-item label="类型">{{ selectedModel.task_type }}</el-descriptions-item>
+                  <el-descriptions-item label="类型">{{ selectedModel.task_type || '未知' }}</el-descriptions-item>
                   <el-descriptions-item label="目标">{{ selectedModel.target_column || '无' }}</el-descriptions-item>
                   <el-descriptions-item label="特征" :span="2">
                     {{ (selectedModel.features || []).join('、') }}
@@ -610,16 +610,23 @@ function onModelSelect() {
   const model = savedModels.value.find(
     m => m.model_key === predictForm.value.modelKey
   )
-  if (!model) return
+  if (!model) {
+    selectedModel.value = null
+    return
+  }
 
+  // 🔧 修复：从 config 中正确提取 task_type、target_column、features
   const config = model.config || {}
   const features = config.features || []
 
   selectedModel.value = {
     ...model,
+    task_type: config.task_type || model.task_type || '未知',
+    target_column: config.target_column || model.target_column || '无',
     features: features
   }
 
+  // 重置输入值
   predictForm.value.inputValues = {}
   features.forEach(f => {
     predictForm.value.inputValues[f] = ''

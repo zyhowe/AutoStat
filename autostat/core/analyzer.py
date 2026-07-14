@@ -845,8 +845,6 @@ class AutoStatisticalAnalyzer:
                     'mode_pct': summary.get('mode_pct', 0),
                     'top_categories': top_categories
                 }
-
-
             elif var_type == 'datetime':
                 variable_summaries[col] = {
                     'type': var_type,
@@ -876,7 +874,26 @@ class AutoStatisticalAnalyzer:
             if len(valid_numeric) >= 2:
                 correlation_matrix = self.data[valid_numeric].corr().round(4).to_dict()
 
-        high_correlations = self._get_high_correlations(numeric_vars, threshold=0.7) if numeric_vars else []
+        # ==================== 🔥 修改：从 relationship_analyzer 获取强相关对（包含 valid_count 和 confidence） ====================
+        high_correlations = []
+        if hasattr(self, 'relationship_analyzer') and hasattr(self.relationship_analyzer, 'significant_pairs'):
+            # 从 relationship_analyzer 的 significant_pairs 中提取强相关对 (strength >= 0.7)
+            for pair in self.relationship_analyzer.significant_pairs:
+                if pair.get('strength', 0) >= 0.7 and pair.get('type') == '数值-数值':
+                    high_correlations.append({
+                        'var1': pair.get('var1'),
+                        'var2': pair.get('var2'),
+                        'value': pair.get('statistic'),
+                        'valid_count': pair.get('valid_count', 0),
+                        'total_count': pair.get('total_count', 0),
+                        'confidence': pair.get('confidence', 0)
+                    })
+
+        # 如果没有从 relationship_analyzer 获取到，回退到原有方法
+        if not high_correlations:
+            high_correlations = self._get_high_correlations(numeric_vars, threshold=0.7) if numeric_vars else []
+        # =============================================================================================================
+
         skewed_vars = self._get_skewed_vars(threshold=2)
         imbalanced_vars = self._get_imbalanced_vars(threshold=0.8)
 
@@ -921,7 +938,7 @@ class AutoStatisticalAnalyzer:
                 'duplicates': self.quality_report.get('duplicates', {}),
                 'inconsistent_types': self.quality_report.get('inconsistent_types', {}),
                 'invalid_values': self.quality_report.get('invalid_values', {}),
-                'audit_rules': self.quality_report.get('audit_rules', {})  # 新增这一行
+                'audit_rules': self.quality_report.get('audit_rules', {})
             },
             'cleaning_suggestions': self.cleaning_suggestions,
             'correlations': {

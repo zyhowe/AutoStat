@@ -1,5 +1,4 @@
 // src/views/PatternDiscovery.vue
-// 只修改强相关表格部分，其余不变
 <template>
   <div class="pattern-discovery">
     <h2>📈 规律发现</h2>
@@ -100,12 +99,12 @@
           <div v-else>
             <p>发现 <strong>{{ highCorrelations.length }}</strong> 对强相关关系：</p>
             <el-table :data="highCorrelations" border size="small" max-height="400">
-              <el-table-column prop="var1" label="变量1" width="130" fixed="left">
+              <el-table-column prop="var1" label="变量1" width="120" fixed="left">
                 <template #default="{ row }">
                   <span class="field-name-link" @click="openFieldDetail(row.var1)">{{ row.var1 }}</span>
                 </template>
               </el-table-column>
-              <el-table-column prop="var2" label="变量2" width="130">
+              <el-table-column prop="var2" label="变量2" width="120">
                 <template #default="{ row }">
                   <span class="field-name-link" @click="openFieldDetail(row.var2)">{{ row.var2 }}</span>
                 </template>
@@ -126,15 +125,23 @@
                   </span>
                 </template>
               </el-table-column>
-              <!-- ✅ 有效记录数（修复显示逻辑） -->
-              <el-table-column label="有效记录数" width="110" align="center">
+              <!-- 样本量（两字段均非空） -->
+              <el-table-column label="样本量" width="100" align="center">
                 <template #default="{ row }">
-                  <span class="field-name-link" @click="showCorrelationData(row)">
-                    {{ getValidDisplay(row) }}
+                  <span class="field-name-link" @click="showNonMissingData(row)">
+                    {{ row.valid_count !== undefined && row.valid_count !== null ? row.valid_count : '--' }}
                   </span>
                 </template>
               </el-table-column>
-              <!-- ✅ 置信度（修复显示逻辑） -->
+              <!-- 强相关数（显示 valid_count，即相关系数对应的记录数） -->
+              <el-table-column label="强相关数" width="110" align="center">
+                <template #default="{ row }">
+                  <span class="field-name-link" @click="showCorrelationData(row)">
+                    {{ row.valid_count !== undefined && row.valid_count !== null ? row.valid_count : '--' }}
+                  </span>
+                </template>
+              </el-table-column>
+              <!-- 置信度 = 强相关数 / 样本量（总记录数） -->
               <el-table-column label="置信度" width="100" align="center">
                 <template #default="{ row }">
                   <span class="field-name-link" @click="showCorrelationData(row)">
@@ -856,22 +863,36 @@ function generateMockTimeseriesOption(keys, colors) {
   }
 }
 
-// ==================== 有效记录数 & 置信度显示函数 ====================
-function getValidDisplay(row) {
-  if (row.valid_count !== undefined && row.valid_count !== null) {
-    return row.valid_count
-  }
-  return '--'
-}
-
+// ==================== 显示函数 ====================
 function getConfidenceDisplay(row) {
-  if (row.confidence !== undefined && row.confidence !== null) {
-    return (row.confidence * 100).toFixed(1) + '%'
+  if (row.valid_count !== undefined && row.valid_count !== null && row.valid_count > 0) {
+    const total = row.valid_count
+    if (total > 0) {
+      return ((row.valid_count / total) * 100).toFixed(1) + '%'
+    }
   }
   return '--'
 }
 
 // ==================== 数据预览联动 ====================
+function showNonMissingData(row) {
+  const sessionId = sessionStore.currentSessionId || localStorage.getItem('lastSessionId')
+  if (!sessionId) {
+    ElMessage.warning('请先加载项目')
+    return
+  }
+
+  openDataPreview({
+    sessionId: sessionId,
+    title: `${row.var1} ↔ ${row.var2} 有效记录（两字段均非空，共 ${row.valid_count || 0} 条）`,
+    fields: [row.var1, row.var2],
+    filters: [
+      { field: row.var1, condition: 'is_not_null', value: true },
+      { field: row.var2, condition: 'is_not_null', value: true }
+    ]
+  })
+}
+
 function showCorrelationData(row) {
   const sessionId = sessionStore.currentSessionId || localStorage.getItem('lastSessionId')
   if (!sessionId) {
@@ -879,13 +900,13 @@ function showCorrelationData(row) {
     return
   }
 
-  const validCount = row.valid_count !== undefined && row.valid_count !== null ? row.valid_count : '--'
-  const confidence = row.confidence !== undefined && row.confidence !== null ? (row.confidence * 100).toFixed(1) + '%' : '--'
-  const validDisplay = typeof validCount === 'number' ? `${validCount}条有效，${confidence}置信度` : ''
+  const validCount = row.valid_count !== undefined && row.valid_count !== null ? row.valid_count : 0
+  const total = reportData.value?.data_shape?.rows || 0
+  const confPct = total > 0 ? ((validCount / total) * 100).toFixed(1) : 0
 
   openDataPreview({
     sessionId: sessionId,
-    title: `${row.var1} ↔ ${row.var2} (r=${Number(row.value).toFixed(3)}) 数据${validDisplay ? '（' + validDisplay + '）' : ''}`,
+    title: `${row.var1} ↔ ${row.var2} (r=${Number(row.value).toFixed(3)}) 强相关数据（${validCount}条有效，${confPct}%置信度）`,
     fields: [row.var1, row.var2],
     filters: [
       { field: row.var1, condition: 'is_not_null', value: true },

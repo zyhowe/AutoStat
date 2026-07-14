@@ -4,12 +4,10 @@
     <div class="chat-header">
       <div class="header-left">
         <span class="chat-title">💬 对话</span>
-        <!-- 上下文选择移到标题旁边 -->
-        <el-checkbox-group v-model="localContexts" @change="onContextChange" class="context-checkboxes">
-          <el-checkbox value="json">📊 JSON</el-checkbox>
-          <el-checkbox value="upload">📁 上传</el-checkbox>
-          <el-checkbox value="source">🗄️ 源数据</el-checkbox>
-        </el-checkbox-group>
+        <el-radio-group v-model="selectedContext" @change="onContextChange" size="small" class="context-radio">
+          <el-radio-button value="upload">📁 上传数据</el-radio-button>
+          <el-radio-button value="source">🗄️ 源数据</el-radio-button>
+        </el-radio-group>
       </div>
       <div class="header-actions">
         <el-button size="small" text @click="scrollToBottom">⬇ 到底</el-button>
@@ -22,7 +20,7 @@
       <div v-if="messages.length === 0 && !isStreaming" class="empty-state">
         <div class="empty-icon">🤖</div>
         <p class="empty-title">开始你的分析</p>
-        <p class="empty-desc">从左侧选择推荐问题或工具，或者直接在下方输入</p>
+        <p class="empty-desc">从右侧选择推荐问题或工具，或者直接在下方输入</p>
       </div>
 
       <div
@@ -109,7 +107,6 @@
           </template>
         </el-input>
       </div>
-      <!-- 去掉 "按 Enter 发送" 提示 -->
       <div class="input-hint" v-if="pendingTool">
         <span class="tool-hint">
           🛠️ {{ pendingTool.name }}
@@ -140,10 +137,9 @@ const props = defineProps({
     type: Object,
     default: null
   },
-  // 上下文选择（由父组件传入，双向绑定）
   contextValue: {
-    type: Array,
-    default: () => ['json']
+    type: String,
+    default: 'upload'
   }
 })
 
@@ -154,15 +150,13 @@ const inputRef = ref(null)
 const messagesRef = ref(null)
 const inputPlaceholder = ref('输入问题...')
 
-// 本地上下文（双向绑定）
-const localContexts = ref([...props.contextValue])
+const selectedContext = ref(props.contextValue)
 
-// 监听外部变化
 watch(() => props.contextValue, (newVal) => {
-  if (newVal && newVal.length > 0) {
-    localContexts.value = [...newVal]
+  if (newVal) {
+    selectedContext.value = newVal
   }
-}, { deep: true })
+})
 
 function onContextChange(value) {
   emit('context-change', value)
@@ -269,15 +263,13 @@ defineExpose({ scrollToBottom, focus: () => inputRef.value?.focus() })
   color: #2c3e50;
 }
 
-.context-checkboxes {
-  display: flex;
-  gap: 12px;
-  align-items: center;
+.context-radio {
+  flex-shrink: 0;
 }
 
-.context-checkboxes .el-checkbox {
-  margin-right: 0;
+.context-radio :deep(.el-radio-button__inner) {
   font-size: 12px;
+  padding: 4px 12px;
 }
 
 .header-actions {
@@ -322,12 +314,11 @@ defineExpose({ scrollToBottom, focus: () => inputRef.value?.focus() })
   gap: 12px;
   margin-bottom: 16px;
   align-items: flex-start;
-  max-width: 92%;
+  width: 100%;
 }
 
 .message-wrapper.user {
   flex-direction: row-reverse;
-  margin-left: auto;
 }
 
 .message-wrapper.user .message-bubble {
@@ -353,11 +344,11 @@ defineExpose({ scrollToBottom, focus: () => inputRef.value?.focus() })
 }
 
 .message-bubble {
-  max-width: 85%;
-  padding: 12px 18px;
+  max-width: 96%;
+  padding: 10px 14px;
   word-break: break-word;
-  line-height: 1.8;
-  font-size: 14px;
+  line-height: 1.5;
+  font-size: 13px;
 }
 
 .message-bubble.streaming-bubble {
@@ -367,25 +358,25 @@ defineExpose({ scrollToBottom, focus: () => inputRef.value?.focus() })
 
 .message-content {
   white-space: pre-wrap;
-  font-size: 14px;
-  line-height: 1.8;
+  font-size: 13px;
+  line-height: 1.5;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
 }
 
 .message-content :deep(pre) {
   background: #1e1e1e;
   color: #d4d4d4;
-  padding: 12px;
+  padding: 10px 12px;
   border-radius: 6px;
   overflow-x: auto;
-  font-size: 13px;
-  margin: 8px 0;
+  font-size: 11px;
+  margin: 6px 0;
   font-family: 'Consolas', 'Courier New', monospace;
 }
 
 .message-content :deep(code) {
   font-family: 'Consolas', 'Courier New', monospace;
-  font-size: 13px;
+  font-size: 11px;
 }
 
 .message-footer {
