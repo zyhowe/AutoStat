@@ -109,8 +109,26 @@ class AnalysisService:
                     all_questions[table_name] = questions
                     print(f"✅ 已生成 {table_name} 的推荐问题: {sum(len(v) for v in questions.values())} 条")
 
-                self.session_service.save_recommended_questions(session_id, all_questions)
-                print(f"✅ 所有表的推荐问题已保存")
+                # ============================================================
+                # 🔥 修改：按规范格式保存推荐问题
+                # 格式：{"merged": {...}, "all_tables": {"table1": {...}, "table2": {...}}}
+                # 单表时 merged 为空对象
+                # ============================================================
+                new_questions = {}
+                new_questions["merged"] = all_questions.get("merged", {})
+                new_questions["all_tables"] = {}
+                for table_name, questions in all_questions.items():
+                    if table_name != "merged":
+                        new_questions["all_tables"][table_name] = questions
+
+                # 单表时 merged 为空（只有一张原始表）
+                if len(tables_data) == 1:
+                    new_questions["merged"] = {}
+
+                self.session_service.save_recommended_questions(session_id, new_questions)
+                print(f"✅ 所有表的推荐问题已保存（格式: merged + all_tables）")
+                # ============================================================
+
             except Exception as e:
                 print(f"⚠️ 生成推荐问题失败: {e}")
                 import traceback as tb

@@ -215,7 +215,133 @@ def _apply_filter(df: Any, filter_cond: FilterCondition):
     return df, desc
 
 
-# ==================== 原有路由 ====================
+# ==================== 统一的多表关系发现和会话创建 ====================
+
+def _discover_relations_and_create_session(
+    tables: Dict[str, Any],
+    source_name: str,
+    source_type: str,
+    request: Request,
+    data_service: DataService,
+    session_service: SessionService,
+    session_id: Optional[str] = None,
+    db_config: Optional[Dict] = None
+) -> Dict[str, Any]:
+    """
+    统一的多表关系发现和会话创建
+
+    参数:
+    - tables: 表名字典 {表名: DataFrame}
+    - source_name: 数据源名称
+    - source_type: 来源类型 (multi_upload / database / demo)
+    - request: FastAPI Request
+    - data_service: DataService 实例
+    - session_service: SessionService 实例
+    - session_id: 可选，如果传入则复用已有会话
+    - db_config: 可选的数据库配置信息
+
+    返回:
+    - 统一格式的响应字典
+    """
+    import pandas as pd
+
+    # ===== 1. 创建或复用会话 =====
+    client_ip = get_client_ip(request)
+    session_service.set_client_ip(client_ip)
+
+    if session_id:
+        # 复用已有会话
+        session = session_service.get_session(session_id)
+        if not session:
+            raise HTTPException(status_code=404, detail=f"会话不存在: {session_id}")
+    else:
+        # 创建新会话
+        tables_info = {"tables": list(tables.keys()), "source": source_type}
+        if db_config:
+            tables_info["db_config"] = db_config
+        session_id = session_service.create_session(source_name, "database", tables_info)
+
+    # ===== 2. 保存所有表到 Parquet =====
+    table_list = []
+    result = {}
+    all_variable_types = {}
+
+    for name, df in tables.items():
+        variable_types = data_service.infer_types(df)
+        preview = data_service.get_preview(df)
+
+        table_info = {
+            "name": name,
+            "rows": len(df),
+            "columns": len(df.columns),
+            "preview": preview,
+            "variable_types": variable_types,
+            "load_status": "success"
+        }
+        table_list.append(table_info)
+        result[name] = {
+            "rows": len(df),
+            "columns": len(df.columns),
+            "variable_types": variable_types,
+            "preview": preview
+        }
+        all_variable_types[name] = variable_types
+
+        # 保存到 Parquet
+        data_service.save_to_parquet(df, session_service, session_id, name)
+        session_service.save_table_info(session_id, name, {
+            "rows": len(df),
+            "columns": len(df.columns),
+            "saved_at": pd.Timestamp.now().isoformat()
+        })
+
+    # 保存 variable_types
+    for name, vt in all_variable_types.items():
+        session_service.save_variable_types(session_id, vt)
+
+    # ===== 3. 统一发现关系 =====
+    candidate_relations = []
+    if len(tables) >= 2:
+        try:
+            from autostat.multi_analyzer import MultiTableStatisticalAnalyzer
+            analyzer = MultiTableStatisticalAnalyzer(tables)
+            # 统一使用 discover_relationships_only()，仅发现关系
+            all_rels = analyzer.discover_relationships_only()
+            if all_rels and 'foreign_keys' in all_rels:
+                for fk in all_rels['foreign_keys']:
+                    candidate_relations.append(CandidateRelation(
+                        from_table=fk.get('from_table', ''),
+                        from_col=fk.get('from_col', ''),
+                        to_table=fk.get('to_table', ''),
+                        to_col=fk.get('to_col', ''),
+                        relation_type=fk.get('type', 'many_to_one'),
+                        confidence=fk.get('confidence', 0.5),
+                        auto_discovered=fk.get('auto_discovered', True)
+                    ))
+            print(f"✅ {source_type} 发现 {len(candidate_relations)} 条候选关系")
+        except Exception as e:
+            print(f"⚠️ {source_type} 关系发现失败: {e}")
+            import traceback
+            traceback.print_exc()
+
+    # 保存关系到 session（此时只是候选关系，等待用户确认）
+    # 如果用户后续确认，会通过 /data/relations/confirm 覆盖
+    session_service.save_relationships(session_id, [r.dict() for r in candidate_relations])
+
+    return {
+        "tables": result,
+        "session_id": session_id,
+        "table_list": table_list,
+        "candidate_relations": [r.dict() for r in candidate_relations],
+        "load_summary": {
+            "total": len(tables),
+            "success": len([t for t in table_list if t["load_status"] == "success"]),
+            "failed": len([t for t in table_list if t["load_status"] == "failed"])
+        }
+    }
+
+
+# ==================== 文件上传 ====================
 
 @router.post("/data/upload", response_model=DataUploadResponse)
 async def upload_file(
@@ -241,8 +367,8 @@ async def upload_file(
     variable_types = data_service.infer_types(df)
 
     if session_id:
-        parquet_path = session_service.get_data_parquet_path(session_id)
-        data_service.save_to_parquet(df, parquet_path)
+        # 标准签名：save_to_parquet(df, session_service, session_id, table_name)
+        data_service.save_to_parquet(df, session_service, session_id, "data")
 
     return DataUploadResponse(
         file_name=file.filename,
@@ -253,6 +379,8 @@ async def upload_file(
         preview=data_service.get_preview(df)
     )
 
+
+# ==================== 数据库加载 ====================
 
 @router.post("/data/database/load", response_model=DatabaseLoadResponse)
 async def load_database(
@@ -283,93 +411,20 @@ async def load_database(
     if not valid_tables:
         raise HTTPException(status_code=400, detail="所有表均为空")
 
-    # 创建会话
     source_name = f"{request_body.table_names[0]}_db" if request_body.table_names else "database"
     if len(request_body.table_names) > 1:
         source_name = f"{source_name}_multi"
-    client_ip = get_client_ip(request)
-    session_service.set_client_ip(client_ip)
-    session_id = session_service.create_session(
-        source_name,
-        "database",
-        {"tables": request_body.table_names, "db_config": request_body.config}
-    )
 
-    table_list = []
-    result = {}
-
-    # 保存所有表到 Parquet
-    for name, df in valid_tables.items():
-        variable_types = database_service.infer_types(df)
-        preview = database_service.get_preview(df)
-
-        table_info = TableInfo(
-            name=name,
-            rows=len(df),
-            columns=len(df.columns),
-            preview=preview,
-            variable_types=variable_types,
-            load_status="success"
-        )
-        table_list.append(table_info)
-        result[name] = {
-            "rows": len(df),
-            "columns": len(df.columns),
-            "variable_types": variable_types,
-            "preview": preview
-        }
-
-        session_service.save_variable_types(session_id, variable_types)
-
-    # ✅ 保存所有表到 Parquet
-    save_results = data_service.save_tables_to_parquet(valid_tables, session_service, session_id)
-
-    # ✅ 自动识别表间关系
-    candidate_relations = []
-    if len(valid_tables) >= 2:
-        try:
-            from autostat.multi_analyzer import MultiTableStatisticalAnalyzer
-            # 创建多表分析器
-            analyzer = MultiTableStatisticalAnalyzer(valid_tables)
-            # 获取自动发现的关系
-            discovered = analyzer.discovered_relationships
-            all_rels = analyzer.all_relationships
-            if all_rels and 'foreign_keys' in all_rels:
-                for fk in all_rels['foreign_keys']:
-                    candidate_relations.append(CandidateRelation(
-                        from_table=fk.get('from_table', ''),
-                        from_col=fk.get('from_col', ''),
-                        to_table=fk.get('to_table', ''),
-                        to_col=fk.get('to_col', ''),
-                        relation_type=fk.get('type', 'many_to_one'),
-                        confidence=fk.get('confidence', 0.5),
-                        auto_discovered=fk.get('auto_discovered', True)
-                    ))
-            print(f"✅ 自动发现 {len(candidate_relations)} 条候选关系")
-        except Exception as e:
-            print(f"⚠️ 关系自动发现失败: {e}")
-
-    # 保存到 metadata
-    session_service.save_relationships(session_id, [r.dict() for r in candidate_relations])
-
-    # 保存临时CSV（兼容旧版）
-    if valid_tables:
-        first_name, first_df = next(iter(valid_tables.items()))
-        import tempfile
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False, encoding='utf-8') as tmp:
-            first_df.to_csv(tmp.name, index=False)
-            session_service.add_file(session_id, f"{first_name}.csv", tmp.name)
-
-    return DatabaseLoadResponse(
-        tables=result,
-        session_id=session_id,
-        table_list=table_list,
-        candidate_relations=candidate_relations,
-        load_summary={
-            "total": len(valid_tables),
-            "success": len([t for t in table_list if t.load_status == "success"]),
-            "failed": len([t for t in table_list if t.load_status == "failed"])
-        }
+    # 统一调用，传入 session_id=None 创建新会话
+    return _discover_relations_and_create_session(
+        tables=valid_tables,
+        source_name=source_name,
+        source_type="database",
+        request=request,
+        data_service=data_service,
+        session_service=session_service,
+        session_id=None,
+        db_config=request_body.config
     )
 
 
@@ -405,6 +460,109 @@ async def get_relations(
     return {"session_id": session_id, "relationships": relationships}
 
 
+# ==================== 示例数据 ====================
+
+def _handle_single_table_demo(df, dataset, request, data_service, session_service):
+    """处理单表示例数据"""
+    source_name = f"{dataset}_demo"
+    client_ip = get_client_ip(request)
+    session_service.set_client_ip(client_ip)
+    session_id = session_service.create_session(source_name, "single")
+
+    import tempfile
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False, encoding='utf-8') as tmp:
+        df.to_csv(tmp.name, index=False)
+        session_service.add_file(session_id, f"{dataset}_demo.csv", tmp.name)
+
+    data_service.save_to_parquet(df, session_service, session_id, "demo")
+
+    variable_types = data_service.infer_types(df)
+    session_service.save_variable_types(session_id, variable_types)
+
+    return {
+        "session_id": session_id,
+        "source_name": source_name,
+        "rows": len(df),
+        "columns": len(df.columns),
+        "variable_types": variable_types,
+        "preview": data_service.get_preview(df)
+    }
+
+
+def _handle_multi_table_ecommerce(request, data_service, session_service):
+    """
+    生成电商多表示例数据（订单、客户、订单明细）
+    统一使用 discover_relationships_only() 发现关系
+    """
+    import pandas as pd
+    import numpy as np
+
+    np.random.seed(42)
+
+    # ----- 1. 客户表 (200条) -----
+    n_customers = 200
+    customers = pd.DataFrame({
+        "id": range(1, n_customers + 1),
+        "name": [f"客户_{i}" for i in range(1, n_customers + 1)],
+        "city": np.random.choice(["北京", "上海", "广州", "深圳", "杭州", "成都", "武汉", "南京"], n_customers),
+        "member_level": np.random.choice(["普通", "黄金", "铂金", "钻石"], n_customers, p=[0.5, 0.3, 0.15, 0.05]),
+        "register_date": pd.date_range("2023-01-01", periods=n_customers, freq="D"),
+        "age": np.random.normal(32, 10, n_customers).astype(int)
+    })
+    customers["age"] = customers["age"].clip(18, 70)
+
+    # ----- 2. 订单表 (500条) -----
+    n_orders = 500
+    order_dates = pd.date_range("2023-06-01", periods=n_orders, freq="D")
+    customer_ids = customers["id"].values
+
+    orders = pd.DataFrame({
+        "id": range(1, n_orders + 1),
+        "customer_id": np.random.choice(customer_ids, n_orders),
+        "order_date": order_dates,
+        "status": np.random.choice(["已完成", "已发货", "已付款", "已取消"], n_orders, p=[0.6, 0.2, 0.15, 0.05]),
+        "total_amount": np.random.uniform(50, 5000, n_orders).round(2),
+        "payment_method": np.random.choice(["支付宝", "微信支付", "银行卡", "货到付款"], n_orders, p=[0.4, 0.35, 0.15, 0.1])
+    })
+
+    # ----- 3. 订单明细表 (1200条) -----
+    n_items = 1200
+    products = ["iPhone 15", "MacBook Pro", "AirPods Pro", "iPad Air", "Apple Watch",
+                "机械键盘", "电竞鼠标", "4K显示器", "USB-C Hub", "移动硬盘",
+                "咖啡机", "空气炸锅", "扫地机器人", "智能音箱", "投影仪"]
+
+    order_ids = orders["id"].values
+
+    order_items = pd.DataFrame({
+        "id": range(1, n_items + 1),
+        "order_id": np.random.choice(order_ids, n_items),
+        "product_name": np.random.choice(products, n_items),
+        "quantity": np.random.randint(1, 5, n_items),
+        "unit_price": np.random.uniform(10, 2000, n_items).round(2)
+    })
+
+    # 计算明细金额
+    order_items["subtotal"] = (order_items["quantity"] * order_items["unit_price"]).round(2)
+
+    # ----- 4. 构建返回数据 -----
+    tables = {
+        "customers": customers,
+        "orders": orders,
+        "order_items": order_items
+    }
+
+    # 统一调用 _discover_relations_and_create_session
+    return _discover_relations_and_create_session(
+        tables=tables,
+        source_name="ecommerce_demo",
+        source_type="demo",
+        request=request,
+        data_service=data_service,
+        session_service=session_service,
+        session_id=None
+    )
+
+
 @router.post("/data/demo")
 async def load_demo_data(
     request: Request,
@@ -431,6 +589,8 @@ async def load_demo_data(
             "折扣": np.random.choice([0, 0.05, 0.1, 0.15, 0.2], n),
             "成本": np.random.uniform(30, 300, n).round(2)
         })
+        return _handle_single_table_demo(df, dataset, request, data_service, session_service)
+
     elif dataset == "user":
         np.random.seed(42)
         n = 3000
@@ -447,6 +607,8 @@ async def load_demo_data(
             "停留时长": np.random.exponential(300, n).round(0),
             "注册日期": dates,
         })
+        return _handle_single_table_demo(df, dataset, request, data_service, session_service)
+
     elif dataset == "medical":
         np.random.seed(42)
         n = 2000
@@ -464,30 +626,71 @@ async def load_demo_data(
             "是否吸烟": np.random.choice(["是", "否"], n, p=[0.3, 0.7]),
             "就诊日期": pd.date_range("2023-01-01", periods=n, freq="D"),
         })
+        return _handle_single_table_demo(df, dataset, request, data_service, session_service)
+
+    elif dataset == "ecommerce":
+        return _handle_multi_table_ecommerce(request, data_service, session_service)
+
     else:
         raise HTTPException(status_code=400, detail="不支持的示例数据集")
 
-    source_name = f"{dataset}_demo"
-    client_ip = get_client_ip(request)
-    session_service.set_client_ip(client_ip)
-    session_id = session_service.create_session(source_name, "single")
 
-    import tempfile
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False, encoding='utf-8') as tmp:
-        df.to_csv(tmp.name, index=False)
-        session_service.add_file(session_id, f"{dataset}_demo.csv", tmp.name)
+# ==================== 多文件上传 ====================
 
-    parquet_path = session_service.get_data_parquet_path(session_id)
-    data_service.save_to_parquet(df, parquet_path)
+@router.post("/data/upload/multi")
+async def upload_multiple_files(
+    request: Request,
+    files: List[UploadFile] = File(...),
+    session_id: Optional[str] = None,
+    data_service: DataService = Depends(Dependencies.get_data_service),
+    session_service: SessionService = Depends(Dependencies.get_session_service)
+):
+    """
+    多文件上传 - 每个文件作为一张表
+    支持 CSV, Excel, JSON, TXT
+    """
+    if not files:
+        raise HTTPException(status_code=400, detail="请至少上传一个文件")
 
-    variable_types = data_service.infer_types(df)
-    session_service.save_variable_types(session_id, variable_types)
+    # 限制文件数量
+    if len(files) > 50:
+        raise HTTPException(status_code=400, detail="一次最多上传50个文件")
 
-    return {
-        "session_id": session_id,
-        "source_name": source_name,
-        "rows": len(df),
-        "columns": len(df.columns),
-        "variable_types": variable_types,
-        "preview": data_service.get_preview(df)
-    }
+    tables = {}
+    for file in files:
+        # 保存上传文件到临时路径
+        file_path = Dependencies.save_upload_file(file)
+
+        # 加载 DataFrame
+        try:
+            df = data_service.load_file(str(file_path))
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"文件 {file.filename} 加载失败: {str(e)}")
+
+        if df.empty:
+            raise HTTPException(status_code=400, detail=f"文件 {file.filename} 为空")
+
+        # 使用文件名（不含扩展名）作为表名
+        import os
+        base_name = os.path.splitext(file.filename)[0]
+        # 如果有重名，加后缀
+        if base_name in tables:
+            idx = 2
+            while f"{base_name}_{idx}" in tables:
+                idx += 1
+            base_name = f"{base_name}_{idx}"
+
+        tables[base_name] = df
+
+    source_name = f"multi_upload_{len(tables)}tables" if not session_id else None
+
+    # 统一调用 _discover_relations_and_create_session
+    return _discover_relations_and_create_session(
+        tables=tables,
+        source_name=source_name or "multi_upload",
+        source_type="multi_upload",
+        request=request,
+        data_service=data_service,
+        session_service=session_service,
+        session_id=session_id
+    )

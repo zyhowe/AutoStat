@@ -226,14 +226,14 @@ def example_multi_table_from_files():
         file_paths[name] = file_path
         print(f"  ✅ 已保存: {file_path}")
 
-    # 使用 MultiTableStatisticalAnalyzer.from_files 加载
-    analyzer = MultiTableStatisticalAnalyzer.from_files(file_paths)
-    analyzer.analyze_all_tables()
-
-    # 清理临时文件
-    import shutil
-    shutil.rmtree(temp_dir)
-    print(f"✅ 临时文件已清理")
+    # # 使用 MultiTableStatisticalAnalyzer.from_files 加载
+    # analyzer = MultiTableStatisticalAnalyzer.from_files(file_paths)
+    # analyzer.analyze_all_tables()
+    #
+    # # 清理临时文件
+    # import shutil
+    # shutil.rmtree(temp_dir)
+    # print(f"✅ 临时文件已清理")
 
 
 def example_multi_table_from_json_strings():
@@ -1022,7 +1022,7 @@ if __name__ == "__main__":
     #example_multi_table()
 
     # 多表分析（从文件加载）
-    # example_multi_table_from_files()
+    example_multi_table_from_files()
 
     # 多表分析（从JSON字符串加载）
     # example_multi_table_from_json_strings()
@@ -1030,7 +1030,7 @@ if __name__ == "__main__":
     # 数据库分析（需要配置）
     #example_database()
 
-    example_database_single_table()
+    #example_database_single_table()
 
     # 单表分析（从CSV文件加载）
     # example_single_table_from_file()

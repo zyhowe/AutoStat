@@ -14,33 +14,137 @@
     </el-radio-group>
 
     <!-- ============================================================ -->
+    <!-- 关系确认（独立于数据源类型，只要有多表关系就显示） -->
+    <!-- ============================================================ -->
+    <TableRelationConfirm
+      v-if="showRelationConfirm"
+      :relations="candidateRelations"
+      :table-names="currentTableNames"
+      :confirmed="relationsConfirmed"
+      @confirm="handleRelationsConfirmed"
+      @skip="handleRelationsSkipped"
+      @edit="handleRelationsEdit"
+    />
+
+    <!-- ============================================================ -->
     <!-- 文件上传 -->
     <!-- ============================================================ -->
     <div v-if="dataSourceType === 'file'" class="upload-area">
-      <div v-if="!uploadData" class="drop-zone" @dragover.prevent @drop.prevent="handleDrop">
+      <!-- 上传区域（当没有任何数据时显示） -->
+      <div v-if="!uploadData && !multiUploadData" class="drop-zone" @dragover.prevent @drop.prevent="handleDrop">
         <el-upload
           ref="uploadRef"
           drag
           :auto-upload="false"
           :on-change="handleFileChange"
           :on-remove="handleRemove"
-          :limit="1"
+          :limit="20"
+          multiple
           action="#"
         >
           <el-icon class="el-icon--upload"><Upload /></el-icon>
           <div class="el-upload__text">
-            拖拽文件到此处，或 <em>点击选择</em>
+            拖拽文件到此处，或 <em>点击选择</em>（支持多选）
           </div>
           <template #tip>
             <div class="el-upload__tip">
-              支持 CSV, Excel, JSON, TXT 格式，文件大小不超过 100MB
+              支持 CSV, Excel, JSON, TXT 格式，文件大小不超过 100MB，最多 20 个文件
             </div>
           </template>
         </el-upload>
       </div>
 
-      <!-- 文件预览 -->
-      <div v-else class="file-preview">
+      <!-- 多文件上传结果 -->
+      <div v-else-if="multiUploadData" class="file-preview">
+        <div class="file-info">
+          <div class="file-header">
+            <el-icon><Document /></el-icon>
+            <span class="file-name">已加载 {{ Object.keys(multiUploadData.tables || {}).length }} 个文件</span>
+            <el-tag size="small" type="success">已上传</el-tag>
+            <el-button size="small" type="danger" plain @click="handleReupload">重新选择</el-button>
+          </div>
+          <div class="file-stats">
+            <span>📊 总表数: {{ Object.keys(multiUploadData.tables || {}).length }}</span>
+            <span>📋 总行数: {{ totalRows }}</span>
+          </div>
+        </div>
+
+        <!-- 表切换 -->
+        <div class="table-switcher">
+          <el-radio-group v-model="selectedTable" size="small" @change="onTableChange">
+            <el-radio-button
+              v-for="name in multiTableNames"
+              :key="name"
+              :label="name"
+            />
+          </el-radio-group>
+        </div>
+
+        <!-- 当前表的信息 -->
+        <div v-if="currentTableData" class="table-info">
+          <el-descriptions :column="3" border size="small">
+            <el-descriptions-item label="表名">{{ selectedTable }}</el-descriptions-item>
+            <el-descriptions-item label="行数">{{ currentTableData.rows }}</el-descriptions-item>
+            <el-descriptions-item label="列数">{{ currentTableData.columns }}</el-descriptions-item>
+          </el-descriptions>
+        </div>
+
+        <!-- 字段类型调整 -->
+        <div class="field-types">
+          <h4>📋 字段类型调整 <el-tag size="small" type="info">点击下拉修改</el-tag></h4>
+          <div class="type-grid">
+            <div v-for="(type, field) in currentEditableTypes" :key="field" class="type-item">
+              <span class="field-name">{{ field }}</span>
+              <el-select
+                v-model="currentEditableTypes[field]"
+                size="small"
+                style="width: 120px;"
+                @change="onMultiTypeChange(field, $event)"
+              >
+                <el-option label="连续变量" value="continuous" />
+                <el-option label="分类变量" value="categorical" />
+                <el-option label="数值型分类" value="categorical_numeric" />
+                <el-option label="有序分类" value="ordinal" />
+                <el-option label="日期时间" value="datetime" />
+                <el-option label="标识符" value="identifier" />
+                <el-option label="文本" value="text" />
+                <el-option label="排除" value="exclude" />
+              </el-select>
+            </div>
+          </div>
+        </div>
+
+        <!-- 数据预览 -->
+        <div class="data-preview">
+          <h4>数据预览（前 100 行）</h4>
+          <el-table :data="currentPreviewData" border size="small" max-height="300">
+            <el-table-column
+              v-for="col in currentPreviewColumns"
+              :key="col"
+              :prop="col"
+              :label="col"
+              width="120"
+              show-overflow-tooltip
+            />
+          </el-table>
+        </div>
+
+        <!-- 操作按钮 -->
+        <div class="actions">
+          <el-button type="primary" :loading="analyzing" @click="handleStartMultiAnalysis">
+            {{ analyzing ? '分析中...' : '🚀 开始分析' }}
+          </el-button>
+        </div>
+
+        <!-- 分析进度 -->
+        <div v-if="analyzing" class="progress-section">
+          <el-progress :percentage="progress" :format="formatProgress" />
+          <p class="status-message">{{ statusMessage }}</p>
+        </div>
+      </div>
+
+      <!-- 单文件上传结果 -->
+      <div v-else-if="uploadData" class="file-preview">
         <div class="file-info">
           <div class="file-header">
             <el-icon><Document /></el-icon>
@@ -138,7 +242,6 @@
           </el-select>
         </el-form-item>
 
-        <!-- ✅ 改为文本域，支持多表输入 -->
         <el-form-item label="表名">
           <el-input
             v-model="dbForm.tableNamesInput"
@@ -184,15 +287,6 @@
         <el-progress :percentage="dbLoadProgress" />
         <p class="status-message">{{ dbLoadStatus }}</p>
       </div>
-
-      <!-- ✅ 关系确认 -->
-      <TableRelationConfirm
-        v-if="dbData && candidateRelations.length > 0 && !relationsConfirmed"
-        :relations="candidateRelations"
-        :table-names="dbTableNames"
-        @confirm="handleRelationsConfirmed"
-        @skip="handleRelationsSkipped"
-      />
 
       <!-- 数据库加载结果 -->
       <div v-if="dbData" class="file-preview">
@@ -339,6 +433,16 @@ const uploadData = ref(null)
 const selectedFile = ref(null)
 const uploadRef = ref(null)
 
+// 多文件上传
+const multiUploadData = ref(null)
+const multiTableNames = ref([])
+const selectedTable = ref('')
+const currentTableData = ref(null)
+const currentEditableTypes = ref({})
+const currentPreviewData = ref([])
+const currentPreviewColumns = ref([])
+const loadingFiles = ref(false)
+
 // 字段类型
 const editableTypes = ref({})
 const originalTypes = ref({})
@@ -353,31 +457,50 @@ const dbForm = reactive({
 const parsedTableNames = ref([])
 const loadingDb = ref(false)
 const dbData = ref(null)
-const dbEditableTypes = ref({})
-const dbOriginalTypes = ref({})
 const candidateRelations = ref([])
 const dbTableNames = ref([])
-const selectedTable = ref('')
-const currentTableData = ref(null)
-const currentEditableTypes = ref({})
-const currentPreviewData = ref([])
-const currentPreviewColumns = ref([])
 const dbLoadProgress = ref(0)
 const dbLoadStatus = ref('')
 const relationsConfirmed = ref(false)
 const confirmedRelations = ref([])
-const dbLoadResults = ref({})
 
 // 示例数据
 const demoDatasets = [
-  { key: 'sales', name: '销售数据', icon: '📊', description: '零售销售分析', rows: 5000, cols: 9 },
-  { key: 'user', name: '用户数据', icon: '👥', description: '用户行为分析', rows: 3000, cols: 10 },
-  { key: 'medical', name: '医疗数据', icon: '🏥', description: '患者就诊分析', rows: 2000, cols: 11 }
+  { key: 'sales', name: '销售数据', icon: '📊', description: '零售销售分析', rows: '5,000', cols: 9 },
+  { key: 'user', name: '用户数据', icon: '👥', description: '用户行为分析', rows: '3,000', cols: 10 },
+  { key: 'medical', name: '医疗数据', icon: '🏥', description: '患者就诊分析', rows: '2,000', cols: 11 },
+  { key: 'ecommerce', name: '电商多表', icon: '🏪', description: '订单+客户+明细 3表关联', rows: '3张表', cols: '关联分析' }
 ]
 
 // 当前有效的 session_id
 const currentSessionId = ref(null)
 
+// ===== 计算属性 =====
+const showRelationConfirm = computed(() => {
+  return (dbData.value || multiUploadData.value) &&
+         candidateRelations.value.length > 0 &&
+         !relationsConfirmed.value
+})
+
+const currentTableNames = computed(() => {
+  if (dbData.value) return dbTableNames.value
+  if (multiUploadData.value) return multiTableNames.value
+  return []
+})
+
+const totalRows = computed(() => {
+  const data = multiUploadData.value || dbData.value
+  if (!data) return 0
+  return Object.values(data.tables).reduce((sum, t) => sum + (t.rows || 0), 0)
+})
+
+const totalColumns = computed(() => {
+  const data = multiUploadData.value || dbData.value
+  if (!data) return 0
+  return Object.values(data.tables).reduce((sum, t) => sum + (t.columns || 0), 0)
+})
+
+// ===== 生命周期 =====
 onMounted(async () => {
   await loadDbConfigs()
 })
@@ -396,34 +519,50 @@ function onDataSourceChange() {
 }
 
 // ==================== 文件上传 ====================
-function handleFileChange(file) {
-  selectedFile.value = file.raw
-  handleUpload()
+function handleFileChange(file, fileList) {
+  if (fileList.length === 0) return
+
+  const files = fileList.map(f => f.raw)
+  if (files.length === 1) {
+    selectedFile.value = files[0]
+    handleSingleUpload()
+    return
+  }
+  handleMultiUpload(files)
 }
 
 function handleRemove() {
   selectedFile.value = null
   uploadData.value = null
+  multiUploadData.value = null
 }
 
 function handleDrop(e) {
   const files = e.dataTransfer.files
   if (files.length > 0) {
-    selectedFile.value = files[0]
-    handleUpload()
+    if (files.length === 1) {
+      selectedFile.value = files[0]
+      handleSingleUpload()
+    } else {
+      handleMultiUpload(Array.from(files))
+    }
   }
 }
 
 function handleReupload() {
   uploadData.value = null
+  multiUploadData.value = null
   selectedFile.value = null
   currentStep.value = 0
+  relationsConfirmed.value = false
+  candidateRelations.value = []
   if (uploadRef.value) {
     uploadRef.value.clearFiles()
   }
 }
 
-async function handleUpload() {
+// ===== 单文件上传 =====
+async function handleSingleUpload() {
   if (!selectedFile.value) return
 
   try {
@@ -433,6 +572,7 @@ async function handleUpload() {
 
     const result = await sessionStore.uploadFile(selectedFile.value)
     uploadData.value = result
+    multiUploadData.value = null
     currentStep.value = 1
 
     editableTypes.value = { ...result.variable_types }
@@ -444,21 +584,96 @@ async function handleUpload() {
   }
 }
 
-function onTypeChange(field, newType) {
-  console.log(`字段 ${field} 类型变更为: ${newType}`)
+// ===== 多文件上传 =====
+async function handleMultiUpload(files) {
+  if (!files || files.length === 0) {
+    ElMessage.warning('请选择文件')
+    return
+  }
+
+  if (loadingFiles.value) return
+
+  loadingFiles.value = true
+
+  try {
+    if (!sessionStore.currentSessionId) {
+      await sessionStore.createSession('multi_upload')
+    }
+
+    const result = await dataApi.uploadMulti(
+      files,
+      sessionStore.currentSessionId
+    )
+
+    if (result && result.tables) {
+      multiUploadData.value = result
+      multiTableNames.value = Object.keys(result.tables)
+      candidateRelations.value = result.candidate_relations || []
+      relationsConfirmed.value = false
+
+      if (multiTableNames.value.length > 0) {
+        selectedTable.value = multiTableNames.value[0]
+        updateMultiCurrentTable(selectedTable.value)
+      }
+
+      if (result.session_id) {
+        sessionStore.currentSessionId = result.session_id
+        localStorage.setItem('lastSessionId', result.session_id)
+        await sessionStore.loadSession(result.session_id)
+      }
+
+      currentStep.value = 1
+      ElMessage.success(`成功加载 ${multiTableNames.value.length} 个表`)
+
+      // 如果有候选关系，滚动到关系确认区域
+      if (candidateRelations.value.length > 0) {
+        setTimeout(() => {
+          const el = document.querySelector('.relation-confirm')
+          if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+        }, 300)
+      }
+    }
+  } catch (err) {
+    ElMessage.error('上传失败: ' + err.message)
+  } finally {
+    loadingFiles.value = false
+  }
+}
+
+function updateMultiCurrentTable(tableName) {
+  if (!multiUploadData.value || !multiUploadData.value.tables[tableName]) return
+
+  const table = multiUploadData.value.tables[tableName]
+  currentTableData.value = {
+    rows: table.rows,
+    columns: table.columns
+  }
+  currentEditableTypes.value = { ...table.variable_types }
+  currentPreviewData.value = table.preview.head || []
+  currentPreviewColumns.value = table.preview.columns || []
+}
+
+function onTableChange(value) {
+  if (multiUploadData.value) {
+    updateMultiCurrentTable(value)
+  } else if (dbData.value) {
+    updateDbCurrentTable(value)
+  }
+}
+
+function onMultiTypeChange(field, newType) {
+  console.log(`多文件字段 ${field} 类型变更为: ${newType}`)
 }
 
 // ==================== 数据库连接 ====================
 function onDbConfigChange() {}
 
-// ==================== 多表解析 ====================
 function parseTableNames() {
   const input = dbForm.tableNamesInput || ''
   const parts = input.split(/[,，\s\n]+/).map(s => s.trim())
   parsedTableNames.value = parts.filter(s => s.length > 0)
 }
 
-// ==================== 加载多表 ====================
 async function handleLoadDbTables() {
   if (!dbForm.configName || parsedTableNames.value.length === 0) {
     ElMessage.warning('请选择配置并输入至少一个表名')
@@ -490,22 +705,17 @@ async function handleLoadDbTables() {
     if (result && result.tables) {
       dbData.value = result
       dbTableNames.value = Object.keys(result.tables)
-
-      // 保存候选关系
       candidateRelations.value = result.candidate_relations || []
 
-      // 选择第一个表
       if (dbTableNames.value.length > 0) {
         selectedTable.value = dbTableNames.value[0]
-        updateCurrentTable(selectedTable.value)
+        updateDbCurrentTable(selectedTable.value)
       }
 
       if (result.session_id) {
         sessionStore.currentSessionId = result.session_id
         localStorage.setItem('lastSessionId', result.session_id)
         await sessionStore.loadSession(result.session_id)
-        // 保存关系到 store
-        sessionStore.relationships = candidateRelations.value
       }
 
       ElMessage.success(`成功加载 ${dbTableNames.value.length} 个表`)
@@ -517,7 +727,7 @@ async function handleLoadDbTables() {
   }
 }
 
-function updateCurrentTable(tableName) {
+function updateDbCurrentTable(tableName) {
   if (!dbData.value || !dbData.value.tables[tableName]) return
 
   const table = dbData.value.tables[tableName]
@@ -530,10 +740,6 @@ function updateCurrentTable(tableName) {
   currentPreviewColumns.value = table.preview.columns || []
 }
 
-function onTableChange(value) {
-  updateCurrentTable(value)
-}
-
 function onDbTypeChange(field, newType) {
   console.log(`数据库字段 ${field} 类型变更为: ${newType}`)
 }
@@ -542,12 +748,27 @@ function onDbTypeChange(field, newType) {
 function handleRelationsConfirmed(relations) {
   confirmedRelations.value = relations
   relationsConfirmed.value = true
+
+  // 保存关系到后端
+  if (sessionStore.currentSessionId) {
+    dataApi.confirmRelations({
+      session_id: sessionStore.currentSessionId,
+      relationships: relations
+    }).catch(err => {
+      console.warn('保存关系到后端失败:', err)
+    })
+  }
+
   ElMessage.success(`已确认 ${relations.length} 条表间关系`)
 }
 
 function handleRelationsSkipped() {
   relationsConfirmed.value = true
   ElMessage.info('已跳过关系配置')
+}
+
+function handleRelationsEdit() {
+  relationsConfirmed.value = false
 }
 
 // ==================== 示例数据 ====================
@@ -559,28 +780,49 @@ async function handleLoadDemo(datasetKey) {
       sessionStore.currentSessionId = result.session_id
       localStorage.setItem('lastSessionId', result.session_id)
 
-      sessionStore.currentSession = {
-        source_name: result.source_name,
-        data_shape: { rows: result.rows, columns: result.columns },
-        variable_types: result.variable_types
+      // 判断是否多表（通过是否存在 tables 字段且长度 > 1）
+      if (result.tables && Object.keys(result.tables).length > 1) {
+        // 多表示例
+        multiUploadData.value = result
+        multiTableNames.value = Object.keys(result.tables)
+        candidateRelations.value = result.candidate_relations || []
+        relationsConfirmed.value = false
+
+        if (multiTableNames.value.length > 0) {
+          selectedTable.value = multiTableNames.value[0]
+          updateMultiCurrentTable(selectedTable.value)
+        }
+
+        uploadData.value = null
+        currentStep.value = 1
+        dataSourceType.value = 'file'
+        ElMessage.success(`已加载 ${multiTableNames.value.length} 张表`)
+
+        // 如果有候选关系，滚动到关系确认区域
+        if (candidateRelations.value.length > 0) {
+          setTimeout(() => {
+            const el = document.querySelector('.relation-confirm')
+            if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+          }, 300)
+        }
+      } else if (result.rows !== undefined) {
+        // 单表示例（有 rows 字段）
+        uploadData.value = {
+          file_name: `${datasetKey}_demo.csv`,
+          rows: result.rows,
+          columns: result.columns,
+          variable_types: result.variable_types,
+          preview: result.preview
+        }
+        multiUploadData.value = null
+        editableTypes.value = { ...result.variable_types }
+        originalTypes.value = { ...result.variable_types }
+        currentStep.value = 1
+        dataSourceType.value = 'file'
+        ElMessage.success(`已加载 ${result.source_name || datasetKey}`)
+      } else {
+        ElMessage.warning('未知的数据格式')
       }
-
-      uploadData.value = {
-        file_name: `${datasetKey}_demo.csv`,
-        rows: result.rows,
-        columns: result.columns,
-        variable_types: result.variable_types,
-        preview: result.preview
-      }
-
-      editableTypes.value = { ...result.variable_types }
-      originalTypes.value = { ...result.variable_types }
-      currentStep.value = 1
-
-      ElMessage.success(`已加载 ${result.source_name}`)
-
-      dataSourceType.value = 'file'
-      router.push('/upload')
     }
   } catch (err) {
     ElMessage.error('加载示例数据失败: ' + err.message)
@@ -620,6 +862,7 @@ async function handleStartAnalysis() {
 
     if (success) {
       ElMessage.success('分析完成！')
+      router.push('/report-summary')
     } else {
       ElMessage.error(analysisStore.error || '分析失败')
     }
@@ -630,13 +873,12 @@ async function handleStartAnalysis() {
   }
 }
 
-async function handleStartDbAnalysis() {
-  if (!dbData.value) {
-    ElMessage.warning('请先加载数据库表')
+async function handleStartMultiAnalysis() {
+  if (!multiUploadData.value) {
+    ElMessage.warning('请先上传文件')
     return
   }
 
-  // 如果有多表关系但用户还未确认，提醒
   if (candidateRelations.value.length > 0 && !relationsConfirmed.value) {
     ElMessage.warning('请先确认表间关系')
     return
@@ -648,11 +890,9 @@ async function handleStartDbAnalysis() {
   statusMessage.value = '准备分析...'
 
   try {
-    // 收集所有表的变量类型
     const allTypes = {}
-    for (const [name, table] of Object.entries(dbData.value.tables)) {
+    for (const [name, table] of Object.entries(multiUploadData.value.tables)) {
       for (const [field, type] of Object.entries(table.variable_types || {})) {
-        // 表名.字段名 作为唯一标识
         allTypes[`${name}.${field}`] = type
       }
     }
@@ -669,6 +909,54 @@ async function handleStartDbAnalysis() {
 
     if (success) {
       ElMessage.success('分析完成！')
+      router.push('/report-summary')
+    } else {
+      ElMessage.error(analysisStore.error || '分析失败')
+    }
+  } catch (err) {
+    ElMessage.error('分析失败: ' + err.message)
+  } finally {
+    analyzing.value = false
+  }
+}
+
+async function handleStartDbAnalysis() {
+  if (!dbData.value) {
+    ElMessage.warning('请先加载数据库表')
+    return
+  }
+
+  if (candidateRelations.value.length > 0 && !relationsConfirmed.value) {
+    ElMessage.warning('请先确认表间关系')
+    return
+  }
+
+  analyzing.value = true
+  currentStep.value = 2
+  progress.value = 0
+  statusMessage.value = '准备分析...'
+
+  try {
+    const allTypes = {}
+    for (const [name, table] of Object.entries(dbData.value.tables)) {
+      for (const [field, type] of Object.entries(table.variable_types || {})) {
+        allTypes[`${name}.${field}`] = type
+      }
+    }
+
+    let sessionId = sessionStore.currentSessionId
+    if (!sessionId) {
+      ElMessage.error('会话ID丢失，请重新加载')
+      return
+    }
+
+    localStorage.setItem('lastSessionId', sessionId)
+
+    const success = await analysisStore.runAnalysis(sessionId, allTypes)
+
+    if (success) {
+      ElMessage.success('分析完成！')
+      router.push('/report-summary')
     } else {
       ElMessage.error(analysisStore.error || '分析失败')
     }
@@ -682,17 +970,6 @@ async function handleStartDbAnalysis() {
 function formatProgress(percentage) {
   return `${percentage}%`
 }
-
-// ==================== 计算属性 ====================
-const totalRows = computed(() => {
-  if (!dbData.value) return 0
-  return Object.values(dbData.value.tables).reduce((sum, t) => sum + (t.rows || 0), 0)
-})
-
-const totalColumns = computed(() => {
-  if (!dbData.value) return 0
-  return Object.values(dbData.value.tables).reduce((sum, t) => sum + (t.columns || 0), 0)
-})
 </script>
 
 <style scoped>

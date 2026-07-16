@@ -86,6 +86,33 @@ class MultiTableStatisticalAnalyzer:
             print(f"  - {name}")
         print("⏳ 分析未执行，请调用 analyze_all() 方法")
 
+    # ==================== 新增：仅关系发现 ====================
+
+    def discover_relationships_only(self) -> Dict:
+        """
+        仅发现表间关系，不执行完整分析
+        用于上传/加载阶段，避免不必要的性能开销
+
+        返回:
+        - all_relationships 字典
+        """
+        print("\n" + "=" * 80)
+        print("🔍 仅发现表间关系（不执行完整分析）")
+        print("=" * 80)
+
+        if len(self.tables) < 2:
+            print("ℹ️ 表数量不足2个，无需发现关系")
+            self.all_relationships = {'foreign_keys': []}
+            return self.all_relationships
+
+        # 执行关系发现
+        self.discovered_relationships = self._discover_relationships()
+        self.all_relationships = self._merge_relationships()
+        self._print_discovered_relationships()
+
+        print(f"✅ 关系发现完成，共 {len(self.all_relationships.get('foreign_keys', []))} 条关系")
+        return self.all_relationships
+
     # ==================== 分析入口 ====================
 
     def analyze_all(self, quiet: bool = False):
