@@ -1,7 +1,6 @@
 <template>
   <div class="ai-assistant">
     <div class="workbench-body">
-      <!-- ===== 中间：对话区域 ===== -->
       <div class="chat-wrapper">
         <ChatArea
           ref="chatAreaRef"
@@ -17,7 +16,6 @@
         />
       </div>
 
-      <!-- ===== 右侧：推荐问题面板 ===== -->
       <div class="tool-panel-wrapper">
         <ToolPanel
           ref="toolPanelRef"
@@ -30,7 +28,6 @@
       </div>
     </div>
 
-    <!-- ===== 底部工具栏 ===== -->
     <div class="footer-toolbar">
       <el-button size="small" text @click="handleClear">🗑️ 清空对话</el-button>
       <el-button size="small" text @click="handleExport">📥 导出对话</el-button>
@@ -63,7 +60,6 @@ const route = useRoute()
 const sessionStore = useSessionStore()
 const chatStore = useChatStore()
 
-// ===== Refs =====
 const toolPanelRef = ref(null)
 const chatAreaRef = ref(null)
 const pendingTool = ref(null)
@@ -72,10 +68,8 @@ const reportData = ref(null)
 const personalizedQuestions = ref({})
 const activeToolId = ref('')
 
-// ===== 上下文状态（单选） =====
 const currentContext = ref('upload')
 
-// ===== 场景映射 =====
 const sceneMap = {
   '/report-summary': 'report_summary',
   '/data-overview': 'data_overview',
@@ -85,7 +79,6 @@ const sceneMap = {
   '/models': 'smart_prediction'
 }
 
-// ===== 计算属性 =====
 const currentScene = computed(() => {
   const path = route.path
   return sceneMap[path] || 'general'
@@ -212,10 +205,40 @@ const insightsList = computed(() => {
   return reportData.value?.insights?.findings || []
 })
 
-// ===== 上下文辅助方法 =====
-function getContextLabel() {
-  return currentContext.value === 'upload' ? '上传数据' : '源数据'
-}
+// ===== 推荐问题去重合并 =====
+const allQuestionsMerged = computed(() => {
+  if (!reportData.value?.all_tables) return {}
+
+  const allQuestions = {}
+  const seenTexts = new Set()
+
+  for (const [tableName, tableData] of Object.entries(reportData.value.all_tables)) {
+    const questions = tableData.recommended_questions || {}
+    for (const [scene, qList] of Object.entries(questions)) {
+      if (!allQuestions[scene]) {
+        allQuestions[scene] = []
+      }
+      for (const q of qList) {
+        const text = q.text || ''
+        if (text && !seenTexts.has(text)) {
+          seenTexts.add(text)
+          allQuestions[scene].push({
+            ...q,
+            tables: [tableName]
+          })
+        } else {
+          // 如果已存在，追加来源表
+          const existing = allQuestions[scene].find(item => item.text === text)
+          if (existing && !existing.tables.includes(tableName)) {
+            existing.tables.push(tableName)
+          }
+        }
+      }
+    }
+  }
+
+  return allQuestions
+})
 
 // ===== 处理点击推荐问题 =====
 function handleQuestionClick(payload) {
@@ -227,7 +250,6 @@ function handleQuestionClick(payload) {
   handleSend(text, contextData)
 }
 
-// ===== 发送消息（移除硬编码预测判断，全部交给 AI 自主决定） =====
 function handleSend(text, contextData = null) {
   const message = text || pendingTool.value?.prompt
   if (!message) return
@@ -271,15 +293,16 @@ async function loadRecommendedQuestions() {
     const data = response.data || response
 
     if (data && data.questions) {
+      // 直接使用存储的数据
       personalizedQuestions.value = data.questions
     } else if (data && typeof data === 'object') {
       personalizedQuestions.value = data
     } else {
-      personalizedQuestions.value = {}
+      personalizedQuestions.value = allQuestionsMerged.value
     }
   } catch (err) {
     console.warn('加载个性化推荐失败:', err)
-    personalizedQuestions.value = {}
+    personalizedQuestions.value = allQuestionsMerged.value
   }
 }
 

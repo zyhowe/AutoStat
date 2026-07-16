@@ -17,18 +17,15 @@ class SessionService:
         self.data_dir = settings.DATA_DIR
         self.projects_dir = settings.PROJECTS_DIR
         self._ensure_dirs()
-        # ✅ 存储客户端IP，一次设置，全局使用
         self._client_ip = None
 
     def _ensure_dirs(self):
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.projects_dir.mkdir(parents=True, exist_ok=True)
 
-    # ✅ 设置客户端IP
     def set_client_ip(self, client_ip: str):
         self._client_ip = client_ip
 
-    # ✅ 获取客户端IP
     def get_client_ip(self) -> str:
         return self._client_ip or "localhost"
 
@@ -39,15 +36,28 @@ class SessionService:
         return self._get_session_path(session_id) / "metadata.json"
 
     def _get_projects_file(self) -> Path:
-        """获取项目列表文件路径（使用存储的client_ip）"""
         ip = self._client_ip or "localhost"
         ip_key = ip.replace('.', '_')
         return self.projects_dir / f"{ip_key}.json"
 
-    # ==================== ✅ 新增：获取 Parquet 缓存路径 ====================
+    # ==================== ✅ 统一 Parquet 路径 ====================
+    def get_table_parquet_path(self, session_id: str, table_name: str) -> Path:
+        """
+        获取指定表的 Parquet 路径
+        统一格式: ~/.autostat/data/{session_id}/{table_name}.parquet
+        """
+        return self._get_session_path(session_id) / f"{table_name}.parquet"
+
     def get_data_parquet_path(self, session_id: str) -> Path:
-        """获取当前会话的 Parquet 缓存文件路径"""
-        return self._get_session_path(session_id) / "data.parquet"
+        """
+        兼容旧代码，默认表名为 'data'
+        实际调用 get_table_parquet_path(session_id, "data")
+        """
+        return self.get_table_parquet_path(session_id, "data")
+
+    def get_merged_parquet_path(self, session_id: str) -> Path:
+        """获取合并表的 Parquet 路径（表名为 'merged'）"""
+        return self.get_table_parquet_path(session_id, "merged")
 
     def _load_metadata(self, session_id: str) -> Optional[Dict]:
         metadata_path = self._get_metadata_path(session_id)
@@ -154,7 +164,6 @@ class SessionService:
             self._save_metadata(session_id, metadata)
             print(f"✅ 已保存 analysis_result 到 metadata: {session_id}")
 
-            # ✅ 使用存储的client_ip
             projects = self._load_projects()
             for p in projects:
                 if p.get("session_id") == session_id:
@@ -258,25 +267,83 @@ class SessionService:
             return questions.get(scene, [])
         return []
 
+    # ==================== 多表支持 ====================
+    def get_tables_dir(self, session_id: str) -> Path:
+        """获取会话的表存储目录（保留用于兼容，但实际已不使用子目录）"""
+        session_path = self._get_session_path(session_id)
+        tables_dir = session_path / "tables"
+        tables_dir.mkdir(parents=True, exist_ok=True)
+        return tables_dir
+
+    def get_all_table_names(self, session_id: str) -> List[str]:
+        """获取会话的所有表名（从 tables_meta 读取）"""
+        metadata = self._load_metadata(session_id)
+        if metadata:
+            tables_meta = metadata.get("tables_meta", {})
+            return list(tables_meta.keys())
+        return []
+
+    def save_relationships(self, session_id: str, relationships: List[Dict]):
+        """保存表间关系"""
+        metadata = self._load_metadata(session_id)
+        if not metadata:
+            metadata = {}
+        metadata["relationships"] = relationships
+        self._save_metadata(session_id, metadata)
+
+    def get_relationships(self, session_id: str) -> List[Dict]:
+        """获取表间关系"""
+        metadata = self._load_metadata(session_id)
+        if metadata:
+            return metadata.get("relationships", [])
+        return []
+
+    def get_table_count(self, session_id: str) -> int:
+        """获取会话的表数量"""
+        return len(self.get_all_table_names(session_id))
+
+    def is_multi_table(self, session_id: str) -> bool:
+        """判断是否为多表会话"""
+        return self.get_table_count(session_id) > 1
+
+    def save_table_info(self, session_id: str, table_name: str, info: Dict):
+        """保存单个表的元信息"""
+        metadata = self._load_metadata(session_id)
+        if not metadata:
+            metadata = {}
+        if "tables_meta" not in metadata:
+            metadata["tables_meta"] = {}
+        metadata["tables_meta"][table_name] = info
+        self._save_metadata(session_id, metadata)
+
+    def get_tables_meta(self, session_id: str) -> Dict:
+        """获取所有表的元信息"""
+        metadata = self._load_metadata(session_id)
+        if metadata:
+            return metadata.get("tables_meta", {})
+        return {}
+
+    # ==================== 兼容旧方法 ====================
     def get_data_path(self, session_id: str) -> Optional[str]:
         """
-        获取会话的数据文件路径，优先返回 Parquet 缓存
-
-        返回:
-        - 如果 Parquet 存在，返回 Parquet 路径
-        - 否则返回原始文件路径（如果有）
-        - 否则返回 None
+        获取会话的数据文件路径（兼容旧版）
+        优先返回 Parquet 路径，如果不存在则返回原始文件路径
         """
-        # 1. 优先 Parquet
+        # 1. 检查是否有表（从 Parquet 加载）
+        table_names = self.get_all_table_names(session_id)
+        if table_names:
+            parquet_path = self.get_table_parquet_path(session_id, table_names[0])
+            if parquet_path.exists():
+                return str(parquet_path)
+
+        # 2. 检查根目录 data.parquet
         parquet_path = self.get_data_parquet_path(session_id)
         if parquet_path.exists():
-            print(f"📂 使用 Parquet 缓存: {parquet_path}")
             return str(parquet_path)
 
-        # 2. 回退到原始文件
+        # 3. 回退到原始文件
         file_info = self.get_file(session_id)
         if file_info:
-            print(f"📂 Parquet 不存在，使用原始文件: {file_info['path']}")
             return file_info['path']
 
         return None

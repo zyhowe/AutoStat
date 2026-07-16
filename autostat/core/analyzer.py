@@ -791,6 +791,30 @@ class AutoStatisticalAnalyzer:
             if not self.quiet:
                 print(f"⚠️ 图表显示失败: {e}")
 
+            # ==================== 新增：质量评分 ====================
+        try:
+            from autostat.core.scorer import QualityScorer
+            scorer = QualityScorer()
+            score_result = scorer.score(
+                self.data,
+                table_name=self.source_table_name or "未知",
+                variable_types=self.variable_types,
+                audit_rules=self.quality_report.get('audit_rules', {}),
+                last_updated=None,
+                id_columns=[col for col, typ in self.variable_types.items() if typ == 'identifier']
+            )
+            # 合并评分到 quality_report
+            self.quality_report['overall_score'] = score_result.overall_score
+            self.quality_report['dimensions'] = score_result.dimensions
+            self.quality_report['grade'] = score_result.grade
+            self.quality_report['grade_icon'] = score_result.grade_icon
+            self.quality_report['alerts'] = score_result.alerts
+            # 保留原有的 alerts 不要覆盖？可以合并，但 scorer 的 alerts 更全面，直接替换
+            print(f"✅ 质量评分: {score_result.overall_score:.1f} 分 ({score_result.grade})")
+        except Exception as e:
+            if not self.quiet:
+                print(f"⚠️ 质量评分计算失败: {e}")
+
         if include_html:
             print("✅ 将在外部生成 HTML 报告（由调用方控制）")
         else:

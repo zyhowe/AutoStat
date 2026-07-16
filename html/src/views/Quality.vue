@@ -1,4 +1,3 @@
-// src/views/Quality.vue（完整代码）
 <template>
   <div class="quality-page">
     <h2>📊 数据质量看板</h2>
@@ -8,7 +7,15 @@
       <el-skeleton :rows="10" animated />
     </div>
 
-    <div v-else-if="qualityData" class="quality-content">
+    <div v-else-if="reportData" class="quality-content">
+      <!-- ===== 表选择器 ===== -->
+      <TableSelector
+        v-model="currentTable"
+        :table-names="tableNames"
+        :is-multi-table="isMultiTable"
+        @change="onTableChange"
+      />
+
       <!-- 图表区域 -->
       <div class="charts-row">
         <div class="chart-card gauge-card">
@@ -106,16 +113,21 @@ import { useSessionStore } from '../stores/session'
 import { useFieldDetailStore } from '../stores/fieldDetail'
 import { reportApi } from '../api/report'
 import { openDataPreview } from '../components/DataPreviewDialog'
+import TableSelector from '../components/TableSelector.vue'
 
 const router = useRouter()
 const sessionStore = useSessionStore()
 const fieldDetailStore = useFieldDetailStore()
 
 const loading = ref(true)
-const qualityData = ref(null)
 const reportData = ref(null)
 const issues = ref([])
 const gaugeKey = ref(0)
+
+// ===== 表选择器状态 =====
+const currentTable = ref('merged')
+const tableNames = ref([])
+const isMultiTable = ref(false)
 
 const typeDisplay = {
   continuous: '连续变量',
@@ -127,11 +139,38 @@ const typeDisplay = {
   text: '文本'
 }
 
-watch(() => qualityData.value?.overall_score, (newVal) => {
+// ===== 当前数据（从 all_tables 取） =====
+const currentData = computed(() => {
+  if (!reportData.value?.all_tables) return {}
+  return reportData.value.all_tables[currentTable.value] || reportData.value.all_tables['merged'] || {}
+})
+
+const currentQualityData = computed(() => {
+  return currentData.value?.quality_report || {}
+})
+
+const currentDimensions = computed(() => {
+  return currentQualityData.value?.dimensions || {}
+})
+
+const currentOverallScore = computed(() => {
+  return currentQualityData.value?.overall_score ?? null
+})
+
+const currentAlerts = computed(() => {
+  return currentQualityData.value?.alerts || []
+})
+
+watch(() => currentOverallScore.value, (newVal) => {
   if (newVal !== undefined && newVal !== null) {
     gaugeKey.value += 1
   }
 })
+
+function onTableChange() {
+  gaugeKey.value += 1
+  updateIssues()
+}
 
 onMounted(async () => {
   await loadQuality()
@@ -155,33 +194,43 @@ async function loadQuality() {
 
   loading.value = true
   try {
-    const [qualityResult, reportResult] = await Promise.all([
-      reportApi.getQuality(sessionId),
-      reportApi.get(sessionId)
-    ])
-    qualityData.value = qualityResult
+    const reportResult = await reportApi.get(sessionId)
     reportData.value = reportResult
 
-    const allIssues = []
-    const alerts = qualityResult?.alerts || []
-    alerts.forEach(alert => {
-      if (alert.level === 'error' || alert.level === 'warning') {
-        allIssues.push({
-          level: alert.level,
-          field: alert.field || alert.dimension,
-          message: alert.message,
-          current: alert.current,
-          threshold: alert.threshold
-        })
-      }
-    })
-    issues.value = allIssues
+    // 初始化表选择器
+    const allTables = reportResult?.all_tables || {}
+    const tableKeys = Object.keys(allTables)
+    tableNames.value = tableKeys.filter(k => k !== 'merged')
+    isMultiTable.value = tableNames.value.length > 1
+
+    if (!currentTable.value || !allTables[currentTable.value]) {
+      currentTable.value = 'merged'
+    }
+
+    updateIssues()
 
   } catch (err) {
     ElMessage.error('加载质量报告失败: ' + err.message)
   } finally {
     loading.value = false
   }
+}
+
+function updateIssues() {
+  const allIssues = []
+  const alerts = currentAlerts.value || []
+  alerts.forEach(alert => {
+    if (alert.level === 'error' || alert.level === 'warning') {
+      allIssues.push({
+        level: alert.level,
+        field: alert.field || alert.dimension,
+        message: alert.message,
+        current: alert.current,
+        threshold: alert.threshold
+      })
+    }
+  })
+  issues.value = allIssues
 }
 
 function getDimensionLabel(name) {
@@ -212,7 +261,7 @@ function getProgressColor(score) {
 
 // ===== 过滤 timeliness =====
 const filteredDimensions = computed(() => {
-  const dims = qualityData.value?.dimensions || {}
+  const dims = currentDimensions.value || {}
   const filtered = {}
   Object.keys(dims).forEach(k => {
     if (k !== 'timeliness') {
@@ -224,12 +273,12 @@ const filteredDimensions = computed(() => {
 
 // ===== 仪表盘 =====
 const hasGaugeData = computed(() => {
-  const score = qualityData.value?.overall_score
+  const score = currentOverallScore.value
   return score !== undefined && score !== null && !isNaN(Number(score))
 })
 
 const gaugeOption = computed(() => {
-  const rawScore = qualityData.value?.overall_score
+  const rawScore = currentOverallScore.value
   const score = Number(rawScore) || 0
   const color = score >= 80 ? '#67C23A' : score >= 60 ? '#E6A23C' : '#F56C6C'
   return {
@@ -321,17 +370,21 @@ const radarOption = computed(() => {
 
 // ===== 字段详情 =====
 function buildFieldData(fieldName) {
-  const summary = reportData.value?.variable_summaries?.[fieldName] || {}
-  const varType = reportData.value?.variable_types?.[fieldName]?.type || 'unknown'
-  const varTypeDesc = reportData.value?.variable_types?.[fieldName]?.type_desc || typeDisplay[varType] || varType
+  const summaries = currentData.value?.variable_summaries || {}
+  const variableTypes = currentData.value?.variable_types || {}
+  const qualityReport = currentQualityData.value
 
-  const tsDiag = reportData.value?.time_series_diagnostics?.[fieldName] || null
-  const outlier = reportData.value?.quality_report?.outliers?.[fieldName] || null
-  const missing = reportData.value?.quality_report?.missing?.find(m => m.column === fieldName) || null
-  const dupInfo = reportData.value?.quality_report?.duplicates || null
+  const summary = summaries?.[fieldName] || {}
+  const varType = variableTypes?.[fieldName]?.type || 'unknown'
+  const varTypeDesc = variableTypes?.[fieldName]?.type_desc || typeDisplay[varType] || varType
+
+  const tsDiag = currentData.value?.time_series_diagnostics?.[fieldName] || null
+  const outlier = qualityReport?.outliers?.[fieldName] || null
+  const missing = qualityReport?.missing?.find(m => m.column === fieldName) || null
+  const dupInfo = qualityReport?.duplicates || null
 
   const correlations = []
-  const matrix = reportData.value?.correlations?.matrix || {}
+  const matrix = currentData.value?.correlations?.matrix || {}
   if (matrix[fieldName]) {
     const entries = Object.entries(matrix[fieldName])
     for (const [varName, value] of entries) {
@@ -343,7 +396,7 @@ function buildFieldData(fieldName) {
   }
 
   const rules = []
-  const auditRules = reportData.value?.quality_report?.audit_rules || {}
+  const auditRules = qualityReport?.audit_rules || {}
   const allRules = [
     ...(auditRules.arithmetic_rules || []),
     ...(auditRules.functional_dependencies || []),
@@ -361,7 +414,7 @@ function buildFieldData(fieldName) {
   }
 
   const models = []
-  const modelRecs = reportData.value?.model_recommendations || []
+  const modelRecs = currentData.value?.model_recommendations || []
   for (const rec of modelRecs) {
     let role = ''
     if (rec.target_column === fieldName) {
@@ -459,6 +512,12 @@ function showDataByAlert(alert) {
 function goTo(routeName) {
   router.push(`/${routeName}`)
 }
+
+// ===== 监听表切换 =====
+watch(currentTable, () => {
+  gaugeKey.value += 1
+  updateIssues()
+})
 </script>
 
 <style scoped>
@@ -493,10 +552,6 @@ function goTo(routeName) {
 }
 .chart-card:hover {
   box-shadow: 0 2px 12px rgba(0,0,0,0.06);
-}
-.chart-card.full-width {
-  grid-column: 1 / -1;
-  margin-bottom: 16px;
 }
 .chart-header {
   display: flex;

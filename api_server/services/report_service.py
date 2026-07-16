@@ -37,8 +37,16 @@ class ReportService:
             "model_recommendations": analysis_result.get("model_recommendations"),
             "cleaning_suggestions": analysis_result.get("cleaning_suggestions"),
             "distribution_insights": analysis_result.get("distribution_insights"),
-            # ✅ 新增：透传 summary
-            "summary": analysis_result.get("summary", [])
+            "summary": analysis_result.get("summary", []),
+
+            # 多表信息（用于表选择器）
+            "multi_table_info": analysis_result.get("multi_table_info"),
+            "is_multi_table": analysis_result.get("is_multi_table", False),
+            "table_names": analysis_result.get("table_names", []),
+            "relationships": analysis_result.get("relationships", []),
+
+            # ✅ 核心修复：透传 all_tables（合并表和原始表的完整数据）
+            "all_tables": analysis_result.get("all_tables")
         })
 
     def get_summary(self, analysis_result: Dict) -> List[Dict]:

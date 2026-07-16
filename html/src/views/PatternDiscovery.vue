@@ -1,14 +1,21 @@
-// src/views/PatternDiscovery.vue
 <template>
   <div class="pattern-discovery">
     <h2>📈 规律发现</h2>
-    <p class="subtitle">探索变量之间的相关性和时间序列规律</p>
+    <p class="subtitle">探索当前表中变量之间的相关性和时间序列规律</p>
 
     <div v-if="loading" class="loading-container">
       <el-skeleton :rows="10" animated />
     </div>
 
     <div v-else-if="reportData" class="pattern-content">
+      <!-- ===== 表选择器 ===== -->
+      <TableSelector
+        v-model="currentTable"
+        :table-names="tableNames"
+        :is-multi-table="isMultiTable"
+        @change="onTableChange"
+      />
+
       <el-tabs v-model="activeTab">
         <!-- ============================================================ -->
         <!-- Tab1: 相关性分析 -->
@@ -125,7 +132,6 @@
                   </span>
                 </template>
               </el-table-column>
-              <!-- 样本量（两字段均非空） -->
               <el-table-column label="样本量" width="100" align="center">
                 <template #default="{ row }">
                   <span class="field-name-link" @click="showNonMissingData(row)">
@@ -133,7 +139,6 @@
                   </span>
                 </template>
               </el-table-column>
-              <!-- 强相关数（显示 valid_count，即相关系数对应的记录数） -->
               <el-table-column label="强相关数" width="110" align="center">
                 <template #default="{ row }">
                   <span class="field-name-link" @click="showCorrelationData(row)">
@@ -141,7 +146,6 @@
                   </span>
                 </template>
               </el-table-column>
-              <!-- 置信度 = 强相关数 / 样本量（总记录数） -->
               <el-table-column label="置信度" width="100" align="center">
                 <template #default="{ row }">
                   <span class="field-name-link" @click="showCorrelationData(row)">
@@ -245,6 +249,7 @@ import { useSessionStore } from '../stores/session'
 import { useFieldDetailStore } from '../stores/fieldDetail'
 import { reportApi } from '../api/report'
 import { openDataPreview } from '../components/DataPreviewDialog'
+import TableSelector from '../components/TableSelector.vue'
 
 const router = useRouter()
 const sessionStore = useSessionStore()
@@ -253,6 +258,11 @@ const fieldDetailStore = useFieldDetailStore()
 const loading = ref(false)
 const reportData = ref(null)
 const activeTab = ref('correlation')
+
+// ===== 表选择器状态 =====
+const currentTable = ref('merged')
+const tableNames = ref([])
+const isMultiTable = ref(false)
 
 // ==================== Key 强制刷新 ====================
 const heatmapKey = ref(0)
@@ -280,30 +290,41 @@ const typeDisplay = {
   text: '文本'
 }
 
+// ===== 当前数据 =====
+const currentData = computed(() => {
+  if (!reportData.value?.all_tables) return {}
+  return reportData.value.all_tables[currentTable.value] || reportData.value.all_tables['merged'] || {}
+})
+
+const variableTypes = computed(() => currentData.value?.variable_types || {})
+const summaries = computed(() => currentData.value?.variable_summaries || {})
+const correlations = computed(() => currentData.value?.correlations || {})
+const quality = computed(() => currentData.value?.quality_report || {})
+
 function buildFieldData(fieldName) {
-  const summary = reportData.value?.variable_summaries?.[fieldName] || {}
-  const varType = reportData.value?.variable_types?.[fieldName]?.type || 'unknown'
-  const varTypeDesc = reportData.value?.variable_types?.[fieldName]?.type_desc || typeDisplay[varType] || varType
+  const summary = summaries.value?.[fieldName] || {}
+  const varType = variableTypes.value?.[fieldName]?.type || 'unknown'
+  const varTypeDesc = variableTypes.value?.[fieldName]?.type_desc || typeDisplay[varType] || varType
 
-  const tsDiag = reportData.value?.time_series_diagnostics?.[fieldName] || null
-  const outlier = reportData.value?.quality_report?.outliers?.[fieldName] || null
-  const missing = reportData.value?.quality_report?.missing?.find(m => m.column === fieldName) || null
-  const dupInfo = reportData.value?.quality_report?.duplicates || null
+  const tsDiag = currentData.value?.time_series_diagnostics?.[fieldName] || null
+  const outlier = quality.value?.outliers?.[fieldName] || null
+  const missing = quality.value?.missing?.find(m => m.column === fieldName) || null
+  const dupInfo = quality.value?.duplicates || null
 
-  const correlations = []
-  const matrix = reportData.value?.correlations?.matrix || {}
+  const corrList = []
+  const matrix = correlations.value?.matrix || {}
   if (matrix[fieldName]) {
     const entries = Object.entries(matrix[fieldName])
     for (const [varName, value] of entries) {
       if (varName !== fieldName && value !== null && value !== undefined && Math.abs(value) >= 0.7) {
-        correlations.push({ var: varName, value: parseFloat(Number(value).toFixed(4)) })
+        corrList.push({ var: varName, value: parseFloat(Number(value).toFixed(4)) })
       }
     }
-    correlations.sort((a, b) => Math.abs(b.value) - Math.abs(a.value))
+    corrList.sort((a, b) => Math.abs(b.value) - Math.abs(a.value))
   }
 
   const rules = []
-  const auditRules = reportData.value?.quality_report?.audit_rules || {}
+  const auditRules = quality.value?.audit_rules || {}
   const allRules = [
     ...(auditRules.arithmetic_rules || []),
     ...(auditRules.functional_dependencies || []),
@@ -321,7 +342,7 @@ function buildFieldData(fieldName) {
   }
 
   const models = []
-  const modelRecs = reportData.value?.model_recommendations || []
+  const modelRecs = currentData.value?.model_recommendations || []
   for (const rec of modelRecs) {
     let role = ''
     if (rec.target_column === fieldName) {
@@ -367,7 +388,7 @@ function buildFieldData(fieldName) {
     outlier,
     missing,
     duplicateInfo: dupInfo,
-    correlations,
+    correlations: corrList,
     rules,
     models,
     topCategories
@@ -398,12 +419,12 @@ watch(activeTab, (newTab) => {
 
 // ==================== 热力图字段 ====================
 const availableHeatmapFields = computed(() => {
-  const matrix = reportData.value?.correlations?.matrix || {}
+  const matrix = correlations.value?.matrix || {}
   return Object.keys(matrix)
 })
 
 const getDefaultHeatmapFields = () => {
-  const corrs = reportData.value?.correlations?.high_correlations || []
+  const corrs = correlations.value?.high_correlations || []
   if (corrs.length === 0) return []
   const fieldSet = new Set()
   corrs.forEach(c => {
@@ -418,7 +439,7 @@ const resetHeatmapFields = () => {
   if (defaults.length > 0) {
     selectedHeatmapFields.value = defaults
   } else {
-    const matrix = reportData.value?.correlations?.matrix || {}
+    const matrix = correlations.value?.matrix || {}
     selectedHeatmapFields.value = Object.keys(matrix).slice(0, Math.min(10, Object.keys(matrix).length))
   }
   selectedCorrPair.value = null
@@ -441,7 +462,7 @@ function onHeatmapClick(params) {
   const data = params.data
   if (!data || data.length < 3 || data[2] === null || data[2] === undefined) return
 
-  const matrix = reportData.value?.correlations?.matrix || {}
+  const matrix = correlations.value?.matrix || {}
   const filteredVars = selectedHeatmapFields.value.filter(key => matrix[key] !== undefined)
   if (filteredVars.length < 2) return
 
@@ -461,12 +482,12 @@ function onHeatmapClick(params) {
 
 // ==================== 热力图配置 ====================
 const hasHeatmapData = computed(() => {
-  const matrix = reportData.value?.correlations?.matrix
+  const matrix = correlations.value?.matrix
   return matrix && Object.keys(matrix).length > 0 && selectedHeatmapFields.value.length >= 2
 })
 
 const heatmapOption = computed(() => {
-  const matrix = reportData.value?.correlations?.matrix || {}
+  const matrix = correlations.value?.matrix || {}
   const selected = selectedHeatmapFields.value
   if (selected.length < 2) return {}
 
@@ -568,7 +589,7 @@ const heatmapOption = computed(() => {
 const hasScatterData = computed(() => {
   const pair = selectedCorrPair.value
   if (pair) {
-    const matrix = reportData.value?.correlations?.matrix || {}
+    const matrix = correlations.value?.matrix || {}
     return matrix[pair.var1] && matrix[pair.var1][pair.var2] !== undefined
   }
   return highCorrelations.value.length > 0
@@ -588,7 +609,7 @@ const scatterOption = computed(() => {
   const corr = pair.value
 
   let scatterData = []
-  const data = reportData.value?.data
+  const data = currentData.value?.data
   if (data && data.length > 0) {
     const sampleData = data.slice(0, 100)
     scatterData = sampleData.map(row => {
@@ -668,18 +689,17 @@ const scatterOption = computed(() => {
 
 // ==================== 时间序列相关 ====================
 const highCorrelations = computed(() => {
-  return reportData.value?.correlations?.high_correlations || []
+  return correlations.value?.high_correlations || []
 })
 
 const availableTsFields = computed(() => {
-  const diag = reportData.value?.time_series_diagnostics || {}
+  const diag = currentData.value?.time_series_diagnostics || {}
   return Object.keys(diag)
 })
 
 const availableTsGroups = computed(() => {
-  const variableTypes = reportData.value?.variable_types || {}
   const groups = []
-  for (const [col, info] of Object.entries(variableTypes)) {
+  for (const [col, info] of Object.entries(variableTypes.value)) {
     const type = info.type || info
     if (type === 'categorical' || type === 'categorical_numeric' || type === 'ordinal') {
       if (col !== 'id' && !col.endsWith('_id')) {
@@ -691,7 +711,7 @@ const availableTsGroups = computed(() => {
 })
 
 const timeSeriesData = computed(() => {
-  const diag = reportData.value?.time_series_diagnostics || {}
+  const diag = currentData.value?.time_series_diagnostics || {}
   return Object.entries(diag).map(([key, info]) => ({
     key,
     n_samples: info.n_samples || 0,
@@ -702,11 +722,11 @@ const timeSeriesData = computed(() => {
 })
 
 const hasTimeseriesData = computed(() => {
-  return Object.keys(reportData.value?.time_series_diagnostics || {}).length > 0
+  return Object.keys(currentData.value?.time_series_diagnostics || {}).length > 0
 })
 
 const hasRealTimeseriesData = computed(() => {
-  const diag = reportData.value?.time_series_diagnostics || {}
+  const diag = currentData.value?.time_series_diagnostics || {}
   return Object.values(diag).some(d => d.data_points && d.data_points.length > 0)
 })
 
@@ -715,8 +735,8 @@ const getDefaultTsFields = () => {
   return fields.slice(0, Math.min(5, fields.length))
 }
 
-watch(() => reportData.value, (newVal) => {
-  if (newVal) {
+watch(() => currentData.value, (newVal) => {
+  if (newVal && Object.keys(newVal).length > 0) {
     resetHeatmapFields()
     selectedTsFields.value = getDefaultTsFields()
     selectedTsGroup.value = ''
@@ -733,7 +753,7 @@ const onTsGroupChange = () => {
 
 // ==================== 时间序列趋势配置 ====================
 const timeseriesOption = computed(() => {
-  const diag = reportData.value?.time_series_diagnostics || {}
+  const diag = currentData.value?.time_series_diagnostics || {}
   const selected = selectedTsFields.value
   const group = selectedTsGroup.value
 
@@ -901,7 +921,7 @@ function showCorrelationData(row) {
   }
 
   const validCount = row.valid_count !== undefined && row.valid_count !== null ? row.valid_count : 0
-  const total = reportData.value?.data_shape?.rows || 0
+  const total = currentData.value?.data_shape?.rows || 0
   const confPct = total > 0 ? ((validCount / total) * 100).toFixed(1) : 0
 
   openDataPreview({
@@ -933,6 +953,17 @@ async function loadData() {
   try {
     const result = await reportApi.get(sessionId)
     reportData.value = result
+
+    // 初始化表选择器
+    const allTables = result?.all_tables || {}
+    const tableKeys = Object.keys(allTables)
+    tableNames.value = tableKeys.filter(k => k !== 'merged')
+    isMultiTable.value = tableNames.value.length > 1
+
+    if (!currentTable.value || !allTables[currentTable.value]) {
+      currentTable.value = 'merged'
+    }
+
     resetHeatmapFields()
     selectedTsFields.value = getDefaultTsFields()
     selectedTsGroup.value = ''

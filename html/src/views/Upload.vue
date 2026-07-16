@@ -114,7 +114,7 @@
     <!-- ============================================================ -->
     <div v-if="dataSourceType === 'database'" class="upload-area">
       <el-alert
-        title="连接 SQL Server 数据库"
+        title="连接 SQL Server 数据库，支持多表加载"
         type="info"
         show-icon
         :closable="false"
@@ -136,13 +136,31 @@
               :value="cfg.name"
             />
           </el-select>
-          <span style="font-size: 12px; color: #909399;">
-            <el-button type="text" @click="$router.push('/settings')">去设置</el-button>
-          </span>
         </el-form-item>
 
+        <!-- ✅ 改为文本域，支持多表输入 -->
         <el-form-item label="表名">
-          <el-input v-model="dbForm.tableName" placeholder="输入表名，如：users" />
+          <el-input
+            v-model="dbForm.tableNamesInput"
+            type="textarea"
+            :rows="3"
+            placeholder="输入表名，支持逗号、空格、换行分隔&#10;例如：users, orders, products"
+            @input="parseTableNames"
+          />
+          <div v-if="parsedTableNames.length > 0" class="table-tags">
+            <el-tag
+              v-for="name in parsedTableNames"
+              :key="name"
+              size="small"
+              type="info"
+              style="margin: 2px;"
+            >
+              {{ name }}
+            </el-tag>
+            <span style="font-size: 12px; color: #909399; margin-left: 8px;">
+              共 {{ parsedTableNames.length }} 个表
+            </span>
+          </div>
         </el-form-item>
 
         <el-form-item label="加载行数">
@@ -153,36 +171,72 @@
           <el-button
             type="primary"
             :loading="loadingDb"
-            :disabled="!dbForm.configName || !dbForm.tableName"
-            @click="handleLoadDbTable"
+            :disabled="!dbForm.configName || parsedTableNames.length === 0"
+            @click="handleLoadDbTables"
           >
             {{ loadingDb ? '加载中...' : '🔌 加载表' }}
           </el-button>
         </el-form-item>
       </el-form>
 
+      <!-- 加载进度 -->
+      <div v-if="loadingDb" class="loading-progress">
+        <el-progress :percentage="dbLoadProgress" />
+        <p class="status-message">{{ dbLoadStatus }}</p>
+      </div>
+
+      <!-- ✅ 关系确认 -->
+      <TableRelationConfirm
+        v-if="dbData && candidateRelations.length > 0 && !relationsConfirmed"
+        :relations="candidateRelations"
+        :table-names="dbTableNames"
+        @confirm="handleRelationsConfirmed"
+        @skip="handleRelationsSkipped"
+      />
+
       <!-- 数据库加载结果 -->
       <div v-if="dbData" class="file-preview">
         <div class="file-info">
           <div class="file-header">
             <el-icon><DataBoard /></el-icon>
-            <span class="file-name">{{ dbForm.tableName }}</span>
+            <span class="file-name">已加载 {{ dbTableNames.length }} 个表</span>
             <el-tag size="small" type="success">已加载</el-tag>
           </div>
           <div class="file-stats">
-            <span>📊 {{ dbData.rows }} 行</span>
-            <span>📋 {{ dbData.columns }} 列</span>
+            <span>📊 总表数: {{ dbTableNames.length }}</span>
+            <span>📋 总列数: {{ totalColumns }}</span>
+            <span>📈 总行数: {{ totalRows }}</span>
           </div>
+        </div>
+
+        <!-- 表切换 -->
+        <div class="table-switcher">
+          <el-radio-group v-model="selectedTable" size="small" @change="onTableChange">
+            <el-radio-button
+              v-for="name in dbTableNames"
+              :key="name"
+              :label="name"
+            />
+          </el-radio-group>
+        </div>
+
+        <!-- 当前表的信息 -->
+        <div v-if="currentTableData" class="table-info">
+          <el-descriptions :column="3" border size="small">
+            <el-descriptions-item label="表名">{{ selectedTable }}</el-descriptions-item>
+            <el-descriptions-item label="行数">{{ currentTableData.rows }}</el-descriptions-item>
+            <el-descriptions-item label="列数">{{ currentTableData.columns }}</el-descriptions-item>
+          </el-descriptions>
         </div>
 
         <!-- 字段类型调整 -->
         <div class="field-types">
           <h4>📋 字段类型调整 <el-tag size="small" type="info">点击下拉修改</el-tag></h4>
           <div class="type-grid">
-            <div v-for="(type, field) in dbEditableTypes" :key="field" class="type-item">
+            <div v-for="(type, field) in currentEditableTypes" :key="field" class="type-item">
               <span class="field-name">{{ field }}</span>
               <el-select
-                v-model="dbEditableTypes[field]"
+                v-model="currentEditableTypes[field]"
                 size="small"
                 style="width: 120px;"
                 @change="onDbTypeChange(field, $event)"
@@ -203,9 +257,9 @@
         <!-- 数据预览 -->
         <div class="data-preview">
           <h4>数据预览（前 100 行）</h4>
-          <el-table :data="dbData.preview.head" border size="small" max-height="300">
+          <el-table :data="currentPreviewData" border size="small" max-height="300">
             <el-table-column
-              v-for="col in dbData.preview.columns"
+              v-for="col in currentPreviewColumns"
               :key="col"
               :prop="col"
               :label="col"
@@ -213,35 +267,6 @@
               show-overflow-tooltip
             />
           </el-table>
-        </div>
-
-        <!-- 多表关系管理 -->
-        <div v-if="dbData && dbData.is_multi" class="relationship-section">
-          <h4>🔗 多表关系管理</h4>
-          <el-alert
-            title="当前加载了多张表，请定义表间关系"
-            type="warning"
-            show-icon
-            :closable="false"
-            style="margin-bottom: 12px"
-          />
-          <div
-            v-for="(rel, index) in relationships"
-            :key="index"
-            class="relationship-row"
-          >
-            <el-select v-model="rel.fromTable" placeholder="源表" style="width: 150px;">
-              <el-option v-for="t in dbData.table_names" :key="t" :label="t" :value="t" />
-            </el-select>
-            <el-input v-model="rel.fromCol" placeholder="源列" style="width: 120px; margin: 0 8px;" />
-            <span style="margin: 0 8px;">→</span>
-            <el-select v-model="rel.toTable" placeholder="目标表" style="width: 150px;">
-              <el-option v-for="t in dbData.table_names" :key="t" :label="t" :value="t" />
-            </el-select>
-            <el-input v-model="rel.toCol" placeholder="目标列" style="width: 120px; margin: 0 8px;" />
-            <el-button size="small" type="danger" @click="removeRelationship(index)">删除</el-button>
-          </div>
-          <el-button size="small" type="primary" @click="addRelationship">➕ 添加关系</el-button>
         </div>
 
         <!-- 操作按钮 -->
@@ -291,13 +316,14 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { useSessionStore } from '../stores/session'
 import { useAnalysisStore } from '../stores/analysis'
 import { dataApi } from '../api/data'
 import { configApi } from '../api/config'
+import TableRelationConfirm from '../components/TableRelationConfirm.vue'
 
 const router = useRouter()
 const sessionStore = useSessionStore()
@@ -321,15 +347,26 @@ const originalTypes = ref({})
 const dbConfigs = ref([])
 const dbForm = reactive({
   configName: '',
-  tableName: '',
+  tableNamesInput: '',
   limit: 5000
 })
+const parsedTableNames = ref([])
 const loadingDb = ref(false)
 const dbData = ref(null)
 const dbEditableTypes = ref({})
 const dbOriginalTypes = ref({})
-const relationships = ref([])
-const isMultiTable = ref(false)
+const candidateRelations = ref([])
+const dbTableNames = ref([])
+const selectedTable = ref('')
+const currentTableData = ref(null)
+const currentEditableTypes = ref({})
+const currentPreviewData = ref([])
+const currentPreviewColumns = ref([])
+const dbLoadProgress = ref(0)
+const dbLoadStatus = ref('')
+const relationsConfirmed = ref(false)
+const confirmedRelations = ref([])
+const dbLoadResults = ref({})
 
 // 示例数据
 const demoDatasets = [
@@ -414,14 +451,25 @@ function onTypeChange(field, newType) {
 // ==================== 数据库连接 ====================
 function onDbConfigChange() {}
 
-async function handleLoadDbTable() {
-  if (!dbForm.configName || !dbForm.tableName) {
-    ElMessage.warning('请选择配置并输入表名')
+// ==================== 多表解析 ====================
+function parseTableNames() {
+  const input = dbForm.tableNamesInput || ''
+  const parts = input.split(/[,，\s\n]+/).map(s => s.trim())
+  parsedTableNames.value = parts.filter(s => s.length > 0)
+}
+
+// ==================== 加载多表 ====================
+async function handleLoadDbTables() {
+  if (!dbForm.configName || parsedTableNames.value.length === 0) {
+    ElMessage.warning('请选择配置并输入至少一个表名')
     return
   }
 
   loadingDb.value = true
   dbData.value = null
+  dbLoadProgress.value = 0
+  dbLoadStatus.value = '正在加载表...'
+  relationsConfirmed.value = false
 
   try {
     const config = dbConfigs.value.find(c => c.name === dbForm.configName)
@@ -432,57 +480,35 @@ async function handleLoadDbTable() {
 
     const result = await dataApi.loadDatabase({
       config: config,
-      table_names: [dbForm.tableName],
+      table_names: parsedTableNames.value,
       limit: dbForm.limit
     })
 
+    dbLoadProgress.value = 100
+    dbLoadStatus.value = '加载完成'
+
     if (result && result.tables) {
+      dbData.value = result
+      dbTableNames.value = Object.keys(result.tables)
+
+      // 保存候选关系
+      candidateRelations.value = result.candidate_relations || []
+
+      // 选择第一个表
+      if (dbTableNames.value.length > 0) {
+        selectedTable.value = dbTableNames.value[0]
+        updateCurrentTable(selectedTable.value)
+      }
+
       if (result.session_id) {
         sessionStore.currentSessionId = result.session_id
         localStorage.setItem('lastSessionId', result.session_id)
         await sessionStore.loadSession(result.session_id)
+        // 保存关系到 store
+        sessionStore.relationships = candidateRelations.value
       }
 
-      const tableData = result.tables[dbForm.tableName]
-      if (!tableData) {
-        ElMessage.error('表加载失败')
-        return
-      }
-
-      dbData.value = {
-        rows: tableData.rows,
-        columns: tableData.columns,
-        preview: tableData.preview,
-        variable_types: tableData.variable_types,
-        table_names: Object.keys(result.tables),
-        is_multi: Object.keys(result.tables).length > 1
-      }
-
-      dbEditableTypes.value = { ...tableData.variable_types }
-      dbOriginalTypes.value = { ...tableData.variable_types }
-
-      if (dbData.value.is_multi) {
-        relationships.value = []
-        const names = Object.keys(result.tables)
-        for (let i = 0; i < names.length; i++) {
-          for (let j = i + 1; j < names.length; j++) {
-            const cols1 = Object.keys(result.tables[names[i]].variable_types || {})
-            const cols2 = Object.keys(result.tables[names[j]].variable_types || {})
-            const common = cols1.filter(c => cols2.includes(c))
-            if (common.length > 0) {
-              relationships.value.push({
-                fromTable: names[i],
-                fromCol: common[0],
-                toTable: names[j],
-                toCol: common[0]
-              })
-            }
-          }
-        }
-      }
-
-      currentStep.value = 1
-      ElMessage.success('表加载成功')
+      ElMessage.success(`成功加载 ${dbTableNames.value.length} 个表`)
     }
   } catch (err) {
     ElMessage.error('加载失败: ' + err.message)
@@ -491,26 +517,37 @@ async function handleLoadDbTable() {
   }
 }
 
+function updateCurrentTable(tableName) {
+  if (!dbData.value || !dbData.value.tables[tableName]) return
+
+  const table = dbData.value.tables[tableName]
+  currentTableData.value = {
+    rows: table.rows,
+    columns: table.columns
+  }
+  currentEditableTypes.value = { ...table.variable_types }
+  currentPreviewData.value = table.preview.head || []
+  currentPreviewColumns.value = table.preview.columns || []
+}
+
+function onTableChange(value) {
+  updateCurrentTable(value)
+}
+
 function onDbTypeChange(field, newType) {
   console.log(`数据库字段 ${field} 类型变更为: ${newType}`)
 }
 
-function addRelationship() {
-  const names = dbData.value?.table_names || []
-  if (names.length < 2) {
-    ElMessage.warning('需要至少2张表才能建立关系')
-    return
-  }
-  relationships.value.push({
-    fromTable: names[0],
-    fromCol: '',
-    toTable: names[1] || names[0],
-    toCol: ''
-  })
+// ==================== 关系确认 ====================
+function handleRelationsConfirmed(relations) {
+  confirmedRelations.value = relations
+  relationsConfirmed.value = true
+  ElMessage.success(`已确认 ${relations.length} 条表间关系`)
 }
 
-function removeRelationship(index) {
-  relationships.value.splice(index, 1)
+function handleRelationsSkipped() {
+  relationsConfirmed.value = true
+  ElMessage.info('已跳过关系配置')
 }
 
 // ==================== 示例数据 ====================
@@ -518,7 +555,6 @@ async function handleLoadDemo(datasetKey) {
   try {
     const result = await dataApi.loadDemo(datasetKey)
     if (result && result.session_id) {
-      // 保存 session_id
       currentSessionId.value = result.session_id
       sessionStore.currentSessionId = result.session_id
       localStorage.setItem('lastSessionId', result.session_id)
@@ -543,7 +579,6 @@ async function handleLoadDemo(datasetKey) {
 
       ElMessage.success(`已加载 ${result.source_name}`)
 
-      // ✅ 切换到文件上传标签页，跳转到上传页面
       dataSourceType.value = 'file'
       router.push('/upload')
     }
@@ -585,7 +620,6 @@ async function handleStartAnalysis() {
 
     if (success) {
       ElMessage.success('分析完成！')
-      // analysisStore 内部已跳转到 /report-summary
     } else {
       ElMessage.error(analysisStore.error || '分析失败')
     }
@@ -602,40 +636,39 @@ async function handleStartDbAnalysis() {
     return
   }
 
+  // 如果有多表关系但用户还未确认，提醒
+  if (candidateRelations.value.length > 0 && !relationsConfirmed.value) {
+    ElMessage.warning('请先确认表间关系')
+    return
+  }
+
   analyzing.value = true
   currentStep.value = 2
   progress.value = 0
   statusMessage.value = '准备分析...'
 
   try {
-    const variableTypes = { ...dbEditableTypes.value }
-    const filteredTypes = {}
-    for (const [key, value] of Object.entries(variableTypes)) {
-      if (value !== 'exclude') {
-        filteredTypes[key] = value
+    // 收集所有表的变量类型
+    const allTypes = {}
+    for (const [name, table] of Object.entries(dbData.value.tables)) {
+      for (const [field, type] of Object.entries(table.variable_types || {})) {
+        // 表名.字段名 作为唯一标识
+        allTypes[`${name}.${field}`] = type
       }
     }
 
     let sessionId = sessionStore.currentSessionId
     if (!sessionId) {
-      sessionId = currentSessionId.value
-    }
-    if (!sessionId) {
       ElMessage.error('会话ID丢失，请重新加载')
       return
     }
 
-    if (relationships.value.length > 0) {
-      sessionStore.relationships = relationships.value
-    }
-
     localStorage.setItem('lastSessionId', sessionId)
 
-    const success = await analysisStore.runAnalysis(sessionId, filteredTypes)
+    const success = await analysisStore.runAnalysis(sessionId, allTypes)
 
     if (success) {
       ElMessage.success('分析完成！')
-      // analysisStore 内部已跳转到 /report-summary
     } else {
       ElMessage.error(analysisStore.error || '分析失败')
     }
@@ -649,6 +682,17 @@ async function handleStartDbAnalysis() {
 function formatProgress(percentage) {
   return `${percentage}%`
 }
+
+// ==================== 计算属性 ====================
+const totalRows = computed(() => {
+  if (!dbData.value) return 0
+  return Object.values(dbData.value.tables).reduce((sum, t) => sum + (t.rows || 0), 0)
+})
+
+const totalColumns = computed(() => {
+  if (!dbData.value) return 0
+  return Object.values(dbData.value.tables).reduce((sum, t) => sum + (t.columns || 0), 0)
+})
 </script>
 
 <style scoped>
@@ -732,17 +776,6 @@ function formatProgress(percentage) {
   color: #909399;
   font-size: 14px;
 }
-.relationship-section {
-  margin-top: 20px;
-  padding-top: 20px;
-  border-top: 1px solid #e4e7ed;
-}
-.relationship-row {
-  display: flex;
-  align-items: center;
-  margin-bottom: 8px;
-  flex-wrap: wrap;
-}
 .demo-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
@@ -772,5 +805,23 @@ function formatProgress(percentage) {
 .demo-meta {
   font-size: 12px;
   color: #c0c4cc;
+}
+.table-tags {
+  margin-top: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.table-switcher {
+  margin: 12px 0;
+}
+.table-info {
+  margin: 12px 0;
+}
+.loading-progress {
+  margin: 16px 0;
+  padding: 16px;
+  background: #f5f7fa;
+  border-radius: 8px;
 }
 </style>

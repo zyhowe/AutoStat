@@ -1,4 +1,3 @@
-// src/components/FieldDetailDialog.vue
 <template>
   <el-dialog
     v-model="visible"
@@ -590,7 +589,6 @@ function getStrengthLabel(value) {
   return '弱'
 }
 
-// corrBarChartOption 简单实现
 const corrBarChartOption = computed(() => {
   const correlations = props.fieldData?.correlations || []
   if (correlations.length < 2) return {}

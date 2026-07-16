@@ -15,15 +15,15 @@
             :closable="false"
           />
           <div v-else>
-            <!-- 模型推荐列表 -->
+            <!-- 模型推荐列表（从所有表收集并去重） -->
             <div class="recommendations">
               <h4>📊 推荐模型 <el-tag size="small" type="info">点击卡片打开训练配置</el-tag></h4>
-              <div v-if="recommendations.length === 0" class="empty-hint">
+              <div v-if="allRecommendations.length === 0" class="empty-hint">
                 暂无模型推荐，请先完成数据分析
               </div>
               <div v-else class="recommend-list">
                 <el-card
-                  v-for="(rec, idx) in recommendations"
+                  v-for="(rec, idx) in allRecommendations"
                   :key="idx"
                   class="recommend-card"
                   shadow="hover"
@@ -37,6 +37,9 @@
                   <div class="rec-target" v-if="rec.target_column">🎯 {{ rec.target_column }}</div>
                   <div class="rec-features" v-if="rec.feature_columns && rec.feature_columns.length > 0">
                     📊 {{ rec.feature_columns.slice(0, 4).join('、') }}{{ rec.feature_columns.length > 4 ? `等${rec.feature_columns.length}个` : '' }}
+                  </div>
+                  <div class="rec-source" v-if="rec.source_table">
+                    📋 来源：{{ rec.source_table === 'merged' ? '合并表' : rec.source_table }}
                   </div>
                   <div class="rec-reason" v-if="rec.reason">💡 {{ rec.reason }}</div>
                   <el-button size="small" type="primary" class="rec-btn">📋 配置训练</el-button>
@@ -137,7 +140,6 @@
       :close-on-press-escape="!training"
     >
       <div v-if="selectedRec" class="dialog-body">
-        <!-- 推荐摘要 -->
         <div class="dialog-summary">
           <el-alert
             :title="`${selectedRec.task_type}：${selectedRec.ml}`"
@@ -148,7 +150,6 @@
           />
         </div>
 
-        <!-- 训练表单 -->
         <el-form label-width="120px" :disabled="training">
           <el-form-item label="任务类型">
             <el-select v-model="trainForm.taskType" @change="onTaskTypeChange" style="width: 100%;">
@@ -252,7 +253,6 @@
           </el-form-item>
         </el-form>
 
-        <!-- 训练进度和日志 -->
         <div v-if="training || trainLogs.length > 0" class="train-progress-dialog">
           <el-divider />
           <el-progress :percentage="trainProgress" :format="formatProgress" />
@@ -311,7 +311,6 @@ const trainLogs = ref([])
 const predicting = ref(false)
 const predictResult = ref(null)
 
-const recommendations = ref([])
 const selectedRec = ref(null)
 const trainDialogVisible = ref(false)
 
@@ -337,6 +336,35 @@ const modelParams = ref([])
 
 const allColumns = ref([])
 const numericColumns = ref([])
+
+// ===== 从 all_tables 收集所有模型推荐并去重 =====
+const allRecommendations = computed(() => {
+  if (!reportData.value?.all_tables) return []
+
+  const all = []
+  const seen = new Set()
+
+  for (const [tableName, tableData] of Object.entries(reportData.value.all_tables)) {
+    const recs = tableData.model_recommendations || []
+    for (const rec of recs) {
+      // 去重：按 (task_type, target_column, features 的字符串) 去重
+      const key = `${rec.task_type || ''}|${rec.target_column || ''}|${(rec.feature_columns || []).sort().join(',')}`
+      if (!seen.has(key)) {
+        seen.add(key)
+        all.push({
+          ...rec,
+          source_table: tableName
+        })
+      }
+    }
+  }
+
+  // 按优先级排序
+  const priorityOrder = { '高': 0, '中': 1, '低': 2 }
+  all.sort((a, b) => (priorityOrder[a.priority] || 1) - (priorityOrder[b.priority] || 1))
+
+  return all
+})
 
 // ==================== 计算属性 ====================
 const canTrain = computed(() => {
@@ -384,14 +412,9 @@ async function loadRecommendations() {
   try {
     const sessionId = sessionStore.currentSessionId
     const result = await reportApi.get(sessionId)
-    if (result && result.model_recommendations) {
-      recommendations.value = result.model_recommendations.slice(0, 10)
-    } else {
-      recommendations.value = []
-    }
+    reportData.value = result
   } catch (err) {
     console.error('加载推荐失败:', err)
-    recommendations.value = []
   }
 }
 
@@ -615,7 +638,6 @@ function onModelSelect() {
     return
   }
 
-  // 🔧 修复：从 config 中正确提取 task_type、target_column、features
   const config = model.config || {}
   const features = config.features || []
 
@@ -626,7 +648,6 @@ function onModelSelect() {
     features: features
   }
 
-  // 重置输入值
   predictForm.value.inputValues = {}
   features.forEach(f => {
     predictForm.value.inputValues[f] = ''
@@ -678,7 +699,6 @@ async function handlePredict() {
   padding: 20px 0;
 }
 
-/* ===== 推荐列表 ===== */
 .recommendations {
   margin-bottom: 20px;
 }
@@ -729,6 +749,11 @@ async function handlePredict() {
   color: #909399;
   margin-top: 4px;
 }
+.recommend-card .rec-source {
+  font-size: 11px;
+  color: #909399;
+  margin-top: 2px;
+}
 .recommend-card .rec-reason {
   font-size: 12px;
   color: #67c23a;
@@ -755,7 +780,6 @@ async function handlePredict() {
   margin-left: 12px;
 }
 
-/* ===== 弹窗 ===== */
 .dialog-body {
   max-height: 70vh;
   overflow-y: auto;
@@ -806,7 +830,6 @@ async function handlePredict() {
   gap: 12px;
 }
 
-/* ===== 弹窗内的训练进度 ===== */
 .train-progress-dialog {
   margin-top: 8px;
 }
@@ -854,7 +877,6 @@ async function handlePredict() {
   color: #f44747;
 }
 
-/* ===== 预测 ===== */
 .model-info {
   margin: 16px 0;
 }

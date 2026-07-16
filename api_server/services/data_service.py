@@ -1,6 +1,6 @@
 """数据服务 - 不依赖 web/"""
 import pandas as pd
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from pathlib import Path
 
 from autostat.loader import DataLoader
@@ -32,37 +32,100 @@ class DataService:
         analyzer._infer_variable_types()
         return analyzer.variable_types
 
-    # ==================== ✅ 新增：保存 Parquet ====================
+    # ==================== ✅ 统一 Parquet 保存/加载 ====================
+
     @staticmethod
-    def save_to_parquet(df: pd.DataFrame, path: Path) -> bool:
+    def save_to_parquet(df: pd.DataFrame, session_service, session_id: str, table_name: str) -> bool:
         """
-        将 DataFrame 保存为 Parquet 格式
+        将 DataFrame 保存为 Parquet 格式（按表名）
 
         参数:
         - df: 要保存的 DataFrame
-        - path: 保存路径
+        - session_service: SessionService 实例
+        - session_id: 会话ID
+        - table_name: 表名
 
         返回:
         - bool: 是否保存成功
         """
         try:
+            path = session_service.get_table_parquet_path(session_id, table_name)
             path.parent.mkdir(parents=True, exist_ok=True)
             df.to_parquet(path, index=False, compression='zstd')
-            print(f"✅ Parquet 缓存已保存: {path}")
+            print(f"✅ 表 {table_name} 已保存到 Parquet: {path}")
             return True
         except Exception as e:
-            print(f"❌ Parquet 保存失败: {e}")
+            print(f"❌ Parquet 保存失败 ({table_name}): {e}")
             return False
 
     @staticmethod
-    def load_parquet(path: Path) -> pd.DataFrame:
+    def load_parquet(session_service, session_id: str, table_name: str) -> Optional[pd.DataFrame]:
         """
-        从 Parquet 文件加载数据
+        从 Parquet 文件加载指定表
 
         参数:
-        - path: Parquet 文件路径
+        - session_service: SessionService 实例
+        - session_id: 会话ID
+        - table_name: 表名
 
         返回:
-        - pd.DataFrame
+        - pd.DataFrame 或 None
         """
-        return pd.read_parquet(path)
+        path = session_service.get_table_parquet_path(session_id, table_name)
+        if path.exists():
+            try:
+                return pd.read_parquet(path)
+            except Exception as e:
+                print(f"❌ 加载 Parquet 失败 ({table_name}): {e}")
+                return None
+        return None
+
+    @staticmethod
+    def load_all_tables_from_parquet(session_service, session_id: str) -> Dict[str, pd.DataFrame]:
+        """
+        加载会话的所有表（从 Parquet）
+
+        返回:
+        - {表名: DataFrame}
+        """
+        table_names = session_service.get_all_table_names(session_id)
+        tables = {}
+        for name in table_names:
+            df = DataService.load_parquet(session_service, session_id, name)
+            if df is not None and not df.empty:
+                tables[name] = df
+        return tables
+
+    # ==================== 多表支持（旧版兼容） ====================
+
+    @staticmethod
+    def save_tables_to_parquet(tables: Dict[str, pd.DataFrame], session_service, session_id: str) -> Dict[str, bool]:
+        """
+        保存多个表到 Parquet（每个表独立保存）
+
+        参数:
+        - tables: {表名: DataFrame}
+        - session_service: SessionService 实例
+        - session_id: 会话ID
+
+        返回:
+        - {表名: 是否成功}
+        """
+        results = {}
+        for name, df in tables.items():
+            if df is None or df.empty:
+                results[name] = False
+                continue
+            results[name] = DataService.save_to_parquet(df, session_service, session_id, name)
+            if results[name]:
+                session_service.save_table_info(session_id, name, {
+                    "rows": len(df),
+                    "columns": len(df.columns),
+                    "saved_at": pd.Timestamp.now().isoformat()
+                })
+        return results
+
+    @staticmethod
+    def load_table_from_parquet(session_service, session_id: str, table_name: str) -> Optional[pd.DataFrame]:
+        """从 Parquet 加载单个表"""
+        return DataService.load_parquet(session_service, session_id, table_name)

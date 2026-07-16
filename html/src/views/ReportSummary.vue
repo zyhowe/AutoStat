@@ -17,14 +17,46 @@
     </div>
 
     <div v-else-if="reportData" class="summary-content">
-      <!-- ==================== 关键指标卡片 ==================== -->
+      <!-- ===== 表选择器 ===== -->
+      <TableSelector
+        v-model="currentTable"
+        :table-names="tableNames"
+        :is-multi-table="isMultiTable"
+        @change="onTableChange"
+      />
+
+      <!-- ===== 表间关系 ===== -->
+      <div v-if="showRelations && relationships.length > 0" class="relations-card">
+        <el-card shadow="hover">
+          <h4>🔗 表间关系</h4>
+          <el-table :data="relationships" border size="small">
+            <el-table-column prop="from_table" label="源表" width="150" />
+            <el-table-column prop="from_col" label="源列" width="120" />
+            <el-table-column label="→" width="40" align="center" />
+            <el-table-column prop="to_table" label="目标表" width="150" />
+            <el-table-column prop="to_col" label="目标列" width="120" />
+            <el-table-column prop="relation_type" label="关系类型" width="120" align="center">
+              <template #default="{ row }">
+                <el-tag size="small">{{ getRelationLabel(row.relation_type) }}</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column prop="confidence" label="置信度" width="100" align="center">
+              <template #default="{ row }">
+                {{ (row.confidence * 100).toFixed(0) }}%
+              </template>
+            </el-table-column>
+          </el-table>
+        </el-card>
+      </div>
+
+      <!-- ===== 关键指标卡片 ===== -->
       <div class="stats-row">
         <div class="stat-card">
-          <div class="stat-value">{{ reportData.data_shape?.rows || 0 }}</div>
+          <div class="stat-value">{{ currentData.data_shape?.rows || 0 }}</div>
           <div class="stat-label">总行数</div>
         </div>
         <div class="stat-card">
-          <div class="stat-value">{{ reportData.data_shape?.columns || 0 }}</div>
+          <div class="stat-value">{{ currentData.data_shape?.columns || 0 }}</div>
           <div class="stat-label">总列数</div>
         </div>
         <div class="stat-card" :class="outlierClass">
@@ -49,9 +81,8 @@
         </div>
       </div>
 
-      <!-- ==================== 图表区域 ==================== -->
+      <!-- ===== 图表区域 ===== -->
       <div class="charts-row">
-        <!-- 雷达图 -->
         <div class="chart-card">
           <div class="chart-header">
             <span class="chart-title">📊 质量维度得分</span>
@@ -60,7 +91,6 @@
           <div v-else class="chart-empty">暂无质量维度数据</div>
         </div>
 
-        <!-- 仪表盘 -->
         <div class="chart-card gauge-card">
           <div class="chart-header">
             <span class="chart-title">🎯 综合评分</span>
@@ -75,7 +105,7 @@
         </div>
       </div>
 
-      <!-- ==================== 核心发现 ==================== -->
+      <!-- ===== 核心发现 ===== -->
       <div class="section">
         <h3>📊 核心发现</h3>
         <div v-if="!hasDiscoveries" class="empty-tip">
@@ -83,7 +113,6 @@
         </div>
 
         <div v-else class="discovery-groups">
-          <!-- 数据概况 -->
           <div class="discovery-group field-group">
             <div class="group-header">
               <span class="group-icon">📋</span>
@@ -91,8 +120,12 @@
             </div>
             <div class="group-content">
               <div class="field-item">
+                <span class="field-label">当前表：</span>
+                <span class="field-value">{{ currentTableLabel }}</span>
+              </div>
+              <div class="field-item">
                 <span class="field-label">总字段数：</span>
-                <span class="field-value">{{ reportData.data_shape?.columns || 0 }}</span>
+                <span class="field-value">{{ currentData.data_shape?.columns || 0 }}</span>
               </div>
               <div class="field-item">
                 <span class="field-label">连续变量：</span>
@@ -108,12 +141,11 @@
               </div>
               <div class="field-item">
                 <span class="field-label">样本量：</span>
-                <span class="field-value">{{ reportData.data_shape?.rows || 0 }}</span>
+                <span class="field-value">{{ currentData.data_shape?.rows || 0 }}</span>
               </div>
             </div>
           </div>
 
-          <!-- 质量发现 -->
           <div v-if="qualityDiscoveries.length > 0" class="discovery-group quality-group">
             <div class="group-header">
               <span class="group-icon">🔍</span>
@@ -126,7 +158,6 @@
             </ul>
           </div>
 
-          <!-- 规律发现 -->
           <div v-if="patternDiscoveries.length > 0" class="discovery-group pattern-group">
             <div class="group-header">
               <span class="group-icon">📈</span>
@@ -139,7 +170,6 @@
             </ul>
           </div>
 
-          <!-- 建模建议 -->
           <div v-if="predictionDiscoveries.length > 0" class="discovery-group prediction-group">
             <div class="group-header">
               <span class="group-icon">🤖</span>
@@ -169,25 +199,47 @@ import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { useSessionStore } from '../stores/session'
 import { reportApi } from '../api/report'
+import TableSelector from '../components/TableSelector.vue'
 
 const router = useRouter()
 const sessionStore = useSessionStore()
 
 const loading = ref(false)
 const reportData = ref(null)
-const qualityData = ref(null)
-
 const gaugeKey = ref(0)
 
-watch(() => qualityData.value?.overall_score, (newVal) => {
-  if (newVal !== undefined && newVal !== null) {
-    nextTick(() => { gaugeKey.value += 1 })
-  }
+// ===== 表选择器状态 =====
+const currentTable = ref('merged')
+const tableNames = ref([])
+const isMultiTable = ref(false)
+const relationships = ref([])
+const showRelations = ref(false)
+
+// ===== 当前数据（从 all_tables 取） =====
+const currentData = computed(() => {
+  if (!reportData.value?.all_tables) return {}
+  return reportData.value.all_tables[currentTable.value] || reportData.value.all_tables['merged'] || {}
 })
 
-// ==================== 关键指标卡片 ====================
+const currentTableLabel = computed(() => {
+  if (currentTable.value === 'merged') {
+    return isMultiTable.value ? '合并表' : '数据表'
+  }
+  return currentTable.value
+})
+
+// ===== 当前质量数据 =====
+const currentQualityReport = computed(() => {
+  return currentData.value?.quality_report || {}
+})
+
+// ===== 计算属性（基于 currentData） =====
+const dataShape = computed(() => currentData.value?.data_shape || { rows: 0, columns: 0 })
+const variableTypes = computed(() => currentData.value?.variable_types || {})
+const correlations = computed(() => currentData.value?.correlations || {})
+
 const highCorrCount = computed(() => {
-  return reportData.value?.correlations?.high_correlations?.length || 0
+  return correlations.value?.high_correlations?.length || 0
 })
 
 const corrCountClass = computed(() => {
@@ -198,7 +250,7 @@ const corrCountClass = computed(() => {
 })
 
 const modelRecommendCount = computed(() => {
-  return reportData.value?.model_recommendations?.length || 0
+  return currentData.value?.model_recommendations?.length || 0
 })
 
 const modelCountClass = computed(() => {
@@ -209,7 +261,7 @@ const modelCountClass = computed(() => {
 })
 
 const outlierCount = computed(() => {
-  const outliers = qualityData.value?.outliers || {}
+  const outliers = currentQualityReport.value?.outliers || {}
   return Object.keys(outliers).length
 })
 
@@ -221,7 +273,7 @@ const outlierClass = computed(() => {
 })
 
 const highMissingCount = computed(() => {
-  const missing = reportData.value?.quality_report?.missing || []
+  const missing = currentQualityReport.value?.missing || []
   return missing.filter(m => parseFloat(m.percent) > 20).length
 })
 
@@ -233,7 +285,7 @@ const highMissingClass = computed(() => {
 })
 
 const auditRulesTotal = computed(() => {
-  const rules = reportData.value?.quality_report?.audit_rules || {}
+  const rules = currentQualityReport.value?.audit_rules || {}
   return (rules.arithmetic_rules?.length || 0) +
          (rules.functional_dependencies?.length || 0) +
          (rules.temporal_rules?.length || 0)
@@ -246,34 +298,32 @@ const ruleClass = computed(() => {
   return 'status-bad'
 })
 
-// ==================== 数据概况统计 ====================
-const variableTypes = computed(() => {
-  return reportData.value?.variable_types || {}
-})
-
 const numericCount = computed(() => {
-  return Object.values(variableTypes.value).filter(v => v.type === 'continuous').length
+  const types = variableTypes.value
+  return Object.values(types).filter(v => v.type === 'continuous' || v === 'continuous').length
 })
 
 const categoricalCount = computed(() => {
-  return Object.values(variableTypes.value).filter(v =>
-    ['categorical', 'categorical_numeric', 'ordinal'].includes(v.type)
+  const types = variableTypes.value
+  return Object.values(types).filter(v =>
+    ['categorical', 'categorical_numeric', 'ordinal'].includes(v.type || v)
   ).length
 })
 
 const datetimeCount = computed(() => {
-  return Object.values(variableTypes.value).filter(v => v.type === 'datetime').length
+  const types = variableTypes.value
+  return Object.values(types).filter(v => v.type === 'datetime' || v === 'datetime').length
 })
 
-// ==================== 雷达图 ====================
+// ===== 质量数据（从 currentQualityReport 取） =====
 const hasRadarData = computed(() => {
-  const dims = qualityData.value?.dimensions || {}
+  const dims = currentQualityReport.value?.dimensions || {}
   const filteredKeys = Object.keys(dims).filter(k => k !== 'timeliness')
   return filteredKeys.length > 0
 })
 
 const radarOption = computed(() => {
-  const dims = qualityData.value?.dimensions || {}
+  const dims = currentQualityReport.value?.dimensions || {}
   const filteredDims = {}
   Object.keys(dims).forEach(k => {
     if (k !== 'timeliness') {
@@ -312,14 +362,13 @@ const radarOption = computed(() => {
   }
 })
 
-// ==================== 仪表盘 ====================
 const hasGaugeData = computed(() => {
-  const score = qualityData.value?.overall_score
+  const score = currentQualityReport.value?.overall_score
   return score !== undefined && score !== null && !isNaN(Number(score))
 })
 
 const gaugeOption = computed(() => {
-  const rawScore = qualityData.value?.overall_score
+  const rawScore = currentQualityReport.value?.overall_score
   const score = Number(rawScore) || 0
   const color = score >= 80 ? '#67C23A' : score >= 60 ? '#E6A23C' : '#F56C6C'
   return {
@@ -336,7 +385,7 @@ const gaugeOption = computed(() => {
         show: true,
         width: 14,
         roundCap: true,
-        itemStyle: { color: color }
+        itemStyle: { color }
       },
       axisLine: {
         lineStyle: {
@@ -370,16 +419,15 @@ const gaugeOption = computed(() => {
   }
 })
 
-// ==================== 核心发现 ====================
+// ===== 核心发现 =====
 const qualityDiscoveries = computed(() => {
   const result = []
-  const quality = reportData.value?.quality_report || {}
-  const missing = quality.missing || []
-  const outliers = quality.outliers || {}
-  const duplicates = quality.duplicates || {}
+  const quality = currentQualityReport.value
+  const missing = quality?.missing || []
+  const outliers = quality?.outliers || {}
 
-  if (qualityData.value?.overall_score !== undefined && qualityData.value?.overall_score !== null) {
-    const score = qualityData.value.overall_score
+  if (quality?.overall_score !== undefined && quality?.overall_score !== null) {
+    const score = quality.overall_score
     const grade = score >= 80 ? '良好' : score >= 70 ? '一般' : '需关注'
     result.push(`综合质量评分 ${score} 分（${grade}）`)
   }
@@ -410,12 +458,12 @@ const qualityDiscoveries = computed(() => {
     result.push(text)
   }
 
-  const dupCount = parseInt(duplicates.count) || 0
+  const dupCount = parseInt(quality?.duplicates?.count) || 0
   if (dupCount > 0) {
     result.push(`发现${dupCount}条重复记录，建议去重处理`)
   }
 
-  const rules = reportData.value?.quality_report?.audit_rules || {}
+  const rules = quality?.audit_rules || {}
   const arithmeticCount = rules.arithmetic_rules?.length || 0
   const temporalCount = rules.temporal_rules?.length || 0
   const functionalCount = rules.functional_dependencies?.length || 0
@@ -433,11 +481,11 @@ const qualityDiscoveries = computed(() => {
 
 const patternDiscoveries = computed(() => {
   const result = []
-  const correlations = reportData.value?.correlations || {}
-  const tsDiag = reportData.value?.time_series_diagnostics || {}
-  const distribution = reportData.value?.distribution_insights || {}
+  const corrs = correlations.value
+  const tsDiag = currentData.value?.time_series_diagnostics || {}
+  const distribution = currentData.value?.distribution_insights || {}
 
-  const highCorrs = correlations.high_correlations || []
+  const highCorrs = corrs?.high_correlations || []
   if (highCorrs.length > 0) {
     const pairs = highCorrs.slice(0, 3).map(c => `${c.var1} ↔ ${c.var2} (r=${c.value})`)
     let text = `发现${highCorrs.length}对强相关关系`
@@ -498,9 +546,8 @@ const patternDiscoveries = computed(() => {
 
 const predictionDiscoveries = computed(() => {
   const result = []
-  const variableTypesData = reportData.value?.variable_types || {}
-  const dataShape = reportData.value?.data_shape || {}
-  const modelRecs = reportData.value?.model_recommendations || []
+  const modelRecs = currentData.value?.model_recommendations || []
+  const rows = dataShape.value.rows || 0
 
   const targets = []
   for (const rec of modelRecs) {
@@ -521,15 +568,18 @@ const predictionDiscoveries = computed(() => {
     result.push(text)
   }
 
-  const numericVars = Object.keys(variableTypesData).filter(k => variableTypesData[k]?.type === 'continuous')
-  const rows = dataShape.rows || 0
+  const numericVars = Object.keys(variableTypes.value).filter(k => {
+    const v = variableTypes.value[k]
+    return v.type === 'continuous' || v === 'continuous'
+  })
   if (numericVars.length >= 3 && rows >= 100) {
     result.push(`${numericVars.length}个数值指标，${rows}个样本，可识别分群`)
   }
 
-  const categoricalVars = Object.keys(variableTypesData).filter(k =>
-    ['categorical', 'categorical_numeric', 'ordinal'].includes(variableTypesData[k]?.type)
-  )
+  const categoricalVars = Object.keys(variableTypes.value).filter(k => {
+    const v = variableTypes.value[k]
+    return ['categorical', 'categorical_numeric', 'ordinal'].includes(v.type || v)
+  })
   if (categoricalVars.length >= 3) {
     result.push(`${categoricalVars.length}个分类变量，可发现「如果A则B」的关联模式`)
   }
@@ -545,7 +595,21 @@ const hasDiscoveries = computed(() => {
          categoricalCount.value > 0
 })
 
-// ==================== 加载数据 ====================
+function getRelationLabel(type) {
+  const map = {
+    'one_to_one': '一对一',
+    'one_to_many': '一对多',
+    'many_to_one': '多对一',
+    'many_to_many': '多对多'
+  }
+  return map[type] || type
+}
+
+function onTableChange() {
+  gaugeKey.value += 1
+}
+
+// ===== 加载数据 =====
 async function loadData() {
   let sessionId = sessionStore.currentSessionId
   if (!sessionId) {
@@ -562,13 +626,28 @@ async function loadData() {
 
   loading.value = true
   try {
-    const [reportResult, qualityResult] = await Promise.all([
-      reportApi.get(sessionId),
-      reportApi.getQuality(sessionId)
-    ])
-
+    const reportResult = await reportApi.get(sessionId)
     reportData.value = reportResult
-    qualityData.value = qualityResult
+
+    // 初始化表选择器
+    const allTables = reportResult?.all_tables || {}
+    const tableKeys = Object.keys(allTables)
+    tableNames.value = tableKeys.filter(k => k !== 'merged')
+    isMultiTable.value = tableNames.value.length > 1
+
+    if (!currentTable.value || !allTables[currentTable.value]) {
+      currentTable.value = 'merged'
+    }
+
+    // 多表关系
+    const multiInfo = reportResult?.multi_table_info
+    if (multiInfo && multiInfo.relationships) {
+      relationships.value = multiInfo.relationships || []
+    }
+
+    nextTick(() => {
+      gaugeKey.value += 1
+    })
 
   } catch (err) {
     console.error('加载报告失败:', err)
@@ -578,7 +657,7 @@ async function loadData() {
   }
 }
 
-// ✅ 新增：下载 HTML（前端动态生成）
+// ===== 导出 =====
 async function handleDownloadHtml() {
   const sessionId = sessionStore.currentSessionId || localStorage.getItem('lastSessionId')
   if (!sessionId) {
@@ -587,14 +666,21 @@ async function handleDownloadHtml() {
   }
 
   try {
-    await reportApi.downloadHtml(sessionId)
-    ElMessage.success('HTML 报告导出成功')
+    const blob = await reportApi.export(sessionId, 'html')
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `report_${sessionId}.html`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+    ElMessage.success('HTML 导出成功')
   } catch (err) {
     ElMessage.error('导出失败: ' + err.message)
   }
 }
 
-// ==================== 导出 ====================
 async function handleExport(format) {
   const sessionId = sessionStore.currentSessionId || localStorage.getItem('lastSessionId')
   if (!sessionId) {
@@ -607,7 +693,7 @@ async function handleExport(format) {
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `report_${sessionId}.${format === 'html' ? 'html' : 'json'}`
+    a.download = `report_${sessionId}.${format === 'html' ? 'html' : format === 'json' ? 'json' : 'xlsx'}`
     document.body.appendChild(a)
     a.click()
     document.body.removeChild(a)
@@ -621,6 +707,11 @@ async function handleExport(format) {
 function goTo(routeName) {
   router.push(`/${routeName}`)
 }
+
+// ===== 监听表切换 =====
+watch(currentTable, () => {
+  gaugeKey.value += 1
+})
 
 onMounted(() => {
   loadData()
@@ -658,6 +749,13 @@ onMounted(() => {
   gap: 8px;
 }
 
+.relations-card {
+  margin-bottom: 20px;
+}
+.relations-card h4 {
+  margin-bottom: 12px;
+}
+
 .stats-row {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
@@ -686,9 +784,6 @@ onMounted(() => {
   margin-top: 2px;
 }
 
-.grade-good .stat-value { color: #67c23a; }
-.grade-warn .stat-value { color: #e6a23c; }
-.grade-bad .stat-value { color: #f56c6c; }
 .status-ok .stat-value { color: #67c23a; }
 .status-warn .stat-value { color: #e6a23c; }
 .status-bad .stat-value { color: #f56c6c; }
@@ -709,10 +804,6 @@ onMounted(() => {
 }
 .chart-card:hover {
   box-shadow: 0 2px 12px rgba(0,0,0,0.06);
-}
-.chart-card.full-width {
-  grid-column: 1 / -1;
-  margin-bottom: 16px;
 }
 .chart-header {
   display: flex;
@@ -771,7 +862,6 @@ onMounted(() => {
   flex-direction: column;
   gap: 16px;
 }
-
 .discovery-group {
   background: #f8f9fa;
   border-radius: 12px;
@@ -797,7 +887,6 @@ onMounted(() => {
   font-size: 15px;
   color: #2c3e50;
 }
-
 .group-content {
   display: flex;
   flex-wrap: wrap;
@@ -815,7 +904,6 @@ onMounted(() => {
   font-weight: 600;
   color: #2c3e50;
 }
-
 .discovery-list {
   margin: 0;
   padding-left: 20px;
@@ -835,24 +923,5 @@ onMounted(() => {
   font-weight: bold;
   position: absolute;
   left: -12px;
-}
-
-@media (max-width: 768px) {
-  .report-header {
-    flex-direction: column;
-    align-items: flex-start;
-  }
-  .header-actions {
-    width: 100%;
-  }
-  .header-actions .el-button {
-    flex: 1;
-  }
-  .group-content {
-    gap: 6px 12px;
-  }
-  .field-item {
-    font-size: 13px;
-  }
 }
 </style>

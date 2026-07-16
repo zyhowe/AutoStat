@@ -1,4 +1,3 @@
-// src/views/DataValidation.vue
 <template>
   <div class="data-validation">
     <h2>📋 数据核验</h2>
@@ -9,6 +8,14 @@
     </div>
 
     <div v-else-if="reportData" class="validation-content">
+      <!-- ===== 表选择器 ===== -->
+      <TableSelector
+        v-model="currentTable"
+        :table-names="tableNames"
+        :is-multi-table="isMultiTable"
+        @change="onTableChange"
+      />
+
       <!-- ===== 概览柱状图 ===== -->
       <div class="chart-card full-width">
         <div class="chart-header">
@@ -280,6 +287,7 @@ import { useSessionStore } from '../stores/session'
 import { useFieldDetailStore } from '../stores/fieldDetail'
 import { reportApi } from '../api/report'
 import { openDataPreview } from '../components/DataPreviewDialog'
+import TableSelector from '../components/TableSelector.vue'
 
 const router = useRouter()
 const sessionStore = useSessionStore()
@@ -288,6 +296,11 @@ const fieldDetailStore = useFieldDetailStore()
 const loading = ref(false)
 const reportData = ref(null)
 const activeTab = ref('rules')
+
+// ===== 表选择器状态 =====
+const currentTable = ref('merged')
+const tableNames = ref([])
+const isMultiTable = ref(false)
 
 // ===== 强制刷新 key =====
 const overviewKey = ref(0)
@@ -305,6 +318,20 @@ const typeDisplay = {
   text: '文本'
 }
 
+// ===== 当前数据 =====
+const currentData = computed(() => {
+  if (!reportData.value?.all_tables) return {}
+  return reportData.value.all_tables[currentTable.value] || reportData.value.all_tables['merged'] || {}
+})
+
+const currentQuality = computed(() => {
+  return currentData.value?.quality_report || {}
+})
+
+const currentSummaries = computed(() => {
+  return currentData.value?.variable_summaries || {}
+})
+
 // ===== 监听 tab 切换 =====
 watch(activeTab, (newTab) => {
   if (newTab === 'outliers') {
@@ -316,87 +343,26 @@ watch(activeTab, (newTab) => {
   }
 })
 
+function onTableChange() {
+  loadData()
+}
+
 // ==================== 计算属性 ====================
 const auditRules = computed(() => {
-  return reportData.value?.quality_report?.audit_rules || {}
+  return currentQuality.value?.audit_rules || {}
 })
 
-// ✅ 前端重新计算违反数，不再依赖后端
 const arithmeticRules = computed(() => {
-  const rules = reportData.value?.quality_report?.audit_rules?.arithmetic_rules || []
-  const data = reportData.value?.data || []
-  if (!data.length) return rules
-
-  return rules.map(rule => {
-    const expr = parseRuleToExpr(rule)
-    if (!expr) {
-      return { ...rule, violation_count: 0 }
-    }
-    let count = 0
-    for (const row of data) {
-      try {
-        const keys = Object.keys(row)
-        const fn = new Function(...keys, `return ${expr}`)
-        const result = fn(...keys.map(k => row[k]))
-        if (result) count++
-      } catch (e) {
-        // 忽略该行计算错误
-      }
-    }
-    return { ...rule, violation_count: count }
-  })
+  const rules = currentQuality.value?.audit_rules?.arithmetic_rules || []
+  return rules
 })
 
-// ✅ 前端重新计算违反数，不再依赖后端
 const functionalRules = computed(() => {
-  const rules = reportData.value?.quality_report?.audit_rules?.functional_dependencies || []
-  const data = reportData.value?.data || []
-  if (!data.length) return rules
-
-  return rules.map(rule => {
-    const expr = parseRuleToExpr(rule)
-    if (!expr) {
-      return { ...rule, violation_count: 0 }
-    }
-    let count = 0
-    for (const row of data) {
-      try {
-        const keys = Object.keys(row)
-        const fn = new Function(...keys, `return ${expr}`)
-        const result = fn(...keys.map(k => row[k]))
-        if (result) count++
-      } catch (e) {
-        // ignore
-      }
-    }
-    return { ...rule, violation_count: count }
-  })
+  return currentQuality.value?.audit_rules?.functional_dependencies || []
 })
 
-// ✅ 前端重新计算违反数，不再依赖后端
 const temporalRules = computed(() => {
-  const rules = reportData.value?.quality_report?.audit_rules?.temporal_rules || []
-  const data = reportData.value?.data || []
-  if (!data.length) return rules
-
-  return rules.map(rule => {
-    const expr = parseRuleToExpr(rule)
-    if (!expr) {
-      return { ...rule, violation_count: 0 }
-    }
-    let count = 0
-    for (const row of data) {
-      try {
-        const keys = Object.keys(row)
-        const fn = new Function(...keys, `return ${expr}`)
-        const result = fn(...keys.map(k => row[k]))
-        if (result) count++
-      } catch (e) {
-        // ignore
-      }
-    }
-    return { ...rule, violation_count: count }
-  })
+  return currentQuality.value?.audit_rules?.temporal_rules || []
 })
 
 const auditRulesTotal = computed(() => {
@@ -404,7 +370,7 @@ const auditRulesTotal = computed(() => {
 })
 
 const outlierList = computed(() => {
-  const outliers = reportData.value?.quality_report?.outliers || {}
+  const outliers = currentQuality.value?.outliers || {}
   return Object.entries(outliers).map(([field, info]) => ({
     field,
     count: info.count || 0,
@@ -415,19 +381,19 @@ const outlierList = computed(() => {
 })
 
 const missingList = computed(() => {
-  return reportData.value?.quality_report?.missing || []
+  return currentQuality.value?.missing || []
 })
 
 const duplicateCount = computed(() => {
-  return reportData.value?.quality_report?.duplicates?.count || 0
+  return currentQuality.value?.duplicates?.count || 0
 })
 
 const duplicateRate = computed(() => {
-  return reportData.value?.quality_report?.duplicates?.percent || 0
+  return currentQuality.value?.duplicates?.percent || 0
 })
 
 const cleaningSuggestions = computed(() => {
-  return reportData.value?.cleaning_suggestions || []
+  return currentData.value?.cleaning_suggestions || []
 })
 
 // ==================== 概览柱状图 ====================
@@ -575,17 +541,20 @@ const missingBarOption = computed(() => {
 
 // ===== 字段详情 =====
 function buildFieldData(fieldName) {
-  const summary = reportData.value?.variable_summaries?.[fieldName] || {}
-  const varType = reportData.value?.variable_types?.[fieldName]?.type || 'unknown'
-  const varTypeDesc = reportData.value?.variable_types?.[fieldName]?.type_desc || typeDisplay[varType] || varType
+  const summary = currentSummaries.value?.[fieldName] || {}
+  const variableTypes = currentData.value?.variable_types || {}
+  const qualityReport = currentQuality.value
 
-  const tsDiag = reportData.value?.time_series_diagnostics?.[fieldName] || null
-  const outlier = reportData.value?.quality_report?.outliers?.[fieldName] || null
-  const missing = reportData.value?.quality_report?.missing?.find(m => m.column === fieldName) || null
-  const dupInfo = reportData.value?.quality_report?.duplicates || null
+  const varType = variableTypes?.[fieldName]?.type || 'unknown'
+  const varTypeDesc = variableTypes?.[fieldName]?.type_desc || typeDisplay[varType] || varType
+
+  const tsDiag = currentData.value?.time_series_diagnostics?.[fieldName] || null
+  const outlier = qualityReport?.outliers?.[fieldName] || null
+  const missing = qualityReport?.missing?.find(m => m.column === fieldName) || null
+  const dupInfo = qualityReport?.duplicates || null
 
   const correlations = []
-  const matrix = reportData.value?.correlations?.matrix || {}
+  const matrix = currentData.value?.correlations?.matrix || {}
   if (matrix[fieldName]) {
     const entries = Object.entries(matrix[fieldName])
     for (const [varName, value] of entries) {
@@ -597,7 +566,7 @@ function buildFieldData(fieldName) {
   }
 
   const rules = []
-  const auditRules = reportData.value?.quality_report?.audit_rules || {}
+  const auditRules = qualityReport?.audit_rules || {}
   const allRules = [
     ...(auditRules.arithmetic_rules || []),
     ...(auditRules.functional_dependencies || []),
@@ -615,7 +584,7 @@ function buildFieldData(fieldName) {
   }
 
   const models = []
-  const modelRecs = reportData.value?.model_recommendations || []
+  const modelRecs = currentData.value?.model_recommendations || []
   for (const rec of modelRecs) {
     let role = ''
     if (rec.target_column === fieldName) {
@@ -675,9 +644,8 @@ function openFieldDetail(fieldName) {
 
 // ==================== 辅助函数 ====================
 
-// 获取字段非空数
 function getFieldNonMissingCount(fieldName) {
-  const summary = reportData.value?.variable_summaries?.[fieldName]
+  const summary = currentSummaries.value?.[fieldName]
   if (!summary) return 0
   return summary.count || 0
 }
@@ -728,67 +696,6 @@ function showFieldNonMissing(fieldName) {
   })
 }
 
-function parseRuleToExpr(rule) {
-  const ruleStr = rule.rule || ''
-  const fields = rule.fields || []
-
-  const cleanRule = ruleStr.replace(/\s+/g, ' ').trim()
-
-  if (cleanRule.includes(' = ') && !cleanRule.includes(' + ') && fields.length >= 2) {
-    const parts = cleanRule.split(' = ')
-    if (parts.length === 2) {
-      const left = parts[0].trim()
-      const right = parts[1].trim()
-      if (fields.includes(left) && fields.includes(right)) {
-        return `abs(${left} - ${right}) > 0.000001`
-      }
-    }
-  }
-
-  if (cleanRule.includes(' → ')) {
-    const parts = cleanRule.split(' → ')
-    if (parts.length === 2) {
-      const left = parts[0].trim()
-      const right = parts[1].trim()
-      if (fields.includes(left) && fields.includes(right)) {
-        return `${left}.notna() & ${right}.isna()`
-      }
-    }
-  }
-
-  if (cleanRule.includes(' = ') && cleanRule.includes(' + ')) {
-    const parts = cleanRule.split(' = ')
-    if (parts.length === 2) {
-      let leftExpr = parts[0].trim()
-      let rightExpr = parts[1].trim()
-      const leftFields = leftExpr.split('+').map(s => s.trim())
-      const rightFields = rightExpr.split('+').map(s => s.trim())
-      const allLeftAreFields = leftFields.every(f => fields.includes(f))
-      const allRightAreFields = rightFields.every(f => fields.includes(f))
-      if (allLeftAreFields && allRightAreFields) {
-        return `abs((${leftExpr}) - (${rightExpr})) > 0.000001`
-      }
-    }
-  }
-
-  if (cleanRule.includes(' + ') && cleanRule.includes(' = ')) {
-    const parts = cleanRule.split(' = ')
-    if (parts.length === 2) {
-      let leftExpr = parts[0].trim()
-      let rightExpr = parts[1].trim()
-      const leftFields = leftExpr.split('+').map(s => s.trim())
-      const rightFields = rightExpr.split('+').map(s => s.trim())
-      const allLeftAreFields = leftFields.every(f => fields.includes(f))
-      const allRightAreFields = rightFields.every(f => fields.includes(f))
-      if (allLeftAreFields && allRightAreFields) {
-        return `abs((${leftExpr}) - (${rightExpr})) > 0.000001`
-      }
-    }
-  }
-
-  return null
-}
-
 function showRuleViolations(rule) {
   const sessionId = sessionStore.currentSessionId || localStorage.getItem('lastSessionId')
   if (!sessionId) {
@@ -802,27 +709,16 @@ function showRuleViolations(rule) {
     return
   }
 
-  const expr = parseRuleToExpr(rule)
   const violationCount = rule.violation_count || 0
-
-  let filters = []
-  let title = ''
-
-  if (expr) {
-    filters = [{ field: 'expr', condition: 'expr', value: expr }]
-    title = `违反规则「${rule.rule}」的记录（共 ${fields.length} 个字段，违反 ${violationCount} 条）`
-  } else {
-    filters = fields.map(f => ({
-      field: f,
-      condition: 'is_not_null',
-      value: true
-    }))
-    title = `规则「${rule.rule}」涉及字段数据（共 ${fields.length} 个字段，均非空）`
-  }
+  const filters = fields.map(f => ({
+    field: f,
+    condition: 'is_not_null',
+    value: true
+  }))
 
   openDataPreview({
     sessionId: sessionId,
-    title: title,
+    title: `规则「${rule.rule}」涉及字段数据（共 ${fields.length} 个字段，违反 ${violationCount} 条）`,
     fields: fields,
     filters: filters
   })
@@ -878,6 +774,17 @@ async function loadData() {
   try {
     const result = await reportApi.get(sessionId)
     reportData.value = result
+
+    // 初始化表选择器
+    const allTables = result?.all_tables || {}
+    const tableKeys = Object.keys(allTables)
+    tableNames.value = tableKeys.filter(k => k !== 'merged')
+    isMultiTable.value = tableNames.value.length > 1
+
+    if (!currentTable.value || !allTables[currentTable.value]) {
+      currentTable.value = 'merged'
+    }
+
     console.log('✅ 数据核验加载完成')
   } catch (err) {
     ElMessage.error('加载数据失败: ' + err.message)
@@ -920,6 +827,7 @@ onMounted(() => {
 .empty-tip.success {
   color: #67c23a;
 }
+
 .rule-section {
   margin-bottom: 24px;
 }

@@ -9,6 +9,11 @@ from api_server.services.session_service import SessionService
 from api_server.services.database_service import DatabaseService
 from api_server.schemas.data import DataPreviewResponse, DataUploadResponse
 from api_server.routers.session import get_client_ip
+from api_server.schemas.data import (
+    DatabaseLoadRequest, DatabaseLoadResponse,
+    TableInfo, CandidateRelation,
+    RelationConfirmRequest, RelationConfirmResponse
+)
 
 router = APIRouter()
 
@@ -24,6 +29,19 @@ class DatabaseLoadRequest(BaseModel):
 class DatabaseLoadResponse(BaseModel):
     tables: Dict[str, Any]
     session_id: Optional[str] = None
+    table_list: List[TableInfo] = []
+    candidate_relations: List[CandidateRelation] = []
+    load_summary: Dict[str, Any] = {}
+
+
+class RelationConfirmRequest(BaseModel):
+    session_id: str
+    relationships: List[Dict]
+
+
+class RelationConfirmResponse(BaseModel):
+    success: bool
+    message: str
 
 
 # ==================== 数据预览/筛选接口 ====================
@@ -242,9 +260,9 @@ async def load_database(
     request_body: DatabaseLoadRequest,
     database_service: DatabaseService = Depends(Dependencies.get_database_service),
     session_service: SessionService = Depends(Dependencies.get_session_service),
-    data_service: DataService = Depends(Dependencies.get_data_service)  # ✅ 新增依赖注入
+    data_service: DataService = Depends(Dependencies.get_data_service)
 ):
-    """从数据库加载表"""
+    """从数据库加载表（支持多表）"""
     try:
         tables = database_service.load_tables(
             config=request_body.config,
@@ -259,47 +277,132 @@ async def load_database(
     if not tables:
         raise HTTPException(status_code=400, detail="没有成功加载任何表")
 
-    source_name = f"{request_body.table_names[0]}_db"
+    # 过滤空表
+    valid_tables = {name: df for name, df in tables.items() if df is not None and not df.empty}
+
+    if not valid_tables:
+        raise HTTPException(status_code=400, detail="所有表均为空")
+
+    # 创建会话
+    source_name = f"{request_body.table_names[0]}_db" if request_body.table_names else "database"
+    if len(request_body.table_names) > 1:
+        source_name = f"{source_name}_multi"
     client_ip = get_client_ip(request)
     session_service.set_client_ip(client_ip)
-    session_id = session_service.create_session(source_name, "database", {"tables": request_body.table_names})
+    session_id = session_service.create_session(
+        source_name,
+        "database",
+        {"tables": request_body.table_names, "db_config": request_body.config}
+    )
 
+    table_list = []
     result = {}
-    first_table = None
-    first_df = None
 
-    for name, df in tables.items():
-        if df is not None and not df.empty:
-            variable_types = database_service.infer_types(df)
-            result[name] = {
-                "rows": len(df),
-                "columns": len(df.columns),
-                "variable_types": variable_types,
-                "preview": database_service.get_preview(df)
-            }
-            session_service.save_variable_types(session_id, variable_types)
+    # 保存所有表到 Parquet
+    for name, df in valid_tables.items():
+        variable_types = database_service.infer_types(df)
+        preview = database_service.get_preview(df)
 
-            if first_table is None:
-                first_table = (name, df)
-                first_df = df
+        table_info = TableInfo(
+            name=name,
+            rows=len(df),
+            columns=len(df.columns),
+            preview=preview,
+            variable_types=variable_types,
+            load_status="success"
+        )
+        table_list.append(table_info)
+        result[name] = {
+            "rows": len(df),
+            "columns": len(df.columns),
+            "variable_types": variable_types,
+            "preview": preview
+        }
 
-    if first_df is not None:
-        parquet_path = session_service.get_data_parquet_path(session_id)
-        data_service.save_to_parquet(first_df, parquet_path)
-        print(f"✅ Parquet 缓存已保存: {parquet_path}")
+        session_service.save_variable_types(session_id, variable_types)
 
-    if first_table:
+    # ✅ 保存所有表到 Parquet
+    save_results = data_service.save_tables_to_parquet(valid_tables, session_service, session_id)
+
+    # ✅ 自动识别表间关系
+    candidate_relations = []
+    if len(valid_tables) >= 2:
+        try:
+            from autostat.multi_analyzer import MultiTableStatisticalAnalyzer
+            # 创建多表分析器
+            analyzer = MultiTableStatisticalAnalyzer(valid_tables)
+            # 获取自动发现的关系
+            discovered = analyzer.discovered_relationships
+            all_rels = analyzer.all_relationships
+            if all_rels and 'foreign_keys' in all_rels:
+                for fk in all_rels['foreign_keys']:
+                    candidate_relations.append(CandidateRelation(
+                        from_table=fk.get('from_table', ''),
+                        from_col=fk.get('from_col', ''),
+                        to_table=fk.get('to_table', ''),
+                        to_col=fk.get('to_col', ''),
+                        relation_type=fk.get('type', 'many_to_one'),
+                        confidence=fk.get('confidence', 0.5),
+                        auto_discovered=fk.get('auto_discovered', True)
+                    ))
+            print(f"✅ 自动发现 {len(candidate_relations)} 条候选关系")
+        except Exception as e:
+            print(f"⚠️ 关系自动发现失败: {e}")
+
+    # 保存到 metadata
+    session_service.save_relationships(session_id, [r.dict() for r in candidate_relations])
+
+    # 保存临时CSV（兼容旧版）
+    if valid_tables:
+        first_name, first_df = next(iter(valid_tables.items()))
         import tempfile
-        name, df = first_table
         with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False, encoding='utf-8') as tmp:
-            df.to_csv(tmp.name, index=False)
-            session_service.add_file(session_id, f"{name}.csv", tmp.name)
-            print(f"✅ 保存临时CSV: {tmp.name}")
+            first_df.to_csv(tmp.name, index=False)
+            session_service.add_file(session_id, f"{first_name}.csv", tmp.name)
 
     return DatabaseLoadResponse(
         tables=result,
-        session_id=session_id
+        session_id=session_id,
+        table_list=table_list,
+        candidate_relations=candidate_relations,
+        load_summary={
+            "total": len(valid_tables),
+            "success": len([t for t in table_list if t.load_status == "success"]),
+            "failed": len([t for t in table_list if t.load_status == "failed"])
+        }
     )
+
+
+@router.post("/data/relations/confirm")
+async def confirm_relations(
+    request: RelationConfirmRequest,
+    session_service: SessionService = Depends(Dependencies.get_session_service)
+):
+    """确认表间关系"""
+    session = session_service.get_session(request.session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="会话不存在")
+
+    session_service.save_relationships(request.session_id, request.relationships)
+
+    return RelationConfirmResponse(
+        success=True,
+        message=f"已确认 {len(request.relationships)} 条关系"
+    )
+
+
+@router.get("/data/relations/{session_id}")
+async def get_relations(
+    session_id: str,
+    session_service: SessionService = Depends(Dependencies.get_session_service)
+):
+    """获取表间关系"""
+    session = session_service.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="会话不存在")
+
+    relationships = session_service.get_relationships(session_id)
+    return {"session_id": session_id, "relationships": relationships}
 
 
 @router.post("/data/demo")

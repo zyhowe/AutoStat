@@ -1,10 +1,11 @@
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import { analysisApi } from '../api/analysis'
 import { reportApi } from '../api/report'
 import { useSessionStore } from './session'
 
 export const useAnalysisStore = defineStore('analysis', () => {
+  // ==================== 原有状态 ====================
   const isLoading = ref(false)
   const progress = ref(0)
   const statusMessage = ref('')
@@ -17,6 +18,30 @@ export const useAnalysisStore = defineStore('analysis', () => {
   const analysisSessionId = ref(null)
   let router = null
 
+  // ==================== 新增：表选择器状态 ====================
+  const currentTable = ref('merged')
+  const tableNames = ref([])
+  const isMultiTable = ref(false)
+
+  // ==================== 原有 Getters ====================
+  const hasSession = computed(() => !!analysisSessionId.value)
+
+  // ==================== 新增：表选择器 Getters ====================
+  const currentData = computed(() => {
+    if (!reportData.value?.all_tables) return {}
+    return reportData.value.all_tables[currentTable.value] || reportData.value.all_tables['merged'] || {}
+  })
+
+  const tableOptions = computed(() => {
+    const options = []
+    options.push({ label: '📊 合并表', value: 'merged' })
+    for (const name of tableNames.value) {
+      options.push({ label: `📋 ${name}`, value: name })
+    }
+    return options
+  })
+
+  // ==================== 原有 Actions ====================
   function setRouter(routerInstance) {
     router = routerInstance
   }
@@ -46,10 +71,8 @@ export const useAnalysisStore = defineStore('analysis', () => {
         await sessionStore.loadSession(sessionId)
       }
 
-      // ✅ 刷新左侧项目列表
       await sessionStore.loadProjects()
 
-      // ✅ 跳转到报告总览
       if (router) {
         router.push('/report-summary')
       }
@@ -103,12 +126,35 @@ export const useAnalysisStore = defineStore('analysis', () => {
       reportData.value = report
       summary.value = summaryData.conclusions || []
       insights.value = insightsData
+
+      // ✅ 初始化表选择器
+      initTableSelector(report)
     } catch (err) {
       console.error('加载分析结果失败:', err)
       throw err
     }
   }
 
+  // ==================== 新增：表选择器 Actions ====================
+  function initTableSelector(analysisResult) {
+    const allTables = analysisResult?.all_tables || {}
+    const keys = Object.keys(allTables)
+    tableNames.value = keys.filter(k => k !== 'merged')
+    isMultiTable.value = tableNames.value.length > 1
+
+    // 如果当前表不存在于 all_tables 中，重置为 merged
+    if (!currentTable.value || !allTables[currentTable.value]) {
+      currentTable.value = 'merged'
+    }
+  }
+
+  function setCurrentTable(table) {
+    if (table && reportData.value?.all_tables?.[table]) {
+      currentTable.value = table
+    }
+  }
+
+  // ==================== 原有 Actions ====================
   function reset() {
     isLoading.value = false
     progress.value = 0
@@ -120,9 +166,16 @@ export const useAnalysisStore = defineStore('analysis', () => {
     insights.value = null
     error.value = null
     analysisSessionId.value = null
+
+    // 重置表选择器状态
+    currentTable.value = 'merged'
+    tableNames.value = []
+    isMultiTable.value = false
   }
 
+  // ==================== 导出 ====================
   return {
+    // 原有状态
     isLoading,
     progress,
     statusMessage,
@@ -133,9 +186,28 @@ export const useAnalysisStore = defineStore('analysis', () => {
     insights,
     error,
     analysisSessionId,
+
+    // 新增状态
+    currentTable,
+    tableNames,
+    isMultiTable,
+
+    // 原有 Getters
+    hasSession,
+
+    // 新增 Getters
+    currentData,
+    tableOptions,
+
+    // 原有 Actions
     setRouter,
     runAnalysis,
+    pollStatus,
     loadResults,
-    reset
+    reset,
+
+    // 新增 Actions
+    initTableSelector,
+    setCurrentTable
   }
 })

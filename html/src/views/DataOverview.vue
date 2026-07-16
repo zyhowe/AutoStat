@@ -1,22 +1,40 @@
-// src/views/DataOverview.vue
 <template>
   <div class="data-overview">
+    <!-- ===== 临时调试区域 ===== -->
+    <div style="background: #f0f0f0; padding: 12px; margin-bottom: 16px; border-radius: 8px; font-size: 13px; border: 2px solid #ff6b6b;">
+      <div><strong>🔍 调试信息</strong></div>
+      <div>reportData 存在: {{ !!reportData }}</div>
+      <div>allTables 键: {{ Object.keys(allTables).join(', ') || '无' }}</div>
+      <div>当前表: {{ currentTable }}</div>
+      <div>currentData 有数据: {{ !!currentData && Object.keys(currentData).length > 0 }}</div>
+      <div>variableSummaries 字段数: {{ Object.keys(currentData?.variable_summaries || {}).length }}</div>
+      <div>dataShape: rows={{ dataShape.rows }}, cols={{ dataShape.columns }}</div>
+    </div>
+
     <h2>📊 数据概览</h2>
-    <p class="subtitle">查看数据的基本信息和字段详情</p>
+    <p class="subtitle">查看当前表的字段分布和统计特征</p>
 
     <div v-if="loading" class="loading-container">
       <el-skeleton :rows="10" animated />
     </div>
 
     <div v-else-if="reportData" class="overview-content">
+      <!-- ===== 表选择器 ===== -->
+      <TableSelector
+        v-model="currentTable"
+        :table-names="tableNames"
+        :is-multi-table="isMultiTable"
+        @change="onTableChange"
+      />
+
       <!-- 统计卡片 -->
       <div class="stats-row">
         <div class="stat-card">
-          <div class="stat-value">{{ reportData.data_shape?.rows || 0 }}</div>
+          <div class="stat-value">{{ dataShape.rows || 0 }}</div>
           <div class="stat-label">总行数</div>
         </div>
         <div class="stat-card">
-          <div class="stat-value">{{ reportData.data_shape?.columns || 0 }}</div>
+          <div class="stat-value">{{ dataShape.columns || 0 }}</div>
           <div class="stat-label">总列数</div>
         </div>
         <div class="stat-card">
@@ -60,7 +78,6 @@
       <div class="section">
         <h4>📋 字段详情</h4>
         <el-tabs v-model="fieldTab" class="field-tabs">
-          <!-- 连续变量 -->
           <el-tab-pane label="连续变量" name="continuous">
             <el-table :data="continuousVarList" border size="small" max-height="420" style="width: 100%;">
               <el-table-column prop="name" label="字段名" width="120" fixed="left">
@@ -68,7 +85,6 @@
                   <span class="field-name-link" @click="openFieldDetail(row.name)">{{ row.name }}</span>
                 </template>
               </el-table-column>
-              <!-- 样本量 增加点击 -->
               <el-table-column prop="count" label="样本量" width="80" align="center">
                 <template #default="{ row }">
                   <span class="field-name-link" @click="showNonMissingRows(row.name)">
@@ -76,7 +92,6 @@
                   </span>
                 </template>
               </el-table-column>
-              <!-- 缺失率 已有点击显示空值 -->
               <el-table-column prop="missing_pct" label="缺失率" width="80" align="center">
                 <template #default="{ row }">
                   <span
@@ -131,7 +146,6 @@
             <div v-if="continuousVarList.length === 0" class="empty-tip">暂无连续变量</div>
           </el-tab-pane>
 
-          <!-- 分类变量 -->
           <el-tab-pane label="分类变量" name="categorical">
             <el-table :data="categoricalVarList" border size="small" max-height="420" style="width: 100%;">
               <el-table-column prop="name" label="字段名" width="120" fixed="left">
@@ -139,7 +153,6 @@
                   <span class="field-name-link" @click="openFieldDetail(row.name)">{{ row.name }}</span>
                 </template>
               </el-table-column>
-              <!-- 样本量 增加点击 -->
               <el-table-column prop="count" label="样本量" width="80" align="center">
                 <template #default="{ row }">
                   <span class="field-name-link" @click="showNonMissingRows(row.name)">
@@ -147,7 +160,6 @@
                   </span>
                 </template>
               </el-table-column>
-              <!-- 缺失率 已有点击 -->
               <el-table-column prop="missing_pct" label="缺失率" width="80" align="center">
                 <template #default="{ row }">
                   <span :style="{ color: row.missing_pct > 20 ? '#F56C6C' : '#909399' }" class="field-name-link" @click="showMissingRows(row.name)">
@@ -180,7 +192,6 @@
             <div v-if="categoricalVarList.length === 0" class="empty-tip">暂无分类变量</div>
           </el-tab-pane>
 
-          <!-- 其他类型 -->
           <el-tab-pane label="其他类型" name="other">
             <el-table :data="otherVarList" border size="small" max-height="420" style="width: 100%;">
               <el-table-column prop="name" label="字段名" width="140" fixed="left">
@@ -189,7 +200,6 @@
                 </template>
               </el-table-column>
               <el-table-column prop="type_desc" label="类型" width="100" align="center" />
-              <!-- 样本量 增加点击 -->
               <el-table-column prop="count" label="样本量" width="80" align="center">
                 <template #default="{ row }">
                   <span class="field-name-link" @click="showNonMissingRows(row.name)">
@@ -197,7 +207,6 @@
                   </span>
                 </template>
               </el-table-column>
-              <!-- 缺失率 增加点击 -->
               <el-table-column prop="missing_pct" label="缺失率" width="80" align="center">
                 <template #default="{ row }">
                   <span :style="{ color: row.missing_pct > 20 ? '#F56C6C' : '#909399' }" class="field-name-link" @click="showMissingRows(row.name)">
@@ -229,6 +238,7 @@ import { useSessionStore } from '../stores/session'
 import { useFieldDetailStore } from '../stores/fieldDetail'
 import { reportApi } from '../api/report'
 import { openDataPreview } from '../components/DataPreviewDialog'
+import TableSelector from '../components/TableSelector.vue'
 
 const router = useRouter()
 const sessionStore = useSessionStore()
@@ -240,6 +250,11 @@ const fieldTab = ref('continuous')
 const catCountKey = ref(0)
 const contRangeKey = ref(0)
 
+// ===== 表选择器状态 =====
+const currentTable = ref('merged')
+const tableNames = ref([])
+const isMultiTable = ref(false)
+
 const typeDisplay = {
   continuous: '连续变量',
   categorical: '分类变量',
@@ -250,31 +265,74 @@ const typeDisplay = {
   text: '文本'
 }
 
-watch(() => reportData.value, () => {
+// ===== 当前数据（从 all_tables 取） =====
+const allTables = computed(() => reportData.value?.all_tables || {})
+const currentData = computed(() => {
+  if (!allTables.value) return {}
+  const target = currentTable.value
+  const data = allTables.value[target] || allTables.value['merged'] || {}
+  // 调试日志
+  console.log('[DataOverview] currentData 计算:', {
+    target,
+    hasData: !!data && Object.keys(data).length > 0,
+    keys: Object.keys(data).slice(0, 5),
+    variableSummariesCount: Object.keys(data?.variable_summaries || {}).length
+  })
+  return data
+})
+
+const dataShape = computed(() => currentData.value?.data_shape || { rows: 0, columns: 0 })
+const variableTypes = computed(() => currentData.value?.variable_types || {})
+const summaries = computed(() => currentData.value?.variable_summaries || {})
+const quality = computed(() => currentData.value?.quality_report || {})
+const correlations = computed(() => currentData.value?.correlations || {})
+
+// 多表信息（仅用于判断）
+const multiInfo = computed(() => reportData.value?.multi_table_info || {})
+
+watch(() => reportData.value, (val) => {
+  console.log('[DataOverview] reportData 变化:', {
+    hasData: !!val,
+    allTablesKeys: Object.keys(val?.all_tables || {}),
+    sourceTable: val?.source_table
+  })
   nextTick(() => {
     catCountKey.value += 1
     contRangeKey.value += 1
   })
+}, { immediate: true, deep: true })
+
+watch(() => multiInfo.value, (info) => {
+  if (info && info.tables) {
+    tableNames.value = Object.keys(info.tables)
+    isMultiTable.value = tableNames.value.length > 1
+  } else {
+    tableNames.value = []
+    isMultiTable.value = false
+  }
 }, { immediate: true })
+
+function onTableChange() {
+  catCountKey.value += 1
+  contRangeKey.value += 1
+}
 
 // ==================== 统计卡片 ====================
 const typeCounts = computed(() => {
-  const variableTypes = reportData.value?.variable_types || {}
   const counts = {}
-  Object.values(variableTypes).forEach(info => {
+  Object.values(variableTypes.value).forEach(info => {
     const typ = info.type || 'unknown'
     counts[typ] = (counts[typ] || 0) + 1
   })
   return counts
 })
 const variableTypesCount = computed(() => Object.keys(typeCounts.value).length)
-const missingFieldsCount = computed(() => reportData.value?.quality_report?.missing?.length || 0)
+const missingFieldsCount = computed(() => quality.value?.missing?.length || 0)
 
-// ==================== 连续变量列表 ====================
+// ==================== 变量列表 ====================
 const continuousVarList = computed(() => {
-  const summaries = reportData.value?.variable_summaries || {}
   const result = []
-  Object.entries(summaries).forEach(([name, info]) => {
+  Object.entries(summaries.value).forEach(([name, info]) => {
     if (info.type === 'continuous') {
       const minVal = info.min !== undefined && info.min !== null ? Number(info.min) : 0
       const maxVal = info.max !== undefined && info.max !== null ? Number(info.max) : 0
@@ -294,15 +352,14 @@ const continuousVarList = computed(() => {
       })
     }
   })
+  console.log('[DataOverview] continuousVarList 数量:', result.length)
   result.sort((a, b) => b.missing_pct - a.missing_pct)
   return result
 })
 
-// ==================== 分类变量列表 ====================
 const categoricalVarList = computed(() => {
-  const summaries = reportData.value?.variable_summaries || {}
   const result = []
-  Object.entries(summaries).forEach(([name, info]) => {
+  Object.entries(summaries.value).forEach(([name, info]) => {
     const typ = info.type
     if (typ === 'categorical' || typ === 'categorical_numeric' || typ === 'ordinal') {
       let topCats = []
@@ -339,11 +396,9 @@ const categoricalVarList = computed(() => {
   return result
 })
 
-// ==================== 其他类型列表 ====================
 const otherVarList = computed(() => {
-  const summaries = reportData.value?.variable_summaries || {}
   const result = []
-  Object.entries(summaries).forEach(([name, info]) => {
+  Object.entries(summaries.value).forEach(([name, info]) => {
     const typ = info.type
     if (typ === 'datetime' || typ === 'identifier' || typ === 'text') {
       let keyInfo = ''
@@ -369,7 +424,6 @@ const otherVarList = computed(() => {
       })
     }
   })
-  result.sort((a, b) => b.missing_pct - a.missing_pct)
   return result
 })
 
@@ -436,25 +490,23 @@ const derivedPatterns = ['_year', '_month', '_quarter', '_week', '_weekday', '_d
 const isDerivedField = (name) => derivedPatterns.some(p => name.endsWith(p))
 
 const hasCategoryCountData = computed(() => {
-  const summaries = reportData.value?.variable_summaries || {}
-  const catVars = Object.keys(summaries).filter(key => {
+  const catVars = Object.keys(summaries.value).filter(key => {
     if (isDerivedField(key)) return false
-    const info = summaries[key]
+    const info = summaries.value[key]
     return info.type && ['categorical', 'categorical_numeric', 'ordinal'].includes(info.type)
   })
   return catVars.length > 0
 })
 
 const categoryCountOption = computed(() => {
-  const summaries = reportData.value?.variable_summaries || {}
-  const catVars = Object.keys(summaries).filter(key => {
+  const catVars = Object.keys(summaries.value).filter(key => {
     if (isDerivedField(key)) return false
-    const info = summaries[key]
+    const info = summaries.value[key]
     return info.type && ['categorical', 'categorical_numeric', 'ordinal'].includes(info.type)
   })
   if (catVars.length === 0) return {}
   const data = catVars.map(key => {
-    const info = summaries[key]
+    const info = summaries.value[key]
     let vc = {}
     if (info.value_counts && Object.keys(info.value_counts).length > 0) {
       vc = info.value_counts
@@ -474,20 +526,18 @@ const categoryCountOption = computed(() => {
 
 // ==================== 连续变量取值范围 ====================
 const hasContinuousRangeData = computed(() => {
-  const summaries = reportData.value?.variable_summaries || {}
-  return Object.keys(summaries).filter(key => summaries[key]?.type === 'continuous').length > 0
+  return Object.keys(summaries.value).filter(key => summaries.value[key]?.type === 'continuous').length > 0
 })
 
 const continuousRangeOption = computed(() => {
-  const summaries = reportData.value?.variable_summaries || {}
-  const contVars = Object.keys(summaries).filter(key => summaries[key]?.type === 'continuous')
+  const contVars = Object.keys(summaries.value).filter(key => summaries.value[key]?.type === 'continuous')
   if (contVars.length === 0) return {}
 
   const topVars = contVars.slice(0, 8)
   const colors = ['#409EFF', '#67C23A', '#E6A23C', '#F56C6C', '#9B59B6', '#1ABC9C', '#3498DB', '#2ECC71']
 
   const data = topVars.map((key, idx) => {
-    const info = summaries[key]
+    const info = summaries.value[key]
     return {
       name: key,
       min: info.min !== undefined && info.min !== null ? Number(info.min) : 0,
@@ -540,29 +590,29 @@ const continuousRangeOption = computed(() => {
 
 // ==================== 字段详情弹窗 ====================
 function buildFieldData(fieldName) {
-  const summary = reportData.value?.variable_summaries?.[fieldName] || {}
-  const varType = reportData.value?.variable_types?.[fieldName]?.type || 'unknown'
-  const varTypeDesc = reportData.value?.variable_types?.[fieldName]?.type_desc || typeDisplay[varType] || varType
+  const summary = summaries.value?.[fieldName] || {}
+  const varType = variableTypes.value?.[fieldName]?.type || 'unknown'
+  const varTypeDesc = variableTypes.value?.[fieldName]?.type_desc || typeDisplay[varType] || varType
 
-  const tsDiag = reportData.value?.time_series_diagnostics?.[fieldName] || null
-  const outlier = reportData.value?.quality_report?.outliers?.[fieldName] || null
-  const missing = reportData.value?.quality_report?.missing?.find(m => m.column === fieldName) || null
-  const dupInfo = reportData.value?.quality_report?.duplicates || null
+  const tsDiag = currentData.value?.time_series_diagnostics?.[fieldName] || null
+  const outlier = quality.value?.outliers?.[fieldName] || null
+  const missing = quality.value?.missing?.find(m => m.column === fieldName) || null
+  const dupInfo = quality.value?.duplicates || null
 
-  const correlations = []
-  const matrix = reportData.value?.correlations?.matrix || {}
+  const correlationsList = []
+  const matrix = correlations.value?.matrix || {}
   if (matrix[fieldName]) {
     const entries = Object.entries(matrix[fieldName])
     for (const [varName, value] of entries) {
       if (varName !== fieldName && value !== null && value !== undefined && Math.abs(value) >= 0.7) {
-        correlations.push({ var: varName, value: parseFloat(Number(value).toFixed(4)) })
+        correlationsList.push({ var: varName, value: parseFloat(Number(value).toFixed(4)) })
       }
     }
-    correlations.sort((a, b) => Math.abs(b.value) - Math.abs(a.value))
+    correlationsList.sort((a, b) => Math.abs(b.value) - Math.abs(a.value))
   }
 
   const rules = []
-  const auditRules = reportData.value?.quality_report?.audit_rules || {}
+  const auditRules = quality.value?.audit_rules || {}
   const allRules = [
     ...(auditRules.arithmetic_rules || []),
     ...(auditRules.functional_dependencies || []),
@@ -580,7 +630,7 @@ function buildFieldData(fieldName) {
   }
 
   const models = []
-  const modelRecs = reportData.value?.model_recommendations || []
+  const modelRecs = currentData.value?.model_recommendations || []
   for (const rec of modelRecs) {
     let role = ''
     if (rec.target_column === fieldName) {
@@ -626,7 +676,7 @@ function buildFieldData(fieldName) {
     outlier,
     missing,
     duplicateInfo: dupInfo,
-    correlations,
+    correlations: correlationsList,
     rules,
     models,
     topCategories
@@ -655,7 +705,6 @@ function showMissingRows(fieldName) {
   })
 }
 
-// ✅ 新增：显示非空数据
 function showNonMissingRows(fieldName) {
   const sessionId = sessionStore.currentSessionId || localStorage.getItem('lastSessionId')
   if (!sessionId) {
@@ -680,16 +729,35 @@ async function loadData() {
   }
   if (!sessionId) {
     loading.value = false
+    console.warn('[DataOverview] 没有 sessionId')
     return
   }
 
   loading.value = true
   try {
+    console.log('[DataOverview] 开始加载数据，sessionId:', sessionId)
     const result = await reportApi.get(sessionId)
+    console.log('[DataOverview] API 返回原始数据:', {
+      hasAllTables: !!result?.all_tables,
+      allTablesKeys: Object.keys(result?.all_tables || {}),
+      sourceTable: result?.source_table,
+      dataShape: result?.data_shape
+    })
     reportData.value = result
-    console.log('✅ 数据概览加载完成')
+
+    // 初始化表选择器
+    const allTables = result?.all_tables || {}
+    const tableKeys = Object.keys(allTables)
+    tableNames.value = tableKeys.filter(k => k !== 'merged')
+    isMultiTable.value = tableNames.value.length > 1
+
+    if (!currentTable.value || !allTables[currentTable.value]) {
+      currentTable.value = 'merged'
+    }
+
+    console.log('[DataOverview] 加载完成，当前表:', currentTable.value, '表列表:', tableNames.value)
   } catch (err) {
-    console.error('加载数据失败:', err)
+    console.error('[DataOverview] 加载数据失败:', err)
     ElMessage.error('加载数据失败: ' + err.message)
   } finally {
     loading.value = false
@@ -805,7 +873,6 @@ onMounted(() => {
   color: #2c3e50;
   font-size: 16px;
 }
-
 .field-tabs {
   margin-top: 4px;
 }

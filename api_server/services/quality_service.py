@@ -2,7 +2,7 @@
 from typing import Dict, Any, List
 import pandas as pd
 
-from autostat.core.quality import QualityScorer
+from autostat.core.scorer import QualityScorer
 
 
 class QualityService:

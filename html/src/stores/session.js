@@ -9,6 +9,9 @@ export const useSessionStore = defineStore('session', () => {
   const projects = ref([])
   const currentSession = ref(null)
   const uploadData = ref(null)
+  const relationships = ref([])
+  const tableNames = ref([])
+  const isMultiTable = ref(false)
 
   // Getters
   const hasSession = computed(() => !!currentSessionId.value)
@@ -29,6 +32,21 @@ export const useSessionStore = defineStore('session', () => {
     const session = await sessionApi.get(sessionId)
     currentSession.value = session
     currentSessionId.value = sessionId
+
+    // 检查是否为多表
+    if (session?.tables_meta) {
+      const tableKeys = Object.keys(session.tables_meta)
+      if (tableKeys.length > 0) {
+        tableNames.value = tableKeys
+        isMultiTable.value = tableKeys.length > 1
+      }
+    }
+
+    // 加载关系
+    if (session?.relationships) {
+      relationships.value = session.relationships
+    }
+
     return session
   }
 
@@ -44,6 +62,9 @@ export const useSessionStore = defineStore('session', () => {
     if (currentSessionId.value === sessionId) {
       currentSessionId.value = null
       currentSession.value = null
+      tableNames.value = []
+      relationships.value = []
+      isMultiTable.value = false
     }
   }
 
@@ -57,12 +78,29 @@ export const useSessionStore = defineStore('session', () => {
     uploadData.value = null
   }
 
+  function setRelationships(rels) {
+    relationships.value = rels
+    if (currentSessionId.value) {
+      // 保存到后端（通过 API）
+      // 这里调用 dataApi.confirmRelations
+    }
+  }
+
+  function clearMultiTable() {
+    tableNames.value = []
+    relationships.value = []
+    isMultiTable.value = false
+  }
+
   return {
     // State
     currentSessionId,
     projects,
     currentSession,
     uploadData,
+    relationships,
+    tableNames,
+    isMultiTable,
     // Getters
     hasSession,
     sessionName,
@@ -72,6 +110,8 @@ export const useSessionStore = defineStore('session', () => {
     loadProjects,
     deleteSession,
     uploadFile,
-    clearUpload
+    clearUpload,
+    setRelationships,
+    clearMultiTable
   }
 })

@@ -27,8 +27,18 @@ export const dataApi = {
     return api.post('/data/demo', null, { params: { dataset } })
   },
 
-  // 加载数据库表
+  // 加载数据库表（支持多表）
   loadDatabase(data) {
     return api.post('/data/database/load', data)
+  },
+
+  // ✅ 新增：确认关系
+  confirmRelations(data) {
+    return api.post('/data/relations/confirm', data)
+  },
+
+  // ✅ 新增：获取关系
+  getRelations(sessionId) {
+    return api.get(`/data/relations/${sessionId}`)
   }
 }
