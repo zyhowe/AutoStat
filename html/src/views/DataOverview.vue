@@ -1,16 +1,5 @@
 <template>
   <div class="data-overview">
-    <!-- ===== 临时调试区域 ===== -->
-    <div style="background: #f0f0f0; padding: 12px; margin-bottom: 16px; border-radius: 8px; font-size: 13px; border: 2px solid #ff6b6b;">
-      <div><strong>🔍 调试信息</strong></div>
-      <div>reportData 存在: {{ !!reportData }}</div>
-      <div>allTables 键: {{ Object.keys(allTables).join(', ') || '无' }}</div>
-      <div>当前表: {{ currentTable }}</div>
-      <div>currentData 有数据: {{ !!currentData && Object.keys(currentData).length > 0 }}</div>
-      <div>variableSummaries 字段数: {{ Object.keys(currentData?.variable_summaries || {}).length }}</div>
-      <div>dataShape: rows={{ dataShape.rows }}, cols={{ dataShape.columns }}</div>
-    </div>
-
     <h2>📊 数据概览</h2>
     <p class="subtitle">查看当前表的字段分布和统计特征</p>
 
@@ -270,15 +259,7 @@ const allTables = computed(() => reportData.value?.all_tables || {})
 const currentData = computed(() => {
   if (!allTables.value) return {}
   const target = currentTable.value
-  const data = allTables.value[target] || allTables.value['merged'] || {}
-  // 调试日志
-  console.log('[DataOverview] currentData 计算:', {
-    target,
-    hasData: !!data && Object.keys(data).length > 0,
-    keys: Object.keys(data).slice(0, 5),
-    variableSummariesCount: Object.keys(data?.variable_summaries || {}).length
-  })
-  return data
+  return allTables.value[target] || allTables.value['merged'] || {}
 })
 
 const dataShape = computed(() => currentData.value?.data_shape || { rows: 0, columns: 0 })
@@ -291,11 +272,6 @@ const correlations = computed(() => currentData.value?.correlations || {})
 const multiInfo = computed(() => reportData.value?.multi_table_info || {})
 
 watch(() => reportData.value, (val) => {
-  console.log('[DataOverview] reportData 变化:', {
-    hasData: !!val,
-    allTablesKeys: Object.keys(val?.all_tables || {}),
-    sourceTable: val?.source_table
-  })
   nextTick(() => {
     catCountKey.value += 1
     contRangeKey.value += 1
@@ -352,7 +328,6 @@ const continuousVarList = computed(() => {
       })
     }
   })
-  console.log('[DataOverview] continuousVarList 数量:', result.length)
   result.sort((a, b) => b.missing_pct - a.missing_pct)
   return result
 })
@@ -729,20 +704,12 @@ async function loadData() {
   }
   if (!sessionId) {
     loading.value = false
-    console.warn('[DataOverview] 没有 sessionId')
     return
   }
 
   loading.value = true
   try {
-    console.log('[DataOverview] 开始加载数据，sessionId:', sessionId)
     const result = await reportApi.get(sessionId)
-    console.log('[DataOverview] API 返回原始数据:', {
-      hasAllTables: !!result?.all_tables,
-      allTablesKeys: Object.keys(result?.all_tables || {}),
-      sourceTable: result?.source_table,
-      dataShape: result?.data_shape
-    })
     reportData.value = result
 
     // 初始化表选择器
@@ -754,10 +721,8 @@ async function loadData() {
     if (!currentTable.value || !allTables[currentTable.value]) {
       currentTable.value = 'merged'
     }
-
-    console.log('[DataOverview] 加载完成，当前表:', currentTable.value, '表列表:', tableNames.value)
   } catch (err) {
-    console.error('[DataOverview] 加载数据失败:', err)
+    console.error('加载数据失败:', err)
     ElMessage.error('加载数据失败: ' + err.message)
   } finally {
     loading.value = false

@@ -54,5 +54,14 @@ export const dataApi = {
   // 获取关系
   getRelations(sessionId) {
     return api.get(`/data/relations/${sessionId}`)
+  },
+
+  // ===== 新增：更新字段类型 =====
+  updateFieldTypes(sessionId, tableName, fieldTypes) {
+    return api.post('/data/field_types/update', {
+      session_id: sessionId,
+      table_name: tableName || 'merged',
+      field_types: fieldTypes
+    })
   }
 }

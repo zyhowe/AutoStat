@@ -97,7 +97,10 @@ class SessionService:
             "files": {},
             "variable_types": {},
             "analysis_result": None,
-            "data_shape": {}
+            "data_shape": {},
+            # ===== 新增：缓存字段 =====
+            "field_types_cache": {},   # {表名: {字段名: 类型}}
+            "relationships": []        # 用户确认后的关系
         }
 
         self._save_metadata(session_id, metadata)
@@ -284,7 +287,7 @@ class SessionService:
         return []
 
     def save_relationships(self, session_id: str, relationships: List[Dict]):
-        """保存表间关系"""
+        """保存表间关系（同时更新 metadata 和缓存字段）"""
         metadata = self._load_metadata(session_id)
         if not metadata:
             metadata = {}
@@ -322,6 +325,84 @@ class SessionService:
         if metadata:
             return metadata.get("tables_meta", {})
         return {}
+
+    # ==================== 新增：字段类型缓存 ====================
+
+    def save_field_types_cache(self, session_id: str, table_name: str, field_types: Dict[str, str]) -> bool:
+        """
+        保存字段类型到缓存（分析前临时存储）
+
+        参数:
+        - session_id: 会话ID
+        - table_name: 表名（空或"merged"表示合并表）
+        - field_types: {字段名: 类型}
+
+        返回:
+        - bool: 是否保存成功
+        """
+        metadata = self._load_metadata(session_id)
+        if not metadata:
+            return False
+
+        if "field_types_cache" not in metadata:
+            metadata["field_types_cache"] = {}
+
+        # 使用表名作为键，合并字段类型
+        # 如果是合并表，表名为 "merged" 或空字符串
+        key = table_name if table_name else "merged"
+        metadata["field_types_cache"][key] = field_types.copy()
+
+        self._save_metadata(session_id, metadata)
+        print(f"✅ 已保存字段类型缓存: session={session_id}, table={key}, fields={len(field_types)}")
+        return True
+
+    def get_field_types_cache(self, session_id: str) -> Dict[str, Dict[str, str]]:
+        """
+        获取字段类型缓存
+
+        返回:
+        - {表名: {字段名: 类型}}
+        """
+        metadata = self._load_metadata(session_id)
+        if metadata:
+            return metadata.get("field_types_cache", {})
+        return {}
+
+    def get_table_field_types(self, session_id: str, table_name: str) -> Dict[str, str]:
+        """
+        获取指定表的字段类型缓存
+
+        参数:
+        - session_id: 会话ID
+        - table_name: 表名
+
+        返回:
+        - {字段名: 类型}
+        """
+        cache = self.get_field_types_cache(session_id)
+        key = table_name if table_name else "merged"
+        return cache.get(key, {})
+
+    def clear_field_types_cache(self, session_id: str, table_name: str = None):
+        """
+        清除字段类型缓存
+
+        参数:
+        - session_id: 会话ID
+        - table_name: 可选，指定表名则只清除该表，否则清除全部
+        """
+        metadata = self._load_metadata(session_id)
+        if not metadata:
+            return
+
+        if table_name:
+            key = table_name if table_name else "merged"
+            if "field_types_cache" in metadata:
+                metadata["field_types_cache"].pop(key, None)
+        else:
+            metadata["field_types_cache"] = {}
+
+        self._save_metadata(session_id, metadata)
 
     # ==================== 兼容旧方法 ====================
     def get_data_path(self, session_id: str) -> Optional[str]:

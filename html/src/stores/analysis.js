@@ -46,7 +46,8 @@ export const useAnalysisStore = defineStore('analysis', () => {
     router = routerInstance
   }
 
-  async function runAnalysis(sessionId, variableTypes = {}) {
+  // ===== 修改：runAnalysis 不再接收 variable_types =====
+  async function runAnalysis(sessionId) {
     isLoading.value = true
     progress.value = 0
     statusMessage.value = '提交分析任务...'
@@ -54,9 +55,10 @@ export const useAnalysisStore = defineStore('analysis', () => {
     analysisSessionId.value = sessionId
 
     try {
+      // 不再传递 variable_types，后端从缓存读取
       const result = await analysisApi.run({
         session_id: sessionId,
-        variable_types: variableTypes
+        include_html: false
       })
 
       taskId.value = result.task_id

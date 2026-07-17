@@ -36,7 +36,34 @@ class AnalysisService:
     def set_client_ip(self, client_ip: str):
         self._client_ip = client_ip
 
+    # ==================== 原有方法（保留兼容） ====================
+
     def run_analysis(self, session_id: str, file_path: str, variable_types: Dict, task_id: str, include_html: bool = False):
+        """原有方法，保留兼容"""
+        # 调用新方法，但将 variable_types 包装成缓存格式
+        field_types_cache = {"data": variable_types} if variable_types else {}
+        self.run_analysis_from_cache(session_id, file_path, field_types_cache, task_id, include_html)
+
+    # ==================== 新增方法：从缓存读取字段类型 ====================
+
+    def run_analysis_from_cache(
+        self,
+        session_id: str,
+        file_path: str,
+        field_types_cache: Dict[str, Dict[str, str]],
+        task_id: str,
+        include_html: bool = False
+    ):
+        """
+        从缓存读取字段类型执行分析
+
+        参数:
+        - session_id: 会话ID
+        - file_path: 数据文件路径
+        - field_types_cache: {表名: {字段名: 类型}} 从 session 缓存读取
+        - task_id: 任务ID
+        - include_html: 是否生成HTML
+        """
         from api_server.routers.analysis import task_status
 
         if self._client_ip:
@@ -51,6 +78,18 @@ class AnalysisService:
                 raise ValueError("没有可用的表数据")
 
             task_status[task_id] = {"status": "running", "progress": 30, "message": "分析数据中..."}
+
+            # ==================== 应用缓存的字段类型 ====================
+            # 将缓存的字段类型应用到每个表
+            for table_name, df in tables_data.items():
+                cached_types = field_types_cache.get(table_name, {})
+                if cached_types:
+                    # 过滤掉不在当前表中的字段
+                    valid_types = {k: v for k, v in cached_types.items() if k in df.columns}
+                    if valid_types:
+                        # 保存到 session 的 variable_types（分析时使用）
+                        self.session_service.save_variable_types(session_id, valid_types)
+                        print(f"✅ 应用字段类型缓存到 {table_name}: {len(valid_types)} 个字段")
 
             # ==================== 统一使用 MultiTableStatisticalAnalyzer ====================
             relationships = self.session_service.get_relationships(session_id)
@@ -109,11 +148,7 @@ class AnalysisService:
                     all_questions[table_name] = questions
                     print(f"✅ 已生成 {table_name} 的推荐问题: {sum(len(v) for v in questions.values())} 条")
 
-                # ============================================================
-                # 🔥 修改：按规范格式保存推荐问题
-                # 格式：{"merged": {...}, "all_tables": {"table1": {...}, "table2": {...}}}
-                # 单表时 merged 为空对象
-                # ============================================================
+                # 按规范格式保存推荐问题
                 new_questions = {}
                 new_questions["merged"] = all_questions.get("merged", {})
                 new_questions["all_tables"] = {}
@@ -121,13 +156,11 @@ class AnalysisService:
                     if table_name != "merged":
                         new_questions["all_tables"][table_name] = questions
 
-                # 单表时 merged 为空（只有一张原始表）
                 if len(tables_data) == 1:
                     new_questions["merged"] = {}
 
                 self.session_service.save_recommended_questions(session_id, new_questions)
-                print(f"✅ 所有表的推荐问题已保存（格式: merged + all_tables）")
-                # ============================================================
+                print(f"✅ 所有表的推荐问题已保存")
 
             except Exception as e:
                 print(f"⚠️ 生成推荐问题失败: {e}")
@@ -142,6 +175,9 @@ class AnalysisService:
 
             # ==================== 生成核心结论 ====================
             self._generate_conclusions(session_id, json_result)
+
+            # ===== 清除字段类型缓存（分析完成后不再需要） =====
+            self.session_service.clear_field_types_cache(session_id)
 
             task_status[task_id] = {
                 "status": "completed",

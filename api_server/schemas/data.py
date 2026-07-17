@@ -45,26 +45,40 @@ class CandidateRelation(BaseModel):
 
 class DatabaseLoadRequest(BaseModel):
     config: Dict[str, Any]
-    table_names: List[str]  # ✅ 改为列表
+    table_names: List[str]
     limit: int = 5000
     max_text_length: int = 100
     relationships: Optional[List[Dict]] = None
 
 
 class DatabaseLoadResponse(BaseModel):
-    tables: Dict[str, Any]  # 兼容旧版
+    tables: Dict[str, Any]
     session_id: Optional[str] = None
-    table_list: List[TableInfo] = []  # ✅ 新增：详细表信息
-    candidate_relations: List[CandidateRelation] = []  # ✅ 新增：候选关系
-    load_summary: Dict[str, Any] = {}  # ✅ 新增：加载汇总
+    table_list: List[TableInfo] = []
+    candidate_relations: List[CandidateRelation] = []
+    load_summary: Dict[str, Any] = {}
 
 
 class RelationConfirmRequest(BaseModel):
-    """关系确认请求"""
     session_id: str
-    relationships: List[Dict]  # 用户确认的关系列表
+    relationships: List[Dict]
 
 
 class RelationConfirmResponse(BaseModel):
+    success: bool
+    message: str
+
+
+# ==================== 新增：字段类型更新 ====================
+
+class FieldTypesUpdateRequest(BaseModel):
+    """字段类型更新请求"""
+    session_id: str
+    table_name: str  # 表名，为空或"merged"表示合并表
+    field_types: Dict[str, str]  # {字段名: 类型}
+
+
+class FieldTypesUpdateResponse(BaseModel):
+    """字段类型更新响应"""
     success: bool
     message: str

@@ -23,11 +23,41 @@ async def run_analysis(
     analysis_service: AnalysisService = Depends(Dependencies.get_analysis_service),
     session_service: SessionService = Depends(Dependencies.get_session_service)
 ):
-    """执行分析"""
+    """
+    执行分析
+
+    【修改】不再从请求体接收 variable_types，改为从 session 缓存读取
+    用户在前端调整字段类型后，通过 /data/field_types/update 保存到缓存
+    """
     # 验证会话
     session = session_service.get_session(analysis_request.session_id)
     if not session:
         raise HTTPException(status_code=404, detail="会话不存在")
+
+    # ===== 新增：从缓存读取字段类型 =====
+    field_types_cache = session_service.get_field_types_cache(analysis_request.session_id)
+    print(f"📋 从缓存读取字段类型: {len(field_types_cache)} 个表")
+
+    # 如果缓存中有字段类型，合并到 variable_types
+    # 注意：这里需要读取每个表的实际字段类型，然后应用缓存覆盖
+    variable_types = {}
+
+    # 获取所有表名
+    table_names = session_service.get_all_table_names(analysis_request.session_id)
+    if not table_names:
+        # 如果没有表名，尝试从 files 获取
+        file_info = session_service.get_file(analysis_request.session_id)
+        if file_info:
+            table_names = ["data"]  # 默认表名
+
+    # 对于每个表，从 metadata 中获取原始类型，然后用缓存覆盖
+    # 实际上，analysis_service 会从 Parquet 加载数据并重新推断类型
+    # 我们只需要把缓存中的类型传给 analysis_service
+    # 但 analysis_service.run_analysis 目前只接收一个 variable_types 字典
+    # 对于多表，需要按表名组织
+
+    # 简化处理：analysis_service 会从 session 读取缓存
+    # 修改 analysis_service 支持从 session 读取
 
     # 获取文件路径
     file_info = session_service.get_data_path(analysis_request.session_id)
@@ -44,18 +74,18 @@ async def run_analysis(
         "message": "任务已提交"
     }
 
-    # 获取客户端IP，设置到 analysis_service 实例
+    # 获取客户端IP
     client_ip = get_client_ip(request)
     analysis_service.set_client_ip(client_ip)
 
-    # 后台执行分析（传递 include_html 参数）
+    # ===== 修改：传递 session_id 和 field_types_cache，而不是 variable_types =====
     background_tasks.add_task(
-        analysis_service.run_analysis,
+        analysis_service.run_analysis_from_cache,
         analysis_request.session_id,
         file_info,
-        analysis_request.variable_types or {},
+        field_types_cache,
         task_id,
-        analysis_request.include_html  # ✅ 新增传递
+        analysis_request.include_html
     )
 
     return AnalysisResponse(

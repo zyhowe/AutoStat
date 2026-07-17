@@ -12,7 +12,8 @@ from api_server.routers.session import get_client_ip
 from api_server.schemas.data import (
     DatabaseLoadRequest, DatabaseLoadResponse,
     TableInfo, CandidateRelation,
-    RelationConfirmRequest, RelationConfirmResponse
+    RelationConfirmRequest, RelationConfirmResponse,
+    FieldTypesUpdateRequest, FieldTypesUpdateResponse  # 新增
 )
 
 router = APIRouter()
@@ -305,7 +306,6 @@ def _discover_relations_and_create_session(
         try:
             from autostat.multi_analyzer import MultiTableStatisticalAnalyzer
             analyzer = MultiTableStatisticalAnalyzer(tables)
-            # 统一使用 discover_relationships_only()，仅发现关系
             all_rels = analyzer.discover_relationships_only()
             if all_rels and 'foreign_keys' in all_rels:
                 for fk in all_rels['foreign_keys']:
@@ -321,18 +321,18 @@ def _discover_relations_and_create_session(
             print(f"✅ {source_type} 发现 {len(candidate_relations)} 条候选关系")
         except Exception as e:
             print(f"⚠️ {source_type} 关系发现失败: {e}")
+            # 即使失败也继续，允许用户手动添加
             import traceback
             traceback.print_exc()
 
-    # 保存关系到 session（此时只是候选关系，等待用户确认）
-    # 如果用户后续确认，会通过 /data/relations/confirm 覆盖
+    # 保存关系到 session（即使为空也保存）
     session_service.save_relationships(session_id, [r.dict() for r in candidate_relations])
 
     return {
         "tables": result,
         "session_id": session_id,
         "table_list": table_list,
-        "candidate_relations": [r.dict() for r in candidate_relations],
+        "candidate_relations": [r.dict() for r in candidate_relations],  # 可能为空
         "load_summary": {
             "total": len(tables),
             "success": len([t for t in table_list if t["load_status"] == "success"]),
@@ -458,6 +458,39 @@ async def get_relations(
 
     relationships = session_service.get_relationships(session_id)
     return {"session_id": session_id, "relationships": relationships}
+
+
+# ==================== 新增：字段类型更新 ====================
+
+@router.post("/data/field_types/update", response_model=FieldTypesUpdateResponse)
+async def update_field_types(
+    request: FieldTypesUpdateRequest,
+    session_service: SessionService = Depends(Dependencies.get_session_service)
+):
+    """
+    更新字段类型缓存
+
+    用户在预览界面调整字段类型后，调用此接口保存到后端缓存
+    分析时从缓存读取字段类型
+    """
+    session = session_service.get_session(request.session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="会话不存在")
+
+    # 保存到缓存
+    success = session_service.save_field_types_cache(
+        request.session_id,
+        request.table_name,
+        request.field_types
+    )
+
+    if not success:
+        raise HTTPException(status_code=500, detail="保存字段类型失败")
+
+    return FieldTypesUpdateResponse(
+        success=True,
+        message=f"字段类型已更新，共 {len(request.field_types)} 个字段"
+    )
 
 
 # ==================== 示例数据 ====================
