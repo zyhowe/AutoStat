@@ -5,7 +5,9 @@ import shutil
 import socket
 from pathlib import Path
 from typing import Dict, Any, Optional, List
-from datetime import datetime
+from datetime import datetime,date
+import numpy as np
+import pandas as pd
 
 from api_server.config import settings
 
@@ -40,6 +42,36 @@ class SessionService:
         ip_key = ip.replace('.', '_')
         return self.projects_dir / f"{ip_key}.json"
 
+    def _clean_for_json(self, obj):
+        """递归清理不可 JSON 序列化的对象"""
+        if isinstance(obj, dict):
+            return {k: self._clean_for_json(v) for k, v in obj.items()}
+        elif isinstance(obj, list):
+            return [self._clean_for_json(v) for v in obj]
+        elif isinstance(obj, tuple):
+            return [self._clean_for_json(v) for v in obj]
+        elif isinstance(obj, (np.integer, np.int32, np.int64)):
+            return int(obj)
+        elif isinstance(obj, (np.floating, np.float32, np.float64)):
+            return float(obj)
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
+        elif isinstance(obj, pd.Timestamp):
+            return obj.isoformat()
+        elif isinstance(obj, (datetime, date)):
+            return obj.isoformat()
+        elif isinstance(obj, (bytes, bytearray)):
+            return obj.decode('utf-8', errors='ignore')
+        elif isinstance(obj, (pd.Series, pd.DataFrame)):
+            return obj.to_dict(orient='records')
+        elif hasattr(obj, '__dict__'):
+            try:
+                return {k: self._clean_for_json(v) for k, v in obj.__dict__.items() if not k.startswith('_')}
+            except:
+                return str(obj)
+        else:
+            return obj
+
     # ==================== ✅ 统一 Parquet 路径 ====================
     def get_table_parquet_path(self, session_id: str, table_name: str) -> Path:
         """
@@ -62,26 +94,35 @@ class SessionService:
     def _load_metadata(self, session_id: str) -> Optional[Dict]:
         metadata_path = self._get_metadata_path(session_id)
         if metadata_path.exists():
-            with open(metadata_path, "r", encoding="utf-8") as f:
-                return json.load(f)
+            try:
+                with open(metadata_path, "r", encoding="utf-8") as f:
+                    return json.load(f)
+            except json.JSONDecodeError:
+                print(f"⚠️ metadata.json 损坏，尝试修复: {session_id}")
+                return None
         return None
 
     def _save_metadata(self, session_id: str, metadata: Dict):
         session_path = self._get_session_path(session_id)
         session_path.mkdir(parents=True, exist_ok=True)
+        cleaned_metadata = self._clean_for_json(metadata)
         with open(self._get_metadata_path(session_id), "w", encoding="utf-8") as f:
-            json.dump(metadata, f, ensure_ascii=False, indent=2)
+            json.dump(cleaned_metadata, f, ensure_ascii=False, indent=2, default=str)
 
     def _load_projects(self) -> List[Dict]:
         projects_file = self._get_projects_file()
         if projects_file.exists():
-            with open(projects_file, "r", encoding="utf-8") as f:
-                return json.load(f)
+            try:
+                with open(projects_file, "r", encoding="utf-8") as f:
+                    return json.load(f)
+            except json.JSONDecodeError:
+                return []
         return []
 
     def _save_projects(self, projects: List[Dict]):
+        cleaned_projects = self._clean_for_json(projects)
         with open(self._get_projects_file(), "w", encoding="utf-8") as f:
-            json.dump(projects, f, ensure_ascii=False, indent=2)
+            json.dump(cleaned_projects, f, ensure_ascii=False, indent=2, default=str)
 
     def create_session(self, source_name: str, analysis_type: str = "single", tables_info: dict = None) -> str:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -235,8 +276,9 @@ class SessionService:
             "questions": questions
         }
 
+        cleaned_data = self._clean_for_json(data)
         with open(questions_file, 'w', encoding='utf-8') as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
+            json.dump(cleaned_data, f, ensure_ascii=False, indent=2, default=str)
 
         if hasattr(self, '_recommended_questions_cache'):
             self._recommended_questions_cache[session_id] = questions
@@ -252,15 +294,18 @@ class SessionService:
         questions_file = session_path / "recommended_questions.json"
 
         if questions_file.exists():
-            with open(questions_file, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-                questions = data.get('questions', {})
+            try:
+                with open(questions_file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    questions = data.get('questions', {})
 
-                if not hasattr(self, '_recommended_questions_cache'):
-                    self._recommended_questions_cache = {}
-                self._recommended_questions_cache[session_id] = questions
+                    if not hasattr(self, '_recommended_questions_cache'):
+                        self._recommended_questions_cache = {}
+                    self._recommended_questions_cache[session_id] = questions
 
-                return questions
+                    return questions
+            except json.JSONDecodeError:
+                return None
 
         return None
 
@@ -428,3 +473,102 @@ class SessionService:
             return file_info['path']
 
         return None
+
+    # ==================== 场景数据管理 ====================
+
+    def save_scenarios(self, session_id: str, scenarios_data: dict) -> bool:
+        """
+        保存场景数据到独立 JSON 文件
+
+        参数:
+        - session_id: 会话ID
+        - scenarios_data: 场景数据（包含 candidates, results 等）
+
+        返回:
+        - bool: 是否保存成功
+        """
+        try:
+            session_path = self._get_session_path(session_id)
+            scenarios_path = session_path / "scenarios.json"
+
+            # 清理数据
+            cleaned_data = self._clean_for_json(scenarios_data)
+
+            # 合并已有数据（如果有）
+            existing = {}
+            if scenarios_path.exists():
+                try:
+                    with open(scenarios_path, 'r', encoding='utf-8') as f:
+                        existing = json.load(f)
+                except json.JSONDecodeError:
+                    # 文件损坏，重新创建
+                    print(f"⚠️ scenarios.json 损坏，重新创建: {session_id}")
+                    existing = {}
+
+            # 合并更新
+            existing.update(cleaned_data)
+            existing["session_id"] = session_id
+            existing["updated_at"] = datetime.now().isoformat()
+
+            with open(scenarios_path, 'w', encoding='utf-8') as f:
+                json.dump(existing, f, ensure_ascii=False, indent=2, default=str)
+
+            return True
+        except Exception as e:
+            print(f"❌ 保存场景数据失败: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+
+    def load_scenarios(self, session_id: str) -> Optional[dict]:
+        """
+        加载场景数据
+
+        参数:
+        - session_id: 会话ID
+
+        返回:
+        - 场景数据字典，如果不存在返回 None
+        """
+        try:
+            session_path = self._get_session_path(session_id)
+            scenarios_path = session_path / "scenarios.json"
+
+            if not scenarios_path.exists():
+                return None
+
+            with open(scenarios_path, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except json.JSONDecodeError as e:
+            print(f"❌ 加载场景数据失败: {e}")
+            # 尝试修复：备份并删除损坏文件
+            try:
+                session_path = self._get_session_path(session_id)
+                scenarios_path = session_path / "scenarios.json"
+                if scenarios_path.exists():
+                    backup_path = session_path / "scenarios.json.bak"
+                    import shutil
+                    shutil.copy(scenarios_path, backup_path)
+                    scenarios_path.unlink()
+                    print(f"✅ 已备份并删除损坏的 scenarios.json")
+            except:
+                pass
+            return None
+        except Exception as e:
+            print(f"❌ 加载场景数据失败: {e}")
+            return None
+
+    def get_scenario_results(self, session_id: str) -> List[Dict]:
+        """
+        获取场景执行结果
+
+        参数:
+        - session_id: 会话ID
+
+        返回:
+        - 场景结果列表
+        """
+        data = self.load_scenarios(session_id)
+        if data:
+            return data.get("results", [])
+        return []

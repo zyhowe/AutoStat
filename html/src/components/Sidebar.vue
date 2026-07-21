@@ -6,48 +6,61 @@
       class="sidebar-menu"
       @select="handleMenuSelect"
     >
-      <!-- 平铺菜单 -->
+      <!-- 上传数据 -->
       <el-menu-item index="/upload">
         <el-icon><Upload /></el-icon>
         <span>上传数据</span>
       </el-menu-item>
 
+      <!-- 报告总览 -->
       <el-menu-item index="/report-summary">
         <el-icon><Document /></el-icon>
         <span>报告总览</span>
       </el-menu-item>
 
+      <!-- 数据概览 -->
       <el-menu-item index="/data-overview">
         <el-icon><DataAnalysis /></el-icon>
         <span>数据概览</span>
       </el-menu-item>
 
+      <!-- 质量看板 -->
       <el-menu-item index="/quality">
         <el-icon><Monitor /></el-icon>
         <span>质量看板</span>
       </el-menu-item>
 
+      <!-- 数据核验 -->
       <el-menu-item index="/data-validation">
         <el-icon><CircleCheck /></el-icon>
         <span>数据核验</span>
       </el-menu-item>
 
+      <!-- 规律发现 -->
       <el-menu-item index="/pattern-discovery">
         <el-icon><TrendCharts /></el-icon>
         <span>规律发现</span>
       </el-menu-item>
 
+      <!-- 智能预测 -->
       <el-menu-item index="/models">
         <el-icon><Cpu /></el-icon>
         <span>智能预测</span>
       </el-menu-item>
 
-      <!-- AI助手暂时保留 -->
+      <!-- 场景分析（合并原场景推导和仪表板） -->
+      <el-menu-item index="/scenario-analysis">
+        <el-icon><MagicStick /></el-icon>
+        <span>场景分析</span>
+      </el-menu-item>
+
+      <!-- AI助手 -->
       <el-menu-item index="/ai">
         <el-icon><ChatDotRound /></el-icon>
         <span>AI助手</span>
       </el-menu-item>
 
+      <!-- 设置 -->
       <el-menu-item index="/settings">
         <el-icon><Setting /></el-icon>
         <span>设置</span>
@@ -133,7 +146,8 @@ import {
   Document,
   Cpu,
   ChatDotRound,
-  Setting
+  Setting,
+  MagicStick
 } from '@element-plus/icons-vue'
 
 const router = useRouter()
@@ -148,7 +162,6 @@ onMounted(async () => {
   await loadProjects()
 })
 
-// ✅ 监听 sessionId 变化，自动刷新项目列表
 watch(() => sessionStore.currentSessionId, async (newId, oldId) => {
   if (newId !== oldId) {
     await loadProjects()
@@ -165,7 +178,6 @@ async function loadProjects() {
   loadingProjects.value = true
   try {
     const result = await sessionApi.list()
-    console.log('📋 项目列表刷新:', result.projects)
     projects.value = result.projects || []
   } catch (err) {
     console.error('加载项目列表失败:', err)
@@ -176,14 +188,12 @@ async function loadProjects() {
 
 async function loadProject(sessionId) {
   if (sessionId === sessionStore.currentSessionId) {
-    // ✅ 如果已经是当前项目，强制刷新页面
     router.go(0)
     return
   }
   try {
     await sessionStore.loadSession(sessionId)
     ElMessage.success('已加载项目')
-    // ✅ 使用 replace 强制刷新
     router.replace('/report-summary')
   } catch (err) {
     ElMessage.error('加载项目失败: ' + err.message)
@@ -219,10 +229,11 @@ async function deleteProject(sessionId, sourceName) {
   height: 100%;
   background: #f5f7fa;
   border-right: 1px solid #e4e7ed;
+  overflow: hidden; /* 防止整体滚动 */
 }
 
 .sidebar-menu {
-  flex: 0 0 auto;
+  flex-shrink: 0; /* 菜单不收缩 */
   border-right: none;
   background: transparent;
 }
@@ -239,17 +250,18 @@ async function deleteProject(sessionId, sourceName) {
 }
 
 .projects-section {
-  flex: 1;
-  overflow: hidden;
+  flex: 1 1 0; /* 占据剩余空间，允许收缩 */
+  min-height: 0; /* 允许 flex 子项收缩 */
   display: flex;
   flex-direction: column;
-  min-height: 0;
+  overflow: hidden;
 }
 .projects-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
   padding: 0 16px 8px 16px;
+  flex-shrink: 0;
 }
 .projects-title {
   font-size: 13px;
@@ -257,16 +269,31 @@ async function deleteProject(sessionId, sourceName) {
   color: #2c3e50;
 }
 .projects-list {
-  flex: 1;
-  overflow-y: auto;
+  flex: 1 1 0;
+  overflow-y: auto; /* 垂直滚动 */
   padding: 0 8px;
+  min-height: 0;
 }
+/* 自定义滚动条 */
+.projects-list::-webkit-scrollbar {
+  width: 4px;
+}
+.projects-list::-webkit-scrollbar-thumb {
+  background: #c0c4cc;
+  border-radius: 2px;
+}
+.projects-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
 .projects-loading {
   padding: 8px 16px;
+  flex-shrink: 0;
 }
 .projects-empty {
   padding: 16px;
   text-align: center;
+  flex-shrink: 0;
 }
 
 .project-item {
@@ -306,7 +333,7 @@ async function deleteProject(sessionId, sourceName) {
 }
 
 .sidebar-footer {
-  flex-shrink: 0;
+  flex-shrink: 0; /* 底部不收缩 */
   padding: 8px 16px 12px 16px;
 }
 .sidebar-footer .el-divider {

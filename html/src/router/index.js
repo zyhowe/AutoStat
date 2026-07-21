@@ -9,6 +9,7 @@ import PatternDiscovery from '../views/PatternDiscovery.vue'
 import ModelCenter from '../views/ModelCenter.vue'
 import AIAssistant from '../views/AIAssistant.vue'
 import Settings from '../views/Settings.vue'
+import ScenarioAnalysis from '../views/ScenarioAnalysis.vue'
 
 const routes = [
   { path: '/', name: 'Home', component: Home },
@@ -20,7 +21,8 @@ const routes = [
   { path: '/pattern-discovery', name: 'PatternDiscovery', component: PatternDiscovery },
   { path: '/models', name: 'ModelCenter', component: ModelCenter },
   { path: '/ai', name: 'AIAssistant', component: AIAssistant },
-  { path: '/settings', name: 'Settings', component: Settings }
+  { path: '/settings', name: 'Settings', component: Settings },
+  { path: '/scenario-analysis', name: 'ScenarioAnalysis', component: ScenarioAnalysis }
 ]
 
 const router = createRouter({

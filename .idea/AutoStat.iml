@@ -10,5 +10,6 @@
     <orderEntry type="module" module-name="myapp310" />
     <orderEntry type="module" module-name="hello-agents" />
     <orderEntry type="module" module-name="smart-data-platform" />
+    <orderEntry type="module" module-name="AutoStatPrivate" />
   </component>
 </module>

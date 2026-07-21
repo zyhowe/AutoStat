@@ -3,6 +3,7 @@
   <component name="ProjectModuleManager">
     <modules>
       <module fileurl="file://$PROJECT_DIR$/.idea/AutoStat.iml" filepath="$PROJECT_DIR$/.idea/AutoStat.iml" />
+      <module fileurl="file://$PROJECT_DIR$/../AutoStatPrivate/.idea/AutoStatPrivate.iml" filepath="$PROJECT_DIR$/../AutoStatPrivate/.idea/AutoStatPrivate.iml" />
       <module fileurl="file://$PROJECT_DIR$/../demo/.idea/demo.iml" filepath="$PROJECT_DIR$/../demo/.idea/demo.iml" />
       <module fileurl="file://$PROJECT_DIR$/../dify-official-plugins/.idea/dify-official-plugins.iml" filepath="$PROJECT_DIR$/../dify-official-plugins/.idea/dify-official-plugins.iml" />
       <module fileurl="file://$PROJECT_DIR$/../hello-agents/.idea/hello-agents.iml" filepath="$PROJECT_DIR$/../hello-agents/.idea/hello-agents.iml" />

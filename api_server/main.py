@@ -1,9 +1,8 @@
-# api_server/main.py
-
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from api_server.routers import session, data, analysis, quality, report, export, models, chat, config
+from api_server.routers.scenarios import router as scenarios_router
 from api_server.config import settings
 
 app = FastAPI(
@@ -16,10 +15,9 @@ app = FastAPI(
 )
 
 # CORS 配置
-
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # 开发环境允许所有
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -31,10 +29,11 @@ app.include_router(data.router, prefix="/api/v1", tags=["数据管理"])
 app.include_router(analysis.router, prefix="/api/v1", tags=["分析执行"])
 app.include_router(quality.router, prefix="/api/v1", tags=["质量报告"])
 app.include_router(report.router, prefix="/api/v1", tags=["分析报告"])
-app.include_router(export.router, prefix="/api/v1", tags=["导出"])      # ← 确保这一行存在
+app.include_router(export.router, prefix="/api/v1", tags=["导出"])
 app.include_router(models.router, prefix="/api/v1", tags=["模型管理"])
 app.include_router(chat.router, prefix="/api/v1", tags=["AI对话"])
 app.include_router(config.router, prefix="/api/v1", tags=["配置管理"])
+app.include_router(scenarios_router, prefix="/api/v1", tags=["场景管理"])
 
 
 @app.get("/")
