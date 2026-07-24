@@ -114,13 +114,23 @@
               <el-tag v-else size="small" type="info">其他</el-tag>
             </template>
           </el-table-column>
-          <el-table-column prop="field_display" label="规则/字段" min-width="150" sortable>
+
+          <!-- 规则/字段列 -->
+          <el-table-column prop="field_display" label="规则/字段" min-width="180" sortable>
             <template #default="{ row }">
               <span v-if="row.record_type === 'cluster'">归属群组</span>
-              <span v-else-if="row.record_type === 'violation'">{{ row.rule || row.field_display || '—' }}</span>
+              <span v-else-if="row.record_type === 'violation'">
+                <div style="display:flex;flex-direction:column;gap:2px;">
+                  <span style="font-weight:500;">{{ row.rule || '勾稽规则' }}</span>
+                  <span v-if="row.values_display" style="color:#909399;font-size:11px;word-break:break-all;">
+                    {{ row.values_display }}
+                  </span>
+                </div>
+              </span>
               <span v-else>{{ row.field_display || row.field || '—' }}</span>
             </template>
           </el-table-column>
+
           <el-table-column prop="value_display" label="当前值" min-width="150" sortable>
             <template #default="{ row }">
               <span v-if="row.record_type === 'cluster'">群组 {{ row.cluster_id }}</span>
@@ -134,6 +144,7 @@
               <span v-else>{{ row.value !== undefined && row.value !== null ? row.value : '—' }}</span>
             </template>
           </el-table-column>
+
           <el-table-column prop="expected" label="预期值/范围" min-width="100">
             <template #default="{ row }">
               <span v-if="row.record_type === 'cluster' || row.record_type === 'entity_concentration' || row.record_type === 'duplicate'">—</span>
@@ -141,18 +152,21 @@
               <span v-else>{{ row.expected || '—' }}</span>
             </template>
           </el-table-column>
+
           <el-table-column prop="deviation" label="偏离程度" width="100" align="center" sortable>
             <template #default="{ row }">
               <span v-if="row.record_type === 'cluster' || row.record_type === 'entity_concentration' || row.record_type === 'duplicate'">—</span>
               <span v-else>{{ row.deviation !== undefined ? row.deviation.toFixed(2) + 'x' : '—' }}</span>
             </template>
           </el-table-column>
+
           <el-table-column prop="severity" label="严重程度" width="90" align="center">
             <template #default="{ row }">
               <el-tag v-if="row.severity" :type="row.severity === 'high' ? 'danger' : row.severity === 'medium' ? 'warning' : 'info'" size="small">{{ row.severity }}</el-tag>
               <span v-else>—</span>
             </template>
           </el-table-column>
+
           <el-table-column prop="status" label="状态" width="110" align="center">
             <template #default="{ row }">
               <el-select :model-value="row.status" size="small" placeholder="状态" @update:model-value="$emit('update-record-status', row, $event)">
@@ -162,7 +176,24 @@
               </el-select>
             </template>
           </el-table-column>
-          <el-table-column label="操作" width="80" align="center">
+
+          <!-- 追溯列 -->
+          <el-table-column label="追溯" width="70" align="center" fixed="right">
+            <template #default="{ row }">
+              <el-button
+                size="small"
+                text
+                type="primary"
+                @click="$emit('view-full-data', row)"
+                :disabled="!row.row"
+                title="追溯原始数据"
+              >
+                📦
+              </el-button>
+            </template>
+          </el-table-column>
+
+          <el-table-column label="操作" width="80" align="center" fixed="right">
             <template #default="{ row }">
               <el-button size="small" text type="primary" @click="$emit('show-detail', row)">详情</el-button>
             </template>
@@ -214,7 +245,8 @@ defineEmits([
   'go-to-config',
   'update:filter',
   'update:current-page',
-  'update:page-size'
+  'update:page-size',
+  'view-full-data'
 ])
 </script>
 

@@ -25,7 +25,11 @@
           <div class="insight-card" v-if="insights.rankings?.violation_by_rule?.length > 0">
             <div class="card-title">📊 规则违反排行榜</div>
             <el-table :data="insights.rankings.violation_by_rule.slice(0, 8)" size="small" max-height="280">
-              <el-table-column prop="name" label="规则" min-width="160" show-overflow-tooltip />
+              <el-table-column prop="name" label="规则" min-width="160" show-overflow-tooltip>
+                <template #default="{ row }">
+                  <span class="rule-link" @click="handleRuleClick(row)">{{ row.name }}</span>
+                </template>
+              </el-table-column>
               <el-table-column prop="count" label="违反数" width="80" align="center" sortable />
               <el-table-column prop="rate" label="占比" width="70" align="center">
                 <template #default="{ row }">{{ row.rate }}%</template>
@@ -39,7 +43,7 @@
               </el-table-column>
               <el-table-column label="操作" width="70" align="center">
                 <template #default="{ row }">
-                  <el-button size="small" text type="primary" @click="viewByRule(row.name)">查看</el-button>
+                  <el-button size="small" text type="primary" @click="handleRuleClick(row)">追溯</el-button>
                 </template>
               </el-table-column>
             </el-table>
@@ -56,7 +60,7 @@
               </el-table-column>
               <el-table-column label="操作" width="70" align="center">
                 <template #default="{ row }">
-                  <el-button size="small" text type="primary" @click="viewByCompany(row.name)">查看</el-button>
+                  <el-button size="small" text type="primary" @click="$emit('view-full-data', { type: 'company', data: row.name })">追溯</el-button>
                 </template>
               </el-table-column>
             </el-table>
@@ -73,7 +77,7 @@
               </el-table-column>
               <el-table-column label="操作" width="70" align="center">
                 <template #default="{ row }">
-                  <el-button size="small" text type="primary" @click="viewByField(row.field || row.name)">查看</el-button>
+                  <el-button size="small" text type="primary" @click="$emit('view-full-data', { type: 'field', data: row.field || row.name })">追溯</el-button>
                 </template>
               </el-table-column>
             </el-table>
@@ -90,7 +94,7 @@
               </el-table-column>
               <el-table-column label="操作" width="70" align="center">
                 <template #default="{ row }">
-                  <el-button size="small" text type="primary" @click="viewByCompany(row.name)">查看</el-button>
+                  <el-button size="small" text type="primary" @click="$emit('view-full-data', { type: 'company', data: row.name })">追溯</el-button>
                 </template>
               </el-table-column>
             </el-table>
@@ -258,7 +262,12 @@ const props = defineProps({
   expandedCard: { type: [String, null], default: null }
 })
 
-const emit = defineEmits(['view-details', 'toggle-expand', 'go-to-config'])
+const emit = defineEmits([
+  'view-details',
+  'toggle-expand',
+  'go-to-config',
+  'view-full-data'
+])
 
 const hasInsights = computed(() => {
   const i = props.insights
@@ -329,33 +338,57 @@ function replaceFieldNames(text) {
   return result
 }
 
-function viewByRule(rule) {
-  // 找到对应场景并跳转
-  const scenario = props.scenarioResults.find(s => {
-    const records = s.records || []
-    return records.some(r => r.rule === rule)
-  })
-  if (scenario) {
-    emit('view-details', scenario)
-  }
-}
+// ===== 处理规则点击 =====
+function handleRuleClick(ruleRow) {
+  // 从 scenarioResults 中查找完整的规则信息
+  let fullRule = null
+  let allFields = []
+  let rowIds = []
 
-function viewByCompany(company) {
-  // 找到包含该公司记录的场景
-  // 由于公司不在records里直接存储，需要从row反查
-  // 这里简化处理：跳转到数据解码并提示
-  emit('view-details', { name: company, business_name: company, scenario_id: null })
-}
+  const ruleName = ruleRow.name
 
-function viewByField(field) {
-  // 找到对应场景
-  const scenario = props.scenarioResults.find(s => {
-    const records = s.records || []
-    return records.some(r => r.field === field || r.field_display === field)
-  })
-  if (scenario) {
-    emit('view-details', scenario)
+  for (const scenario of props.scenarioResults) {
+    if (scenario.status !== 'completed') continue
+    const records = scenario.records || []
+    for (const record of records) {
+      if (record.record_type === 'violation' && record.rule) {
+        const recordRule = record.rule
+        if (recordRule === ruleName || (ruleName.length > 10 && recordRule.includes(ruleName.substring(0, 20)))) {
+          if (!fullRule) {
+            fullRule = recordRule
+          }
+          if (record.fields && record.fields.length > 0) {
+            allFields = record.fields
+          }
+          if (record.row) {
+            rowIds.push(record.row)
+          }
+        }
+      }
+    }
   }
+
+  if (!fullRule) {
+    fullRule = ruleName
+  }
+
+  if (allFields.length === 0 && fullRule) {
+    const fieldMatches = fullRule.match(/companyfixasset\d+/g)
+    if (fieldMatches) {
+      allFields = [...new Set(fieldMatches)]
+    }
+    const otherFields = fullRule.match(/companycode|reportdate|declaredate|currency|cunit|guid/g)
+    if (otherFields) {
+      allFields = [...new Set([...allFields, ...otherFields])]
+    }
+  }
+
+  emit('view-full-data', {
+    type: 'rule',
+    rule: fullRule,
+    fields: allFields,
+    sampleRows: rowIds.slice(0, 5)
+  })
 }
 </script>
 
@@ -388,6 +421,17 @@ function viewByField(field) {
   padding: 14px 16px;
 }
 .card-title { font-size: 14px; font-weight: 600; color: #2c3e50; margin-bottom: 10px; }
+
+.rule-link {
+  color: #409eff;
+  cursor: pointer;
+  font-weight: 500;
+  transition: color 0.2s;
+}
+.rule-link:hover {
+  color: #66b1ff;
+  text-decoration: underline;
+}
 
 .trends-grid {
   display: grid;

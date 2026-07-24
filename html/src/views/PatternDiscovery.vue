@@ -1,7 +1,7 @@
 <template>
   <div class="pattern-discovery">
     <h2>📈 规律发现</h2>
-    <p class="subtitle">探索当前表中变量之间的相关性和时间序列规律</p>
+    <p class="subtitle">探索当前表中变量之间的相关性、时间序列规律，以及字段间的信息簇</p>
 
     <div v-if="loading" class="loading-container">
       <el-skeleton :rows="10" animated />
@@ -17,9 +17,7 @@
       />
 
       <el-tabs v-model="activeTab">
-        <!-- ============================================================ -->
-        <!-- Tab1: 相关性分析 -->
-        <!-- ============================================================ -->
+        <!-- ===== 相关性分析 ===== -->
         <el-tab-pane label="相关性分析" name="correlation">
           <!-- 热力图 -->
           <div class="chart-card">
@@ -139,13 +137,6 @@
                   </span>
                 </template>
               </el-table-column>
-              <el-table-column label="强相关数" width="110" align="center">
-                <template #default="{ row }">
-                  <span class="field-name-link" @click="showCorrelationData(row)">
-                    {{ row.valid_count !== undefined && row.valid_count !== null ? row.valid_count : '--' }}
-                  </span>
-                </template>
-              </el-table-column>
               <el-table-column label="置信度" width="100" align="center">
                 <template #default="{ row }">
                   <span class="field-name-link" @click="showCorrelationData(row)">
@@ -157,9 +148,7 @@
           </div>
         </el-tab-pane>
 
-        <!-- ============================================================ -->
-        <!-- Tab2: 时间序列分析 -->
-        <!-- ============================================================ -->
+        <!-- ===== 时间序列分析 ===== -->
         <el-tab-pane label="时间序列分析" name="timeseries">
           <div class="chart-card">
             <div class="chart-header">
@@ -228,6 +217,46 @@
               <el-table-column prop="autocorrelation" label="自相关性" width="120" align="center" />
               <el-table-column prop="seasonality" label="季节性" width="100" align="center" />
             </el-table>
+          </div>
+        </el-tab-pane>
+
+        <!-- ===== 信息簇（新增） ===== -->
+        <!-- ===== 信息簇（新增） ===== -->
+        <el-tab-pane label="🔗 信息簇" name="clusters">
+          <div class="chart-card">
+            <div class="chart-header">
+              <span class="chart-title">🧩 字段信息簇网络图</span>
+              <span class="info-hint">节点为字段，边为强相关（|r| > 0.7），颜色表示簇</span>
+            </div>
+            <div v-if="clusterNodes.length > 0 && networkOption && Object.keys(networkOption).length > 0" class="cluster-network">
+              <v-chart
+                :option="networkOption"
+                class="chart-container"
+                style="height: 500px;"
+                autoresize
+              />
+            </div>
+            <div v-else class="chart-empty">无足够强相关关系形成信息簇（需要至少 3 个有强相关的字段）</div>
+          </div>
+
+          <div v-if="clusterGroups.length > 0" class="cluster-groups">
+            <h4>📋 信息簇分组</h4>
+            <div class="cluster-group-list">
+              <div v-for="(group, idx) in clusterGroups" :key="idx" class="cluster-group">
+                <div class="group-header">
+                  <span class="group-name">簇 {{ idx + 1 }}</span>
+                  <span class="group-size">{{ group.fields.length }} 个字段</span>
+                </div>
+                <div class="group-fields">
+                  <el-tag v-for="field in group.fields" :key="field" size="small" :type="['primary', 'success', 'warning', 'danger', 'info'][idx % 5]">
+                    {{ field }}
+                  </el-tag>
+                </div>
+                <div class="group-desc" v-if="group.centroid">
+                  核心字段：{{ group.centroid }}
+                </div>
+              </div>
+            </div>
           </div>
         </el-tab-pane>
       </el-tabs>
@@ -301,6 +330,237 @@ const summaries = computed(() => currentData.value?.variable_summaries || {})
 const correlations = computed(() => currentData.value?.correlations || {})
 const quality = computed(() => currentData.value?.quality_report || {})
 
+// ===== 信息簇相关（新增） =====
+// ==================== 信息簇相关（修复版） ====================
+const clusterGroups = computed(() => {
+  const matrix = correlations.value?.matrix || {}
+  const fields = Object.keys(matrix)
+  if (fields.length < 2) return []
+
+  // 构建强相关图
+  const graph = {}
+  for (const f of fields) {
+    graph[f] = []
+  }
+  for (let i = 0; i < fields.length; i++) {
+    for (let j = i + 1; j < fields.length; j++) {
+      const f1 = fields[i]
+      const f2 = fields[j]
+      const val = matrix[f1]?.[f2]
+      if (val !== undefined && val !== null && Math.abs(val) > 0.7) {
+        graph[f1].push(f2)
+        graph[f2].push(f1)
+      }
+    }
+  }
+
+  // 连通分量
+  const visited = new Set()
+  const clusters = []
+  for (const f of fields) {
+    if (!visited.has(f) && graph[f].length > 0) {
+      const cluster = []
+      const stack = [f]
+      visited.add(f)
+      while (stack.length > 0) {
+        const node = stack.pop()
+        cluster.push(node)
+        for (const neighbor of graph[node]) {
+          if (!visited.has(neighbor)) {
+            visited.add(neighbor)
+            stack.push(neighbor)
+          }
+        }
+      }
+      if (cluster.length >= 3) {
+        clusters.push(cluster)
+      }
+    }
+  }
+
+  // 按大小降序
+  clusters.sort((a, b) => b.length - a.length)
+
+  // 计算每个簇的中心节点（度数最高的）
+  const result = clusters.map(cluster => {
+    const degrees = {}
+    for (const node of cluster) {
+      degrees[node] = graph[node].filter(n => cluster.includes(n)).length
+    }
+    let maxDegree = 0
+    let centroid = cluster[0]
+    for (const [node, deg] of Object.entries(degrees)) {
+      if (deg > maxDegree) {
+        maxDegree = deg
+        centroid = node
+      }
+    }
+    return {
+      fields: cluster,
+      centroid: centroid
+    }
+  })
+
+  return result.slice(0, 10)
+})
+
+const clusterNodes = computed(() => {
+  const matrix = correlations.value?.matrix || {}
+  const fields = Object.keys(matrix)
+  if (fields.length < 2) return []
+
+  // 构建强相关图
+  const graph = {}
+  for (const f of fields) {
+    graph[f] = []
+  }
+  for (let i = 0; i < fields.length; i++) {
+    for (let j = i + 1; j < fields.length; j++) {
+      const f1 = fields[i]
+      const f2 = fields[j]
+      const val = matrix[f1]?.[f2]
+      if (val !== undefined && val !== null && Math.abs(val) > 0.7) {
+        graph[f1].push(f2)
+        graph[f2].push(f1)
+      }
+    }
+  }
+
+  // 只取有边的节点
+  const hasEdge = new Set()
+  for (const [f, neighbors] of Object.entries(graph)) {
+    if (neighbors.length > 0) {
+      hasEdge.add(f)
+    }
+  }
+  return Array.from(hasEdge)
+})
+
+const networkOption = computed(() => {
+  const matrix = correlations.value?.matrix || {}
+  const fields = Object.keys(matrix)
+  if (fields.length < 3) return {}
+
+  // 构建强相关图
+  const graph = {}
+  for (const f of fields) {
+    graph[f] = []
+  }
+  for (let i = 0; i < fields.length; i++) {
+    for (let j = i + 1; j < fields.length; j++) {
+      const f1 = fields[i]
+      const f2 = fields[j]
+      const val = matrix[f1]?.[f2]
+      if (val !== undefined && val !== null && Math.abs(val) > 0.7) {
+        graph[f1].push(f2)
+        graph[f2].push(f1)
+      }
+    }
+  }
+
+  // 只取有边的节点
+  const hasEdge = new Set()
+  for (const [f, neighbors] of Object.entries(graph)) {
+    if (neighbors.length > 0) {
+      hasEdge.add(f)
+    }
+  }
+  const nodeList = Array.from(hasEdge)
+  if (nodeList.length < 3) return {}
+
+  // 计算连通分量（用于着色）
+  const visited = new Set()
+  const colorMap = {}
+  let colorIdx = 0
+  const colors = ['#409EFF', '#67C23A', '#E6A23C', '#F56C6C', '#9B59B6', '#1ABC9C', '#3498DB', '#2ECC71']
+
+  for (const f of nodeList) {
+    if (!visited.has(f)) {
+      const stack = [f]
+      visited.add(f)
+      while (stack.length > 0) {
+        const node = stack.pop()
+        colorMap[node] = colors[colorIdx % colors.length]
+        for (const neighbor of graph[node]) {
+          if (!visited.has(neighbor) && nodeList.includes(neighbor)) {
+            visited.add(neighbor)
+            stack.push(neighbor)
+          }
+        }
+      }
+      colorIdx++
+    }
+  }
+
+  // 构建 ECharts 数据
+  const nodes = nodeList.map(f => ({
+    id: f,
+    name: f,
+    itemStyle: { color: colorMap[f] || '#909399' },
+    symbolSize: 20 + Math.min(20, graph[f].filter(n => nodeList.includes(n)).length * 2)
+  }))
+
+  const edges = []
+  for (let i = 0; i < nodeList.length; i++) {
+    for (let j = i + 1; j < nodeList.length; j++) {
+      const f1 = nodeList[i]
+      const f2 = nodeList[j]
+      if (graph[f1].includes(f2)) {
+        const val = matrix[f1]?.[f2]
+        edges.push({
+          source: f1,
+          target: f2,
+          lineStyle: {
+            color: Math.abs(val) > 0.9 ? '#f56c6c' : '#e6a23c',
+            width: Math.min(4, Math.abs(val) * 4)
+          }
+        })
+      }
+    }
+  }
+
+  if (edges.length === 0) return {}
+
+  return {
+    tooltip: {
+      trigger: 'item',
+      formatter: (params) => {
+        if (params.dataType === 'node') {
+          return `<strong>${params.name}</strong>`
+        }
+        return ''
+      }
+    },
+    series: [{
+      type: 'graph',
+      layout: 'force',
+      data: nodes,
+      edges: edges,
+      roam: true,
+      draggable: true,
+      force: {
+        repulsion: 200,
+        edgeLength: 150,
+        layoutAnimation: true
+      },
+      label: {
+        show: true,
+        position: 'right',
+        fontSize: 10
+      },
+      lineStyle: {
+        color: 'source',
+        curveness: 0
+      },
+      edgeSymbol: ['none', 'none'],
+      edgeLabel: {
+        show: false
+      }
+    }]
+  }
+})
+
+// ===== 原有逻辑 =====
 function buildFieldData(fieldName) {
   const summary = summaries.value?.[fieldName] || {}
   const varType = variableTypes.value?.[fieldName]?.type || 'unknown'
@@ -954,7 +1214,6 @@ async function loadData() {
     const result = await reportApi.get(sessionId)
     reportData.value = result
 
-    // 初始化表选择器
     const allTables = result?.all_tables || {}
     const tableKeys = Object.keys(allTables)
     tableNames.value = tableKeys.filter(k => k !== 'merged')
@@ -977,6 +1236,10 @@ async function loadData() {
 
 function goToUpload() {
   router.push('/upload')
+}
+
+function onTableChange() {
+  loadData()
 }
 
 onMounted(() => {
@@ -1067,6 +1330,60 @@ onMounted(() => {
   text-decoration: underline;
 }
 
+.info-hint {
+  font-size: 12px;
+  color: #909399;
+}
+
+.cluster-network {
+  width: 100%;
+  height: 500px;
+}
+
+.cluster-groups {
+  margin-top: 20px;
+}
+.cluster-groups h4 {
+  margin-bottom: 12px;
+  color: #2c3e50;
+}
+.cluster-group-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 16px;
+}
+.cluster-group {
+  background: #f5f7fa;
+  border-radius: 8px;
+  padding: 12px 16px;
+  border: 1px solid #e4e7ed;
+}
+.group-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+.group-name {
+  font-weight: 600;
+  font-size: 13px;
+  color: #2c3e50;
+}
+.group-size {
+  font-size: 11px;
+  color: #909399;
+}
+.group-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 4px;
+}
+.group-desc {
+  font-size: 11px;
+  color: #409eff;
+}
+
 @media (max-width: 768px) {
   .filter-bar {
     flex-wrap: wrap;
@@ -1077,6 +1394,9 @@ onMounted(() => {
   }
   .filter-bar .el-input-number {
     width: 65px !important;
+  }
+  .cluster-network {
+    height: 350px;
   }
 }
 </style>

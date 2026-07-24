@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from api_server.routers import session, data, analysis, quality, report, export, models, chat, config
 from api_server.routers.scenarios import router as scenarios_router
+from api_server.routers.stream_query import router as stream_query_router  # 新增
 from api_server.config import settings
 
 app = FastAPI(
@@ -34,6 +35,7 @@ app.include_router(models.router, prefix="/api/v1", tags=["模型管理"])
 app.include_router(chat.router, prefix="/api/v1", tags=["AI对话"])
 app.include_router(config.router, prefix="/api/v1", tags=["配置管理"])
 app.include_router(scenarios_router, prefix="/api/v1", tags=["场景管理"])
+app.include_router(stream_query_router, prefix="/api/v1", tags=["流式查询"])  # 新增
 
 
 @app.get("/")

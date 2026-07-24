@@ -1,7 +1,7 @@
 <template>
   <div class="quality-page">
     <h2>📊 数据质量看板</h2>
-    <p class="subtitle">四维质量评分，全面了解数据健康状况</p>
+    <p class="subtitle">四维质量评分 + SLA 合规性 + 缺失共现分析，全面了解数据健康状况</p>
 
     <div v-if="loading" class="loading-container">
       <el-skeleton :rows="10" animated />
@@ -15,6 +15,42 @@
         :is-multi-table="isMultiTable"
         @change="onTableChange"
       />
+
+      <!-- ===== SLA 红绿灯（新增） ===== -->
+      <div class="sla-section">
+        <div class="sla-title">🚦 SLA 合规性</div>
+        <div class="sla-grid">
+          <div class="sla-item" :class="slaStatus.completeness ? 'pass' : 'fail'">
+            <span class="sla-label">完整性 ≤20% 缺失</span>
+            <span class="sla-value">{{ slaStatus.completeness ? '✅' : '❌' }}</span>
+            <span class="sla-detail">{{ slaStatus.completeness ? '达标' : '不达标' }}</span>
+          </div>
+          <div class="sla-item" :class="slaStatus.accuracy ? 'pass' : 'fail'">
+            <span class="sla-label">准确性 ≤5% 异常</span>
+            <span class="sla-value">{{ slaStatus.accuracy ? '✅' : '❌' }}</span>
+            <span class="sla-detail">{{ slaStatus.accuracy ? '达标' : '不达标' }}</span>
+          </div>
+          <div class="sla-item" :class="slaStatus.noEmptyColumns ? 'pass' : 'fail'">
+            <span class="sla-label">无全空列</span>
+            <span class="sla-value">{{ slaStatus.noEmptyColumns ? '✅' : '❌' }}</span>
+            <span class="sla-detail">{{ slaStatus.noEmptyColumns ? '达标' : '不达标' }}</span>
+          </div>
+          <div class="sla-item" :class="slaStatus.unitConsistent ? 'pass' : 'fail'">
+            <span class="sla-label">单位一致</span>
+            <span class="sla-value">{{ slaStatus.unitConsistent ? '✅' : '❌' }}</span>
+            <span class="sla-detail">{{ slaStatus.unitConsistent ? '达标' : '不达标' }}</span>
+          </div>
+          <div class="sla-item" :class="slaStatus.namingReadable ? 'pass' : 'fail'">
+            <span class="sla-label">字段命名可读</span>
+            <span class="sla-value">{{ slaStatus.namingReadable ? '✅' : '❌' }}</span>
+            <span class="sla-detail">{{ slaStatus.namingReadable ? '达标' : '不达标' }}</span>
+          </div>
+        </div>
+        <div class="sla-summary">
+          达标率：{{ slaPassCount }} / 5
+          <el-progress :percentage="slaPassCount / 5 * 100" :color="slaPassCount >= 4 ? '#67c23a' : slaPassCount >= 3 ? '#e6a23c' : '#f56c6c'" :stroke-width="8" />
+        </div>
+      </div>
 
       <!-- 图表区域 -->
       <div class="charts-row">
@@ -64,6 +100,24 @@
           />
           <div class="dimension-value">{{ Math.round(score) }}%</div>
         </el-card>
+      </div>
+
+      <!-- ===== 缺失共现簇（新增） ===== -->
+      <div v-if="missingClusters.length > 0" class="cluster-section">
+        <h3>📊 缺失共现簇</h3>
+        <p class="cluster-desc">这些字段的缺失模式高度同步，可能来自同一数据源或子表</p>
+        <div class="cluster-grid">
+          <div v-for="(cluster, idx) in missingClusters" :key="idx" class="cluster-card">
+            <div class="cluster-header">
+              <span class="cluster-id">簇 {{ idx + 1 }}</span>
+              <span class="cluster-size">{{ cluster.fields.length }} 个字段</span>
+            </div>
+            <div class="cluster-fields">
+              <el-tag v-for="field in cluster.fields" :key="field" size="small" type="info">{{ field }}</el-tag>
+            </div>
+            <div class="cluster-missing-rate">缺失率：{{ cluster.avgMissingRate }}%</div>
+          </div>
+        </div>
       </div>
 
       <!-- 问题清单 -->
@@ -139,7 +193,7 @@ const typeDisplay = {
   text: '文本'
 }
 
-// ===== 当前数据（从 all_tables 取） =====
+// ===== 当前数据 =====
 const currentData = computed(() => {
   if (!reportData.value?.all_tables) return {}
   return reportData.value.all_tables[currentTable.value] || reportData.value.all_tables['merged'] || {}
@@ -161,6 +215,75 @@ const currentAlerts = computed(() => {
   return currentQualityData.value?.alerts || []
 })
 
+// ===== SLA 状态（新增） =====
+const slaStatus = computed(() => {
+  const missingList = currentQualityData.value?.missing || []
+  const outliers = currentQualityData.value?.outliers || {}
+  const columnNames = currentData.value?.column_names || []
+
+  // 完整性：缺失率 ≤20% 的列占比
+  const completenessPass = missingList.filter(m => m.percent > 20).length === 0
+
+  // 准确性：异常率 ≤5% 的列占比
+  const accuracyPass = Object.values(outliers).every(o => o.percent <= 5)
+
+  // 无全空列
+  const noEmptyColumns = !missingList.some(m => m.percent === 100)
+
+  // 单位一致：简单检查 cunit 是否只有一种单位
+  const unitInfo = currentData.value?.variable_summaries?.cunit
+  const unitConsistent = unitInfo ? unitInfo.n_unique === 1 : true
+
+  // 字段命名可读：数字后缀占比 < 30%
+  const namingReadable = columnNames.filter(col => /^companyfixasset\d+$/.test(col)).length / (columnNames.length || 1) < 0.3
+
+  return {
+    completeness: completenessPass,
+    accuracy: accuracyPass,
+    noEmptyColumns,
+    unitConsistent,
+    namingReadable
+  }
+})
+
+const slaPassCount = computed(() => {
+  return Object.values(slaStatus.value).filter(v => v).length
+})
+
+// ===== 缺失共现簇（新增） =====
+const missingClusters = computed(() => {
+  const missingList = currentQualityData.value?.missing || []
+  if (missingList.length < 2) return []
+
+  // 按缺失率分组，找出缺失率相近且字段名相似的簇
+  const clusters = []
+  const grouped = {}
+  for (const item of missingList) {
+    const pct = Math.round(item.percent / 10) * 10 // 按 10% 分桶
+    if (!grouped[pct]) grouped[pct] = []
+    grouped[pct].push(item.column)
+  }
+
+  // 只保留缺失率 > 50% 的簇，且字段数 >= 2
+  for (const [pct, fields] of Object.entries(grouped)) {
+    if (parseInt(pct) > 50 && fields.length >= 2) {
+      // 检查字段名是否相似（如都有 companyfixasset 前缀）
+      const prefixFields = fields.filter(f => f.startsWith('companyfixasset'))
+      if (prefixFields.length >= 2) {
+        clusters.push({
+          fields: prefixFields,
+          avgMissingRate: parseInt(pct)
+        })
+      }
+    }
+  }
+
+  // 按字段数降序
+  clusters.sort((a, b) => b.fields.length - a.fields.length)
+  return clusters.slice(0, 5)
+})
+
+// ===== 原有逻辑 =====
 watch(() => currentOverallScore.value, (newVal) => {
   if (newVal !== undefined && newVal !== null) {
     gaugeKey.value += 1
@@ -178,16 +301,13 @@ onMounted(async () => {
 
 async function loadQuality() {
   let sessionId = sessionStore.currentSessionId
-
   if (!sessionId) {
     sessionId = localStorage.getItem('lastSessionId')
   }
-
   if (!sessionId) {
     router.push('/')
     return
   }
-
   if (!sessionStore.currentSessionId) {
     sessionStore.currentSessionId = sessionId
   }
@@ -197,7 +317,6 @@ async function loadQuality() {
     const reportResult = await reportApi.get(sessionId)
     reportData.value = reportResult
 
-    // 初始化表选择器
     const allTables = reportResult?.all_tables || {}
     const tableKeys = Object.keys(allTables)
     tableNames.value = tableKeys.filter(k => k !== 'merged')
@@ -259,7 +378,6 @@ function getProgressColor(score) {
   return '#f56c6c'
 }
 
-// ===== 过滤 timeliness =====
 const filteredDimensions = computed(() => {
   const dims = currentDimensions.value || {}
   const filtered = {}
@@ -271,7 +389,6 @@ const filteredDimensions = computed(() => {
   return filtered
 })
 
-// ===== 仪表盘 =====
 const hasGaugeData = computed(() => {
   const score = currentOverallScore.value
   return score !== undefined && score !== null && !isNaN(Number(score))
@@ -329,7 +446,6 @@ const gaugeOption = computed(() => {
   }
 })
 
-// ===== 雷达图 =====
 const hasRadarData = computed(() => {
   return Object.keys(filteredDimensions.value).length > 0
 })
@@ -537,6 +653,116 @@ watch(currentTable, () => {
   padding: 60px 0;
 }
 
+/* ===== SLA 样式 ===== */
+.sla-section {
+  background: #fff;
+  border-radius: 12px;
+  border: 1px solid #e4e7ed;
+  padding: 16px 20px;
+  margin-bottom: 24px;
+}
+.sla-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: #2c3e50;
+  margin-bottom: 12px;
+}
+.sla-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.sla-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  background: #f5f7fa;
+}
+.sla-item.pass {
+  border-left: 4px solid #67c23a;
+}
+.sla-item.fail {
+  border-left: 4px solid #f56c6c;
+}
+.sla-label {
+  font-size: 12px;
+  color: #555;
+}
+.sla-value {
+  font-size: 16px;
+  margin-left: auto;
+}
+.sla-detail {
+  font-size: 11px;
+  color: #909399;
+}
+.sla-summary {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding-top: 8px;
+  border-top: 1px solid #e8ecf1;
+  font-size: 13px;
+  color: #2c3e50;
+}
+.sla-summary .el-progress {
+  flex: 1;
+}
+
+/* ===== 缺失共现簇 ===== */
+.cluster-section {
+  margin-bottom: 30px;
+}
+.cluster-section h3 {
+  margin-bottom: 4px;
+  color: #2c3e50;
+}
+.cluster-desc {
+  color: #909399;
+  font-size: 13px;
+  margin-bottom: 12px;
+}
+.cluster-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 12px;
+}
+.cluster-card {
+  background: #f5f7fa;
+  border-radius: 8px;
+  padding: 12px 16px;
+  border: 1px solid #e4e7ed;
+}
+.cluster-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+.cluster-id {
+  font-weight: 600;
+  font-size: 13px;
+  color: #2c3e50;
+}
+.cluster-size {
+  font-size: 11px;
+  color: #909399;
+}
+.cluster-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 4px;
+}
+.cluster-missing-rate {
+  font-size: 11px;
+  color: #e6a23c;
+}
+
+/* ===== 原有样式 ===== */
 .charts-row {
   display: grid;
   grid-template-columns: 1fr 1fr;

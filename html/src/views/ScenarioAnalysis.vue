@@ -2,7 +2,7 @@
   <div class="scenario-analysis">
     <div class="page-header">
       <h2>🔍 场景分析</h2>
-      <p class="subtitle">配置场景、执行分析、查看结论与明细</p>
+      <p class="subtitle">配置场景、执行诊断、查看结论、追溯数据</p>
     </div>
 
     <!-- 加载状态 -->
@@ -22,7 +22,9 @@
     <!-- 主内容 -->
     <div v-else class="analysis-container">
       <el-tabs v-model="activeTab" @tab-click="onTabChange">
-        <!-- 开始分析 -->
+        <!-- ============================================================ -->
+        <!-- Tab 1: 开始分析 -->
+        <!-- ============================================================ -->
         <el-tab-pane label="🚀 开始分析" name="config">
           <StartAnalysis
             ref="startAnalysisRef"
@@ -55,7 +57,9 @@
           />
         </el-tab-pane>
 
-        <!-- 分析摘要 -->
+        <!-- ============================================================ -->
+        <!-- Tab 2: 分析摘要 -->
+        <!-- ============================================================ -->
         <el-tab-pane label="📊 分析摘要" name="dashboard">
           <AnalysisSummary
             ref="analysisSummaryRef"
@@ -66,40 +70,36 @@
             :field-mapping="fieldMapping"
             :insights="insights"
             :loading-insights="loadingInsights"
+            :expanded-card="expandedCard"
             @view-details="goToRecords"
             @toggle-expand="toggleCardDetail"
-            :expanded-card="expandedCard"
+            @view-full-data="handleViewFullData"
+            @go-to-config="goToConfig"
           />
         </el-tab-pane>
 
-        <!-- 数据解码 -->
-        <el-tab-pane label="🔍 数据解码" name="records">
-          <DataDecode
-            ref="dataDecodeRef"
-            :has-results="hasResults"
-            :total-records="totalRecords"
+        <!-- ============================================================ -->
+        <!-- Tab 3: 数据解码与追溯 -->
+        <!-- ============================================================ -->
+        <el-tab-pane label="📦 数据解码与追溯" name="records">
+          <DataDecodeAndTrace
+            ref="dataTraceRef"
             :scenario-results="scenarioResults"
             :all-records="allRecords"
             :field-mapping="fieldMapping"
-            :filter="recordFilter"
-            :filtered-records="filteredRecords"
-            :paged-records="pagedRecords"
-            :current-page="currentPage"
-            :page-size="pageSize"
-            :loading="loadingRecords"
-            @apply-filters="applyFilters"
-            @reset-filters="resetFilters"
-            @page-change="onPageChange"
-            @update-record-status="updateRecordStatus"
+            :session-id="sessionStore.currentSessionId || localStorage.getItem('lastSessionId')"
+            :has-db-config="hasDbConfig"
+            :parquet-data="parquetData"
+            :trace-context="traceContext"
             @show-detail="showRecordDetail"
-            @export="exportRecords"
-            @go-to-config="activeTab = 'config'"
+            @trace="handleTrace"
+            @update-record-status="updateRecordStatus"
           />
         </el-tab-pane>
       </el-tabs>
     </div>
 
-    <!-- 记录详情弹窗 -->
+    <!-- ===== 记录详情弹窗 ===== -->
     <el-dialog v-model="detailDialogVisible" title="记录详情" width="750px" destroy-on-close>
       <div v-if="selectedRecord" class="record-detail">
         <el-descriptions :column="2" border>
@@ -136,7 +136,7 @@
           </el-descriptions-item>
         </el-descriptions>
 
-        <!-- 勾稽违反：显示详细的字段值 -->
+        <!-- 勾稽违反详情 -->
         <div v-if="selectedRecord.record_type === 'violation' && selectedRecord.values" class="full-context">
           <el-divider />
           <div class="context-title">📋 违反详情</div>
@@ -158,12 +158,6 @@
           <div class="context-title">📋 特征值</div>
           <pre>{{ JSON.stringify(selectedRecord.features, null, 2) }}</pre>
         </div>
-
-        <div v-else-if="selectedRecord.full_context" class="full-context">
-          <el-divider />
-          <div class="context-title">📋 完整上下文</div>
-          <pre>{{ JSON.stringify(selectedRecord.full_context, null, 2) }}</pre>
-        </div>
       </div>
       <template #footer>
         <el-button @click="detailDialogVisible = false">关闭</el-button>
@@ -173,17 +167,19 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { useSessionStore } from '../stores/session'
+import { useAnalysisStore } from '../stores/analysis'
 import { scenariosApi } from '../api/scenarios'
 import StartAnalysis from '../components/StartAnalysis.vue'
 import AnalysisSummary from '../components/AnalysisSummary.vue'
-import DataDecode from '../components/DataDecode.vue'
+import DataDecodeAndTrace from '../components/DataDecodeAndTrace.vue'
 
 const router = useRouter()
 const sessionStore = useSessionStore()
+const analysisStore = useAnalysisStore()
 
 // ===== 状态 =====
 const loading = ref(true)
@@ -217,28 +213,31 @@ const loadingInsights = ref(false)
 
 // 记录发现状态
 const allRecords = ref([])
-const filteredRecords = ref([])
 const totalRecords = ref(0)
-const recordFilter = ref({
-  scenario: '',
-  keyword: '',
-  recordType: '',
-  severity: '',
-  status: ''
-})
-const currentPage = ref(1)
-const pageSize = ref(50)
-const loadingRecords = ref(false)
 const detailDialogVisible = ref(false)
 const selectedRecord = ref(null)
+
+// 数据追溯
+const dataTraceRef = ref(null)
+const traceContext = ref(null)
 
 // ===== 计算属性 =====
 const enabledCount = computed(() => candidates.value.filter(c => c.enabled).length)
 
-const pagedRecords = computed(() => {
-  const start = (currentPage.value - 1) * pageSize.value
-  const end = start + pageSize.value
-  return filteredRecords.value.slice(start, end)
+const hasDbConfig = computed(() => {
+  const session = sessionStore.currentSession
+  if (!session) return false
+  const tablesInfo = session.tables_info || {}
+  return !!tablesInfo.db_config
+})
+
+const parquetData = computed(() => {
+  // 从 analysisStore 获取原始数据
+  const allTables = analysisStore.reportData?.all_tables
+  if (!allTables) return []
+  const merged = allTables.merged
+  if (!merged) return []
+  return merged.data || []
 })
 
 // ===== 生命周期 =====
@@ -288,8 +287,77 @@ function updateSummary() {
   summary.value = { total, completed, failed }
 }
 
-function getRecordCount(scenario) {
-  return (scenario.records || []).length
+function buildRecordsFromResults(results) {
+  const records = []
+  const typeDisplay = {
+    'cluster': '聚类',
+    'violation': '勾稽',
+    'outlier': '异常',
+    'missing': '缺失',
+    'duplicate': '重复',
+    'entity_concentration': '集中'
+  }
+
+  results.forEach(scenario => {
+    if (scenario.status !== 'completed') return
+    const scenarioName = scenario.business_name || scenario.name
+    const scenarioId = String(scenario.scenario_id || '')
+    const recs = scenario.records || []
+    recs.forEach(r => {
+      let recordType = r.record_type || 'other'
+      let fieldDisplay = r.field_display || r.field || '—'
+      let valueDisplay = r.value
+      let valuesDisplay = null
+
+      if (recordType === 'cluster') {
+        fieldDisplay = '归属群组'
+        valueDisplay = `群组 ${r.cluster_id}`
+      } else if (recordType === 'entity_concentration') {
+        fieldDisplay = r.entity || '实体'
+        valueDisplay = r.entity || '—'
+      } else if (recordType === 'violation') {
+        fieldDisplay = r.rule || '勾稽规则'
+        if (r.values && typeof r.values === 'object' && Object.keys(r.values).length > 0) {
+          const pairs = Object.entries(r.values).map(([f, v]) => {
+            const displayName = fieldMapping.value[f] || f
+            const valStr = v !== undefined && v !== null ? (typeof v === 'number' ? v.toFixed(2) : String(v)) : 'null'
+            return `${displayName}=${valStr}`
+          })
+          valuesDisplay = pairs.join(', ')
+          valueDisplay = valuesDisplay
+        } else if (r.fields && Array.isArray(r.fields) && r.fields.length > 0) {
+          const displayNames = r.fields.map(f => fieldMapping.value[f] || f)
+          valuesDisplay = displayNames.join(', ')
+          valueDisplay = valuesDisplay
+        } else {
+          valueDisplay = '违反'
+          valuesDisplay = '违反'
+        }
+      } else if (recordType === 'missing') {
+        if (r.missing_fields && Array.isArray(r.missing_fields)) {
+          valueDisplay = r.missing_fields.map(f => fieldMapping.value[f] || f).join(', ')
+        }
+      } else if (recordType === 'duplicate') {
+        fieldDisplay = '重复记录'
+        valueDisplay = '—'
+      }
+
+      records.push({
+        ...r,
+        scenario_id: scenarioId,
+        scenario_name: scenarioName,
+        record_type: recordType,
+        record_type_display: typeDisplay[recordType] || '其他',
+        field_display: fieldDisplay,
+        value_display: valueDisplay,
+        values_display: valuesDisplay
+      })
+    })
+  })
+
+  allRecords.value = records
+  totalRecords.value = records.length
+  console.log(`[记录发现] 总共 ${records.length} 条记录`)
 }
 
 // ===== 全选/全不选 =====
@@ -401,10 +469,8 @@ async function runScenarioAnalysis() {
   try {
     execProgress.value = 20
     execMessage.value = '正在执行场景分析...'
-    console.log('[场景分析] 开始执行场景...')
     const executeResponse = await scenariosApi.execute(sessionId)
     const results = executeResponse.results || []
-    console.log('[场景分析] 执行完成，结果数:', results.length)
     if (results.length === 0) {
       ElMessage.warning('执行完成，但没有返回结果')
       executing.value = false
@@ -418,18 +484,14 @@ async function runScenarioAnalysis() {
 
     execProgress.value = 70
     execMessage.value = '正在生成业务解读...'
-    console.log('[场景分析] 开始翻译...')
     const translateResponse = await scenariosApi.translate(sessionId, fieldMapping.value)
     const translatedResults = translateResponse.results || []
     if (translatedResults.length > 0) {
       scenarioResults.value = translatedResults
       buildRecordsFromResults(translatedResults)
       ElMessage.success(`成功生成 ${translatedResults.length} 个场景的解读`)
-    } else {
-      ElMessage.warning('翻译接口未返回结果')
     }
 
-    // 加载洞察数据
     execProgress.value = 90
     execMessage.value = '正在生成洞察分析...'
     await loadInsights(sessionId)
@@ -437,7 +499,6 @@ async function runScenarioAnalysis() {
     execProgress.value = 100
     execMessage.value = '全部完成'
 
-    // 自动跳转到分析摘要
     setTimeout(() => {
       activeTab.value = 'dashboard'
     }, 500)
@@ -461,8 +522,6 @@ async function loadInsights(sessionId) {
     if (response.has_insights) {
       insights.value = response.insights
       console.log('[场景分析] 洞察加载成功')
-    } else {
-      console.warn('[场景分析] 无洞察数据:', response.message)
     }
   } catch (err) {
     console.error('[场景分析] 加载洞察失败:', err)
@@ -471,161 +530,18 @@ async function loadInsights(sessionId) {
   }
 }
 
-// ===== 刷新 =====
-function refreshDashboard() { loadData() }
-
-// ===== 其他辅助 =====
 function toggleCardDetail(id) { expandedCard.value = expandedCard.value === id ? null : id }
-function getConclusionIcon(type) {
-  const map = { 'summary': '📌', 'detail': '📋', 'alert': '⚠️', 'success': '✅', 'error': '❌' }
-  return map[type] || '📌'
-}
-function formatProgress(percentage) { return `${percentage}%` }
 
-// ===== 记录发现 =====
-function buildRecordsFromResults(results) {
-  const records = []
-  const typeDisplay = {
-    'cluster': '聚类',
-    'violation': '勾稽',
-    'outlier': '异常',
-    'missing': '缺失',
-    'duplicate': '重复',
-    'entity_concentration': '集中'
-  }
-
-  results.forEach(scenario => {
-    if (scenario.status !== 'completed') return
-    const scenarioName = scenario.business_name || scenario.name
-    const scenarioId = String(scenario.scenario_id || '')
-    const recs = scenario.records || []
-    console.log(`[记录发现] 场景 ${scenarioId} (${scenarioName}) 有 ${recs.length} 条记录`)
-
-    recs.forEach(r => {
-      let recordType = r.record_type || 'other'
-      let fieldDisplay = r.field_display || r.field || '—'
-      let valueDisplay = r.value
-      let valuesDisplay = null
-
-      if (recordType === 'cluster') {
-        fieldDisplay = '归属群组'
-        valueDisplay = `群组 ${r.cluster_id}`
-      } else if (recordType === 'entity_concentration') {
-        fieldDisplay = r.entity || '实体'
-        valueDisplay = r.entity || '—'
-      } else if (recordType === 'violation') {
-        fieldDisplay = r.rule || '勾稽规则'
-        if (r.values && typeof r.values === 'object' && Object.keys(r.values).length > 0) {
-          const pairs = Object.entries(r.values).map(([f, v]) => {
-            const displayName = fieldMapping.value[f] || f
-            const valStr = v !== undefined && v !== null ? (typeof v === 'number' ? v.toFixed(2) : String(v)) : 'null'
-            return `${displayName}=${valStr}`
-          })
-          valuesDisplay = pairs.join(', ')
-          valueDisplay = valuesDisplay
-        } else if (r.fields && Array.isArray(r.fields) && r.fields.length > 0) {
-          const displayNames = r.fields.map(f => fieldMapping.value[f] || f)
-          valuesDisplay = displayNames.join(', ')
-          valueDisplay = valuesDisplay
-        } else {
-          valueDisplay = '违反'
-          valuesDisplay = '违反'
-        }
-      } else if (recordType === 'missing') {
-        if (r.missing_fields && Array.isArray(r.missing_fields)) {
-          valueDisplay = r.missing_fields.map(f => fieldMapping.value[f] || f).join(', ')
-        }
-      } else if (recordType === 'duplicate') {
-        fieldDisplay = '重复记录'
-        valueDisplay = '—'
-      }
-
-      records.push({
-        ...r,
-        scenario_id: scenarioId,
-        scenario_name: scenarioName,
-        record_type: recordType,
-        record_type_display: typeDisplay[recordType] || '其他',
-        field_display: fieldDisplay,
-        value_display: valueDisplay,
-        values_display: valuesDisplay
-      })
-    })
-  })
-
-  allRecords.value = records
-  filteredRecords.value = [...records]
-  totalRecords.value = records.length
-  currentPage.value = 1
-  console.log(`[记录发现] 总共 ${records.length} 条记录`)
-}
-
-function applyFilters() {
-  console.log('[记录发现] 应用筛选, 原始记录数:', allRecords.value.length)
-  let records = [...allRecords.value]
-  const filter = recordFilter.value
-
-  if (filter.scenario) {
-    const filterVal = String(filter.scenario)
-    records = records.filter(r => String(r.scenario_id) === filterVal)
-    console.log(`[记录发现] 按场景筛选后: ${records.length} (场景: ${filterVal})`)
-  }
-  if (filter.keyword) {
-    const kw = filter.keyword.toLowerCase()
-    records = records.filter(r =>
-      (r.field && String(r.field).toLowerCase().includes(kw)) ||
-      (r.field_display && String(r.field_display).toLowerCase().includes(kw)) ||
-      (r.rule && String(r.rule).toLowerCase().includes(kw)) ||
-      (r.entity && String(r.entity).toLowerCase().includes(kw)) ||
-      (r.values_display && String(r.values_display).toLowerCase().includes(kw))
-    )
-    console.log(`[记录发现] 按关键词筛选后: ${records.length}`)
-  }
-  if (filter.recordType) {
-    records = records.filter(r => r.record_type === filter.recordType)
-    console.log(`[记录发现] 按记录类型筛选后: ${records.length}`)
-  }
-  if (filter.severity) {
-    records = records.filter(r => r.severity === filter.severity)
-    console.log(`[记录发现] 按严重程度筛选后: ${records.length}`)
-  }
-  if (filter.status) {
-    records = records.filter(r => r.status === filter.status)
-    console.log(`[记录发现] 按状态筛选后: ${records.length}`)
-  }
-
-  filteredRecords.value = records
-  currentPage.value = 1
-  console.log(`[记录发现] 最终显示 ${records.length} 条记录`)
-}
-
-function resetFilters() {
-  recordFilter.value = { scenario: '', keyword: '', recordType: '', severity: '', status: '' }
-  applyFilters()
-}
-
-function onPageChange() {
-  // 分页由 computed 自动处理
-}
+// ===== 跳转方法 =====
+function goToConfig() { activeTab.value = 'config' }
 
 function goToRecords(scenario) {
   activeTab.value = 'records'
+  // 传递筛选条件
   const scenarioId = String(scenario.scenario_id || '')
-  if (scenarioId) {
-    recordFilter.value.scenario = scenarioId
-    recordFilter.value.keyword = ''
-    recordFilter.value.recordType = ''
-    recordFilter.value.severity = ''
-    recordFilter.value.status = ''
-    applyFilters()
-    ElMessage.success(`已筛选「${scenario.business_name || scenario.name}」的记录`)
-  } else {
-    applyFilters()
+  if (scenarioId && dataTraceRef.value) {
+    dataTraceRef.value.updateFilter('scenario', scenarioId)
   }
-}
-
-function updateRecordStatus(row) {
-  ElMessage.success(`状态已更新为 ${row.status}`)
 }
 
 function showRecordDetail(row) {
@@ -633,53 +549,168 @@ function showRecordDetail(row) {
   detailDialogVisible.value = true
 }
 
-function exportRecords() {
-  if (filteredRecords.value.length === 0) { ElMessage.warning('没有数据可导出'); return }
-  const headers = ['行号', '所属场景', '记录类型', '规则/字段', '当前值', '预期值', '偏离程度', '严重程度', '状态']
-  const rows = filteredRecords.value.map(r => [
-    r.row || '',
-    r.scenario_name || '',
-    r.record_type_display || '其他',
-    r.record_type === 'violation' ? (r.rule || '') : (r.field_display || r.field || ''),
-    r.values_display || r.value_display || '',
-    r.record_type === 'violation' ? '相等' : (r.expected || ''),
-    r.record_type === 'violation' ? (r.diff !== undefined ? r.diff.toFixed(4) : '') : (r.deviation !== undefined ? r.deviation.toFixed(2) : ''),
-    r.severity || '',
-    { pending: '待核查', ignored: '已忽略', resolved: '已处理' }[r.status] || r.status || ''
-  ])
-  const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n')
-  const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a'); a.href = url; a.download = `记录发现_${new Date().toISOString().slice(0,10)}.csv`
-  document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url)
-  ElMessage.success('导出成功')
+function updateRecordStatus(row, status) {
+  row.status = status
+  ElMessage.success(`状态已更新为 ${status}`)
 }
 
-function onTabChange(tab) {
-  if (tab.name === 'records') {
-    console.log('[场景分析] 切换到记录发现 tab')
-    applyFilters()
+// ===== 追溯方法 =====
+function handleViewFullData(payload) {
+  console.log('[追溯] 收到追溯请求:', payload)
+
+  if (!payload || !payload.type) {
+    ElMessage.warning('无效的追溯请求')
+    return
+  }
+
+  let context = {}
+  let description = ''
+
+  switch (payload.type) {
+    case 'rule': {
+      if (payload.rule) {
+        context = {
+          rule: payload.rule,
+          fields: payload.fields || []
+        }
+        description = `规则「${payload.rule.substring(0, 60)}...」的全量数据验证`
+      } else {
+        ElMessage.warning('规则信息不完整')
+        return
+      }
+      break
+    }
+    case 'company': {
+      context = { company_code: payload.data }
+      description = `公司 ${payload.data} 全部数据`
+      break
+    }
+    case 'field': {
+      // 收集该字段的异常行号
+      const rowIds = []
+      for (const scenario of scenarioResults.value) {
+        if (scenario.status !== 'completed') continue
+        const records = scenario.records || []
+        for (const record of records) {
+          if (record.record_type === 'outlier' && record.field === payload.data) {
+            if (record.row) rowIds.push(record.row)
+          }
+        }
+      }
+      if (rowIds.length > 0) {
+        context = { row_ids: rowIds }
+        description = `字段「${payload.data}」的异常记录（${rowIds.length} 条）`
+      } else {
+        ElMessage.warning('该字段没有关联的异常记录')
+        return
+      }
+      break
+    }
+    case 'row': {
+      context = { row_ids: [payload.data] }
+      description = `行 ${payload.data} 的完整数据`
+      break
+    }
+    case 'range': {
+      context = { id_range: { start: payload.start, end: payload.end } }
+      description = `数据段 ${payload.start}-${payload.end}`
+      break
+    }
+    default: {
+      ElMessage.warning('未知的追溯类型')
+      return
+    }
+  }
+
+  traceContext.value = context
+  activeTab.value = 'records'
+
+  // 切换到 SQL 模式
+  if (dataTraceRef.value) {
+    dataTraceRef.value.dataSource = 'sql'
+    setTimeout(() => dataTraceRef.value.loadSqlData(), 300)
+  }
+
+  ElMessage.success(`已切换到数据追溯：${description}`)
+}
+
+function handleTrace(payload) {
+  // 从数据解码组件触发的追溯
+  if (payload.type === 'row' && payload.data) {
+    const context = {
+      row_ids: [payload.data]
+    }
+    traceContext.value = context
+    // 数据解码组件会自己处理加载
   }
 }
 
 function goToUpload() { router.push('/upload') }
+
+function onTabChange(tab) {
+  if (tab.name === 'records') {
+    // 切换到数据解码 tab 时，如果有追溯上下文则自动加载
+    if (traceContext.value && dataTraceRef.value) {
+      dataTraceRef.value.dataSource = 'sql'
+      setTimeout(() => dataTraceRef.value.loadSqlData(), 300)
+    }
+  }
+}
 </script>
 
 <style scoped>
-.scenario-analysis { max-width: 1400px; margin: 0 auto; padding: 20px; }
-.page-header { margin-bottom: 24px; }
-.page-header h2 { margin: 0 0 8px 0; color: #2c3e50; }
-.subtitle { color: #909399; margin: 0; }
-.loading-container { padding: 40px 0; }
-.error-container { padding: 60px 0; }
-.analysis-container { background: #fff; border-radius: 12px; box-shadow: 0 2px 12px rgba(0,0,0,0.06); padding: 20px; }
-
-.record-detail { padding: 4px 0; }
-.full-context { margin-top: 12px; }
-.context-title { font-size: 14px; font-weight: 600; color: #2c3e50; margin-bottom: 8px; }
-.full-context pre { background: #f5f7fa; padding: 12px; border-radius: 4px; font-size: 12px; max-height: 300px; overflow: auto; }
+.scenario-analysis {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 20px;
+}
+.page-header {
+  margin-bottom: 24px;
+}
+.page-header h2 {
+  margin: 0 0 8px 0;
+  color: #2c3e50;
+}
+.subtitle {
+  color: #909399;
+  margin: 0;
+}
+.loading-container {
+  padding: 40px 0;
+}
+.error-container {
+  padding: 60px 0;
+}
+.analysis-container {
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.06);
+  padding: 20px;
+}
+.record-detail {
+  padding: 4px 0;
+}
+.full-context {
+  margin-top: 12px;
+}
+.context-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #2c3e50;
+  margin-bottom: 8px;
+}
+.full-context pre {
+  background: #f5f7fa;
+  padding: 12px;
+  border-radius: 4px;
+  font-size: 12px;
+  max-height: 300px;
+  overflow: auto;
+}
 
 @media (max-width: 768px) {
-  .scenario-analysis { padding: 12px; }
+  .scenario-analysis {
+    padding: 12px;
+  }
 }
 </style>

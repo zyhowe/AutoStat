@@ -32,7 +32,7 @@ import {
   VisualMapComponent,
   ToolboxComponent,
   DataZoomComponent,
-  MarkLineComponent  // ✅ 新增：注册 MarkLine 组件
+  MarkLineComponent
 } from 'echarts/components'
 
 use([
@@ -52,7 +52,7 @@ use([
   VisualMapComponent,
   ToolboxComponent,
   DataZoomComponent,
-  MarkLineComponent  // ✅ 新增
+  MarkLineComponent
 ])
 
 const app = createApp(App)
